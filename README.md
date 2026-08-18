@@ -1,26 +1,124 @@
-# UrsusFlasher 0.1.0-md-lab1fix10
+<div align="center">
 
-Nokia XG-040G-MD / Airoha AN7581 — tcboot-based OpenWrt install and recovery kit.
+# 🐻 UrsusFlasher
 
-The rollup root is intentionally minimal. Start with `START.cmd` on Windows or `START.sh` on Linux.
+**OpenWrt на Nokia XG-040G-MD — через tcboot, без UART и без паяльника**
 
-Documentation:
+`0.1.0-md-lab1fix10` · Airoha AN7581 · SPI-NAND 256 MiB
 
-- Russian instructions: `doc/INSTRUCTIONS_RU.md`
-- English instructions: `doc/INSTRUCTIONS_EN.md`
-- Architecture and tcboot know-how (RU): `doc/ARCHITECTURE_RU.md`
-- Architecture and tcboot know-how (EN): `doc/ARCHITECTURE_EN.md`
-- Changelog: `doc/CHANGELOG_RU.md`, `doc/CHANGELOG_EN.md`
-- Historical LAB notes: `doc/history/`
+[![Release](https://img.shields.io/badge/release-0.1.0--md--lab1fix10-0969da?style=flat-square)](doc/CHANGELOG_RU.md)
+[![Target](https://img.shields.io/badge/SoC-AN7581%20%2F%20XG--040G--MD-8250df?style=flat-square)](#поддерживаемое-железо)
+[![OpenWrt](https://img.shields.io/badge/OpenWrt-UBI%20sysupgrade-00b5e2?style=flat-square&logo=openwrt&logoColor=white)](https://openwrt.org/)
+[![Python](https://img.shields.io/badge/Python%203-stdlib%20only-3776ab?style=flat-square&logo=python&logoColor=white)](#ноль-зависимостей-и-в-этот-раз-действительно-ноль)
+[![UART](https://img.shields.io/badge/UART-не%20требуется-2da44e?style=flat-square)](#что-это-такое)
+[![License](https://img.shields.io/badge/license-MIT-6e7781?style=flat-square)](LICENSE)
 
-Hardware-verified tcboot WebFailsafe entry for MD:
+### 📖 [Инструкция по установке](doc/INSTRUCTIONS_RU.md) · 🇬🇧 [Installation guide (English)](doc/INSTRUCTIONS_EN.md)
+
+🏗 [Архитектура](doc/ARCHITECTURE_RU.md) · 📝 [История изменений](doc/CHANGELOG_RU.md) · 🧪 [QA / статус железа](doc/QA_REPORT.txt)
+
+</div>
+
+---
+
+## Что это такое
+
+`Ursus` — это «медведь» по-латыни. Да, тот самый медведь: UrsusFlasher вырос из [MedveFlasher](https://github.com/Medvedolog/nokia-router-medveflasher), сменил имя на более учёное и заодно поменял стратегию. Если MedveFlasher уговаривал штатный загрузчик Nokia сделать одну-единственную глупость и потом честно уходил, то Ursus в загрузчике **остаётся жить**.
+
+В первый мегабайт NAND прописывается tcboot с веб-мордой, на которой нарисован медведь. Дальше OpenWrt ставится и переставляется через браузер: открыл `http://192.168.1.1/`, выбрал `.itb`, нажал кнопку. UART нужен ровно там же, где и раньше — когда всё уже совсем плохо.
+
+**Три шага, если совсем коротко:**
+
+1. **Backup.** Мастер снимает свежий STOCKSET `mtd0..mtd16` и привязывает его к MAC этого устройства. Экспертные override есть, но они не отключают ни один технический gate.
+2. **tcboot.** Из `tcboot-original.bin` детерминированно собирается персонализированный образ под выбранный вами `.itb`, пишется в `mtd0` и **полностью считывается обратно** с побайтовым сравнением.
+3. **OpenWrt.** Питание OFF → ON → сразу Reset на 10 секунд → веб-морда tcboot → загрузили `.itb` → дальше устройство справляется само.
+
+---
+
+## Поддерживаемое железо
+
+| Модель | SoC | Установка OpenWrt | Recovery |
+|---|---|---|---|
+| Nokia XG-040G-MD | Airoha AN7581 | ✅ полный цикл, HW-подтверждён до `procd` | tcboot WebFailsafe, переживает собственный sysupgrade |
+| Nokia XG-040G-MF | Airoha AN7583 | ⛔ не выведен в этой сборке | — |
+
+MF в `data/FIRMWARE_CAPABILITIES.json` помечен честно: `NOT_EXPOSED_BY_MD_LAB1`. Это lab1-ветка под MD, и делать вид, что она умеет больше, никто не собирается.
+
+---
+
+## Три Урсуфичи, на которых всё держится
+
+### 🏠 Урсуфича №1: загрузчик не заменяем — в него заселяемся
+
+Обычный путь — выкинуть вендорский загрузчик и поставить OpenWrt U-Boot. Ursus так не делает. tcboot занимает `0x00000000..0x0007ffff`, его environment — следующие 512 KiB, а всё остальное отдано UBI. Загрузчик остаётся самостоятельным recovery-механизмом, который не зависит от того, жива ли установленная система.
+
+Персонализация — не «пропатчил и молодец»: `tcboot_builder.py` проверяет SHA256 исходного образа, UUID и TOC записи BL33, распаковывает её из LZMA, сверяет SHA256 распакованного BL33, убеждается что слоты под скрипты и 48 байт обработчика содержат **ровно те байты, которые ожидались**, и только потом пишет свои. Любое расхождение — отказ. Пропатченный вслепую загрузчик — это кирпич, доставленный вам курьером.
+
+### 🎯 Урсуфича №2: официальный образ не трогаем, трогаем его представления о мире
+
+Официальный `nokia_xg-040g-md-ubi` DTB считает, что UBI начинается с `0x00020000`. У нас там живёт tcboot. Наивное решение — пересобрать ITB; решение Ursus — оставить файл на диске **байт в байт официальным** и поправить working FDT в RAM за мгновение до старта ядра:
 
 ```text
-power OFF
-power ON
-immediately press Reset
-hold Reset for 10 seconds
-release Reset
+официальный DTB:   reg = <0x00020000 0x0ffe0000>
+tcboot в runtime:  reg = <0x00100000 0x0ff00000>
 ```
 
-Do not hold Reset before applying power; that is the early BootROM `Press x` path.
+Адрес не зашит: `fit_fdt.py` до всякой записи разбирает FIT, резолвит `/configurations/default`, проверяет хеши образов, находит узел с `label="ubi"`, читает `#address-cells`/`#size-cells` и вычисляет путь и значение сам. Не нашёл ровно один подходящий узел — отказ. Геометрия не сошлась — отказ. Всё, что непонятно, считается опасным.
+
+### 🧱 Урсуфича №3: первый мегабайт священен
+
+Самое приятное свойство конструкции обнаруживается на второй установке. Web sysupgrade в tcboot работает **только внутри UBI-региона с `0x00100000`**. Стирание и пересоздание томов `fit` и `rootfs_data` физически не может дотянуться до `mtd0`, где сидит сам tcboot.
+
+Это подтверждено на живом железе: OpenWrt поставили, загрузились до `procd`, вернулись в WebFailsafe и поставили ещё раз — tcboot на месте, веб-морда на месте, медведь на месте.
+
+> [!NOTE]
+> Обратная сторона: текущий Web sysupgrade — это **recovery-style reinstall**, а не config-preserving обновление. `rootfs_data` пересоздаётся намеренно. Ваши настройки OpenWrt он не сохранит, и не обещал.
+
+---
+
+## Ноль зависимостей, и в этот раз действительно ноль
+
+Весь ПК-скрипт — стандартная библиотека Python 3. Ни `requests`, ни `pyserial`, ни `cryptography`. Причина прежняя и очень практическая: в момент установки компьютер уже воткнут кабелем в роутер, и предлагать пользователю «сначала поставьте пакет» — это предлагать ему сходить за интернетом, которого у него сейчас нет.
+
+Поэтому своё написано там, где обычно берут готовое: разбор FIT/DTB, TFTP-сервер и клиент, AES/RSA для входа в сток-морду, HTTP/1.0-загрузчик прошивки с точным `Content-Length` — tcboot не понимает ни chunked, ни `Expect: 100-continue`, и узнали мы это не из документации.
+
+Проверить, что всё это живо, можно не подключая роутер:
+
+```bash
+python tools/selftest.py
+```
+
+Семь проверок целиком офлайн: детерминированная сборка tcboot с привязкой к базовому образу, разбор хешей FIT и вложенного FDT, вычисление UBI-пути с учётом cells, TFTP `PUT`/`GET`/`OACK` и дубликаты `DATA`, multipart-загрузчик, полный readback `/dev/mtd0` с побайтовым сравнением и аудит на stdlib-only.
+
+---
+
+## Правила, которые лучше не нарушать
+
+> [!CAUTION]
+> Запись в NAND — разрушительная операция. Проверенный backup **именно этого** роутера и стабильное питание обязательны. Что бы вы ни делали, не выдёргивайте питание в момент записи.
+
+- **Reset нажимается ПОСЛЕ подачи питания, а не до.** Выключить → включить → сразу нажать Reset → держать 10 секунд → отпустить. Зажатый заранее Reset — это совсем другой путь, ранний BootROM Airoha с его `Press x`, и WebFailsafe вы там не найдёте.
+- **Backup от чужого роутера — не backup.** Он принесёт чужие MAC, серийники, BOSA и RI. Экспертный override существует, но он снимает только политику backup — model/SoC gate, UID0, геометрию `mtd0`, SHA-проверку tcboot, readback и валидацию FIT/FDT он не отключает.
+- **Разрушительную запись разрешает точная фраза** `FLASH TCBOOT MD`. До маркера `__URSUS_ERASE_BEGIN__` NAND не тронут.
+- **Странный `.itb` — это отказ, а не предупреждение.** Preflight fail-closed по всей цепочке: профиль, хеши, ровно один узел `label="ubi"`, границы UBI. Свой образ собрать можно, но он поедет по тем же правилам.
+- **`rootfs_data` пересоздаётся при каждом Web sysupgrade.** Настройки сохраняйте сами.
+
+---
+
+## Документация
+
+| | 🇷🇺 Русский | 🇬🇧 English |
+|---|---|---|
+| **Инструкция** — установка от и до | [INSTRUCTIONS_RU](doc/INSTRUCTIONS_RU.md) | [INSTRUCTIONS_EN](doc/INSTRUCTIONS_EN.md) |
+| **Архитектура** — tcboot know-how | [ARCHITECTURE_RU](doc/ARCHITECTURE_RU.md) | [ARCHITECTURE_EN](doc/ARCHITECTURE_EN.md) |
+| **История изменений** | [CHANGELOG_RU](doc/CHANGELOG_RU.md) | [CHANGELOG_EN](doc/CHANGELOG_EN.md) |
+
+Хронология патчей tcboot от первого попадания в железо до текущего patch8 — в [`doc/history/`](doc/history/). Машиночитаемая матрица возможностей — [`data/FIRMWARE_CAPABILITIES.json`](data/FIRMWARE_CAPABILITIES.json), запиненные размеры и SHA256 — [`data/MANIFEST.json`](data/MANIFEST.json).
+
+---
+
+## Для тестеров
+
+Готовый комплект — в [Releases](https://github.com/Medvedolog/nokia-router-ursusflasher/releases): один ZIP, внутри одна папка, внутри `START.cmd` (Windows) или `START.sh` (Linux). Рядом лежит `.sha256` — сверьте, это две секунды.
+
+Комплект полностью офлайновый: прошивка, payload'ы tcboot и документация уже внутри. Ничего скачивать в процессе установки не нужно, и это не пожелание, а требование к сценарию — VPN и лишние сетевые адаптеры лучше погасить заранее.

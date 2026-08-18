@@ -23,7 +23,16 @@ assert len(a) == len(b) == 0x80000
 assert sha(a) == '2cd248f49ec1e73c048b3bfb9886c759c9cbb06f19823993c906500178dffb50'
 assert b[0x950:0x960] == bytes.fromhex('d6d0eea7fcead54b97829934f234b6e4')
 size = struct.unpack_from('<Q', b, 0x968)[0]
-dec = lzma.decompress(b[0x2a400:0x2a400+size], format=lzma.FORMAT_ALONE)
+# The vendor stream declares its uncompressed size and carries no end-of-stream
+# marker. lzma.compress() always emits one, and the builder then writes the real
+# size into the LZMA_ALONE header so tcboot can size its output buffer. U-Boot
+# decodes exactly that many bytes and never looks at the marker; liblzma does,
+# and newer versions reject it as trailing garbage. Read the stream back with the
+# size field neutralised — this is the host-side check, the flashed image is the
+# one built above and is not touched here.
+stream = bytearray(b[0x2a400:0x2a400+size])
+stream[5:13] = b'\xff' * 8
+dec = lzma.decompress(bytes(stream), format=lzma.FORMAT_ALONE)
 need = [
  b'U:UPLOAD_BEGIN', b'U:FIT_CHECK_BEGIN', b'U:FIT_CHECK_OK', b'U:UBI_PROBE_BEGIN',
  b'U:UBI_MIGRATION_BEGIN', b'U:CAL_SAVE_BEGIN', b'U:CAL_SAVE_OK', b'U:UBI_FORMAT_BEGIN', b'U:UBI_FORMAT_DONE',

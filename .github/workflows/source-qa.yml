@@ -1,0 +1,47 @@
+name: source-qa
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  static-and-selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python syntax
+        run: |
+          find data tools -type f -name '*.py' -print0 | xargs -0 -n1 python -m py_compile
+
+      - name: Shell syntax
+        run: |
+          find . -type f -name '*.sh' -not -path './.git/*' -print0 |
+            while IFS= read -r -d '' f; do sh -n "$f"; done
+
+      - name: JSON syntax
+        run: |
+          find data -type f -name '*.json' -print0 |
+            while IFS= read -r -d '' f; do python -m json.tool "$f" >/dev/null; done
+
+      - name: Tree checksums
+        run: sha256sum -c SHA256SUMS
+
+      # A passing `sha256sum -c` only proves the listed files are intact; it says
+      # nothing about a file that was added and never listed. The kit ships its own
+      # manifest, so an unlisted file is a hole in it.
+      - name: SHA256SUMS exact coverage
+        run: python .github/ci/check_sums_coverage.py .
+
+      - name: Stock Web parser/crypto selftest
+        run: python data/stock_web.py --selftest
+
+      - name: Offline selftest
+        run: python tools/selftest.py
+
+      - name: Deterministic patch8 tcboot rebuild
+        run: python data/payloads/md/tcboot/verify_patch.py
