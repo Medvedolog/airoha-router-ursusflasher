@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+build/
+dist/
+bundle/
+backup/
+
+# Рабочий каталог запуска: сессионные логи, персонализированный tcboot и
+# STOCKSET-бэкапы остаются локальными, сам каталог должен существовать в комплекте.
+work/*
+!work/.gitkeep
+*.log
+
+# Прошивочные артефакты в git не хранятся: они раздаются готовым rollup-архивом
+# через GitHub Releases. Это payload'ы tcboot (data/payloads/**/*.bin) и
+# sysupgrade-образ (fw/*.itb). SHA256SUMS покрывает весь комплект и пересобирается
+# на каждый релиз, поэтому в истории ему тоже не место.
+*.bin
+*.bin.gz
+*.itb
+*.fip
+SHA256SUMS
