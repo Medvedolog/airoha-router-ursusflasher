@@ -2,6 +2,14 @@
 
 This document covers Nokia XG-040G-MD on Airoha AN7581.
 
+## Required first: factory-reset the Nokia
+
+**The router must be factory-reset before every iteration** — before the first install and before any retry after a failed attempt.
+
+Perform the reset **from the Nokia stock firmware**: press and hold the Reset button for **at least 20 seconds**, release it, and wait for the router to finish rebooting.
+
+Without it the stock system is in an unknown state: changed settings, services left enabled or disabled, and leftovers from earlier attempts. Device detection and stock access can then behave differently from what UrsusFlasher expects.
+
 ## Ethernet
 
 Use **LAN2 or LAN3** for flashing.
