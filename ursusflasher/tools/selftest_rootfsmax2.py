@@ -38,7 +38,7 @@ assert any('ubi remove rootfs_data' in c for c in calls)
 assert any('0xe3e6000' in c for c in calls)
 # Legacy spelling must remain accepted too.
 import re
-src=(ROOT/'data/ursus_web_client.py').read_text()
+src=(ROOT/'data/ursus_web_client.py').read_text(encoding='utf-8')
 assert 'logical\\s+eraseblock' in src
 # Fresh-migration guard must remain fail-closed.
 try:

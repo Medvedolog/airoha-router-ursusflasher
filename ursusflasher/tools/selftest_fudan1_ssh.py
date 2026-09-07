@@ -11,7 +11,7 @@ import one_key as ok
 
 m=json.loads((D/'data/MANIFEST.json').read_text(encoding='utf-8'))
 c=m['ursusboot']['alpha4_fudan1_candidate']
-assert m['version']=='0.2.51-md-alpha4-fudan1-stateui5-payloadrefresh1-rootfsmax2'
+assert m['version']=='0.2.52-md-alpha4-fudan1-stateui6-actionpreflight1-payloadrefresh1-rootfsmax2'
 assert bi.TARGET_URSUS=='0.1.0-alpha4-FUDAN1'
 assert up.PRODUCTION_PAYLOAD==bi.PAYLOAD
 raw=Path(D/c['raw_bl33']).read_bytes(); comp=Path(D/c['lzma']).read_bytes(); fip=Path(D/c['persistent_fip']).read_bytes()

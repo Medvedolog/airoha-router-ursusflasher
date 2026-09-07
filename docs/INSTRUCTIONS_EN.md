@@ -1,4 +1,4 @@
-# UrsusFlasher 0.2.51 — operating instructions
+# UrsusFlasher 0.2.52 — operating instructions
 
 This document covers Nokia XG-040G-MD on Airoha AN7581.
 

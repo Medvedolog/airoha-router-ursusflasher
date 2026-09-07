@@ -20,15 +20,17 @@ assert a[10].enabled and not a[10].write_capable
 
 partial=ds.DeviceState(probe_status=ds.PROBE_PARTIAL, current_system='UNKNOWN')
 ap=ds.action_applicability(partial)
-for n,x in ap.items():
-    if x.write_capable and x.key!='restore_nokia':
-        assert not x.enabled, (n,x)
-        assert x.reason=='состояние определено не полностью'
+# STATEUI6: passive completeness is informational; operations with their own
+# authoritative preflight remain selectable. Action-specific gates still apply.
+assert ap[1].enabled and ap[2].enabled and ap[5].enabled
+assert not ap[3].enabled and 'режима восстановления' in ap[3].reason
+assert not ap[4].enabled and 'UrsusBoot' in ap[4].reason
+assert not ap[6].enabled and 'не реализовано' in ap[6].reason
 assert ap[7].enabled and ap[10].enabled and ap[11].enabled and ap[12].enabled
 
 failed=ds.DeviceState(probe_status=ds.PROBE_FAILED)
 af=ds.action_applicability(failed)
-assert not af[1].enabled and af[7].enabled
+assert af[1].enabled and af[2].enabled and af[5].enabled and af[7].enabled
 
 caps=json.loads((D/'data/FIRMWARE_CAPABILITIES.json').read_text(encoding='utf-8'))
 assert caps['md']['GLOBAL_WRITE_STATE_UNKNOWN'].startswith('DEFERRED')

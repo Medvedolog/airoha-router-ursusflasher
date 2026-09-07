@@ -1335,7 +1335,7 @@ def verify_kit() -> None:
     root_version = KIT / "VERSION"
     data_version = DATA / "VERSION"
     manifest_path = DATA / "MANIFEST.json"
-    required = (root_version, data_version, manifest_path, BUNDLE, MANUAL_BUNDLE, MF_TRANSITION_BUNDLE, MF_MANUAL_TRANSITION_BUNDLE, LAUNCHER_TEMPLATE, BACKUP_AGENT, STOCK_WEB, DATA / "env_patcher.py", RECOVERY_PRELOADER, RECOVERY_FIP, RECOVERY_INITRAMFS, MF_RECOVERY_METADATA, MF_RECOVERY_PRELOADER, MF_RECOVERY_FIP, MF_STOCK_RECOVERY_INITRAMFS, STOCK_AUDIT_SCRIPT, STOCK_AUDIT_PARSER, FIRMWARE_CAPABILITIES, RECOVERY_DIR / "transition-network-source" / "patch_transition_network.py", RECOVERY_DIR / "recovery-clients-source" / "patch_recovery_clients.py", RECOVERY_TFTP_CLIENT, RECOVERY_SCP_CLIENT, RECOVERY_DIR / "transition-network-source" / "shipped-md-02_network.sh", RECOVERY_DIR / "transition-network-source" / "shipped-mf-02_network.sh", RECOVERY_DIR / "recovery-safe-uboot-source" / "patch_recovery_safe_fip.py", RECOVERY_DIR / "recovery-safe-uboot-source" / "lzma1ext_noeopm.c", RECOVERY_DIR / "recovery-safe-uboot-source" / "md-rc18-safe-fip-report.json", RECOVERY_DIR / "recovery-safe-uboot-source" / "mf-rc18-safe-fip-report.json", VENDOR / "rich" / "__init__.py", VENDOR / "RICH_LICENSE.txt")
+    required = (root_version, data_version, manifest_path, BUNDLE, MANUAL_BUNDLE, MF_TRANSITION_BUNDLE, MF_MANUAL_TRANSITION_BUNDLE, LAUNCHER_TEMPLATE, STOCK_WEB, DATA / "env_patcher.py", RECOVERY_PRELOADER, RECOVERY_FIP, RECOVERY_INITRAMFS, MF_RECOVERY_METADATA, MF_RECOVERY_PRELOADER, MF_RECOVERY_FIP, MF_STOCK_RECOVERY_INITRAMFS, STOCK_AUDIT_SCRIPT, STOCK_AUDIT_PARSER, FIRMWARE_CAPABILITIES, RECOVERY_DIR / "transition-network-source" / "patch_transition_network.py", RECOVERY_DIR / "recovery-clients-source" / "patch_recovery_clients.py", RECOVERY_TFTP_CLIENT, RECOVERY_SCP_CLIENT, RECOVERY_DIR / "transition-network-source" / "shipped-md-02_network.sh", RECOVERY_DIR / "transition-network-source" / "shipped-mf-02_network.sh", RECOVERY_DIR / "recovery-safe-uboot-source" / "patch_recovery_safe_fip.py", RECOVERY_DIR / "recovery-safe-uboot-source" / "lzma1ext_noeopm.c", RECOVERY_DIR / "recovery-safe-uboot-source" / "md-rc18-safe-fip-report.json", RECOVERY_DIR / "recovery-safe-uboot-source" / "mf-rc18-safe-fip-report.json", VENDOR / "rich" / "__init__.py", VENDOR / "RICH_LICENSE.txt")
     for path in required:
         if not path.is_file():
             raise Error(f"повреждён комплект: отсутствует {path.relative_to(KIT)}")
@@ -3836,7 +3836,12 @@ def backup_tftp(
             telnet.close()
 
 def backup_to_usb(telnet: Telnet, usb_mount: str, family: str = "md") -> str:
-    telnet.upload_text("/tmp/nokia-backup-agent.sh", BACKUP_AGENT.read_text())
+    if not BACKUP_AGENT.is_file():
+        raise Error(tr(
+            "Унаследованный USB-backup в этот комплект не включён; используйте штатный TFTP или BootROM/RAM backup.",
+            "The legacy USB backup agent is not shipped in this kit; use the supported TFTP or BootROM/RAM backup path.",
+        ))
+    telnet.upload_text("/tmp/nokia-backup-agent.sh", BACKUP_AGENT.read_text(encoding="utf-8"))
     # Disable terminal input echo while the agent command is entered. Runtime
     # output remains visible, but the shell command itself is not printed.
     telnet.command("stty -echo 2>/dev/null || true", timeout=10, echo=False)
@@ -9943,7 +9948,12 @@ def _remote_error_line(text: str) -> str:
 
 
 def verify_router_usb_storage(telnet: Telnet, mount: str) -> dict[str, str]:
-    telnet.upload_text("/tmp/nokia-backup-agent.sh", BACKUP_AGENT.read_text())
+    if not BACKUP_AGENT.is_file():
+        raise Error(tr(
+            "Унаследованный USB-backup в этот комплект не включён; используйте штатный TFTP или BootROM/RAM backup.",
+            "The legacy USB backup agent is not shipped in this kit; use the supported TFTP or BootROM/RAM backup path.",
+        ))
+    telnet.upload_text("/tmp/nokia-backup-agent.sh", BACKUP_AGENT.read_text(encoding="utf-8"))
     command = (
         f"NOKIA_LANG={shlex.quote(ensure_language())} NOKIA_USB_MARKERS=1 "
         f"ash /tmp/nokia-backup-agent.sh {shlex.quote(mount)} --preflight"

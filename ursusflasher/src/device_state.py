@@ -437,12 +437,6 @@ def action_applicability(state: DeviceState) -> dict[int, ActionApplicability]:
         if not implemented:
             enabled = False
             reason = _spec_text(spec, "unavailable_reason", "не реализовано в этой версии", "not implemented in this version")
-        elif write_capable and (
-            state.probe_status != PROBE_COMPLETE
-            or (state.current_system.startswith("OPENWRT") and state.execution_environment == EXEC_UNKNOWN)
-        ):
-            enabled = False
-            reason = terms.tr("состояние определено не полностью", "device state is incomplete")
         elif key == "install_or_repair_bootloader":
             if state.current_system.startswith("OPENWRT") and state.execution_environment == EXEC_RAM_ROOT:
                 backend = "SSH_RAM_OPENWRT"

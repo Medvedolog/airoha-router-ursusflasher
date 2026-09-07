@@ -23,7 +23,8 @@ assert terms.human('SSH_RAM_OPENWRT','method')=='Через SSH из OpenWrt, з
 assert terms.human('PERSISTENT_ROOT','execution_environment')=='установленная OpenWrt во flash-памяти'
 unknown=ds.DeviceState(probe_status=ds.PROBE_COMPLETE,current_system='OPENWRT_UBI',current_layout='OPENWRT_UBI',execution_environment=ds.EXEC_UNKNOWN,bootloader='URSUSBOOT')
 ds.degrade_probe_status(unknown,ds.PROBE_PARTIAL,'EXECUTION_ENVIRONMENT_UNCONFIRMED')
-assert not ds.action_applicability(unknown)[2].enabled
+assert ds.action_applicability(unknown)[2].enabled
+assert ds.action_applicability(unknown)[2].resolved_backend=='AUTO_BOOTLOADER_INSTALL_REPAIR'
 assert any('Среда выполнения:' in x and 'оперативной памяти' in x for x in ds.state_summary_lines(ram))
 assert not any('Среда выполнения:' in x for x in ds.state_summary_lines(stock))
 print('STATEUI4_EXECUTION_ENVIRONMENT_QA=PASS')

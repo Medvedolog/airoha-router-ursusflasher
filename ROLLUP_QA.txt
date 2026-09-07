@@ -1,23 +1,40 @@
-UrsusFlasher 0.2.51 OPERATIONS1 roll-up QA
+UrsusFlasher 0.2.52 STATEUI6 / ACTIONPREFLIGHT1 roll-up QA
 
 README_RU_OPERATIONS_QA=PASS
 STATEUI5_RU_TERMS_QA=PASS
-ALL_EXPORTED_SELFTESTS_REACHED_PASS=YES
-EXPECTED_RELEASE_EXPORT=PASS files=87
-RELEASE_ZIP_QA=PASS files=87
+STATEUI6_ACTION_PREFLIGHT_QA=PASS
+STATEUI6_KIT_BOUNDARY_QA=PASS
+GITHUB_ROLLUP_REPO_QA=PASS
+RELEASE_ZIP_QA=PASS files=88
 PUBLIC_RELEASE_QA=PASS files=65
-PAYLOAD_TREE_IDENTITY_0.2.51_BASELINE=PASS files=34
-FW_TREE_IDENTITY_0.2.51_BASELINE=PASS files=3
-RUNTIME_SRC_IDENTITY_0.2.51_BASELINE=PASS files=13
-CONFIG_IDENTITY_0.2.51_BASELINE=PASS files=4
-REMOVED_PROJECT_TRANSFER_DOCS=PASS
-REMOVED_ROADMAP_STYLE_DOCS=PASS
-CURRENT_OPERATIONAL_DOCS_ONLY=PASS
+PAYLOAD_TREE_IDENTITY_0.2.51=PASS files=34
+FW_TREE_IDENTITY_0.2.51=PASS files=3
+WINDOWS_UTF8_SELFTEST_FIX=PASS
+GITATTRIBUTES_AUTOCRLF_POLICY=PASS
+REPRODUCIBLE_LOG_GITIGNORE_EXCEPTION=PASS
+CMD_CRLF_POLICY=PASS
+WINDOWS_STYLE_CHECKOUT_AUTOCRLF_SHA256=PASS files=139
+REPRODUCIBLE_LOGS_TRACKED=PASS files=4
+GITHUB_MAX_BLOB=90000000
+LEGACY_USB_BACKUP_AGENT_NOT_REQUIRED_BY_KIT_VERIFIER=PASS
+PROJECT_TRANSFER_DOCS_ABSENT=PASS
+ROADMAP_STYLE_DOCS_ABSENT=PASS
 
-Full verify_repo.py reached the final exported self-test with every test reporting PASS before the harness execution-time limit. The remaining release-export comparison was run separately and passed against the repository expected manifest.
+Behavioral change:
+- Passive DeviceState is informational and no longer globally blocks write-capable actions.
+- EXPERT main header shows only UrsusFlasher EXPERT + version.
+- Device state moved to action 10 (Device state and available operations).
+- Actions 1, 2 and 5 remain selectable under PARTIAL passive detection and perform their own operation-specific preflight.
+- Action-specific gates remain active for operations that require confirmed UrsusBoot/Recovery state.
+- Root SSH password is not requested by passive menu probing; the selected operation invokes normal OpenSSH authentication when needed.
+
+Firmware identity:
+- payloads/: byte-identical to 0.2.51 (34 files)
+- fw/: byte-identical to 0.2.51 (3 files)
+- FUDAN1 firmware artifacts unchanged
 
 Release ZIP SHA256:
-6486c1aa09b764455d3b8e4c39484f174d8f14dad21561082016cbea7b4cceb2
+6291475b3479a543903cf72efaf1855ef153cedfd954dd12bb2aad4f9568e355
 
 PUBLIC-TEST ZIP SHA256:
-c780a4aa8a48cefecf8582fe9738de07049ed74a626f5f81bf4f397d5f511ff7
+92b39ccf33a5f898e59c5ad0ca791098e27a63070f5770e300deb3eef0bb8499

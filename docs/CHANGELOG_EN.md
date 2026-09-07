@@ -2,6 +2,15 @@
 
 This file lists released behavior only.
 
+## 0.2.52 — STATEUI6 / ACTIONPREFLIGHT1
+
+- Passive `DeviceState` no longer acts as a global write gate.
+- Actions 1, 2 and 5 remain selectable when passive detection is incomplete; each operation performs its own authoritative preflight.
+- OpenWrt SSH authentication may prompt only after an action is selected.
+- Device state was removed from the EXPERT header and remains available through informational item 10.
+- Build-change prose was removed from the EXPERT banner and kept in the changelog.
+- Fixed explicit UTF-8 reading in `selftest_rootfsmax2.py` on Windows.
+
 ## 0.2.51 — STATEUI5
 
 - Refined Russian operator terminology.

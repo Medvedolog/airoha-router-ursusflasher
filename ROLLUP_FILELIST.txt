@@ -5,7 +5,6 @@
 FILES.md
 LICENSE-NOTICE.md
 README.md
-ROLLUP_FILELIST.txt
 ROLLUP_QA.txt
 START_EXPERT.cmd
 START_EXPERT.sh
@@ -16,7 +15,6 @@ config/FIRMWARE_BUNDLE.json
 config/FIRMWARE_CAPABILITIES.json
 config/MANIFEST.json
 config/UI_TERMS.json
-docs/BACKUP_RESTORE_AUDIT_0.2.41.md
 docs/CHANGELOG_EN.md
 docs/CHANGELOG_RU.md
 docs/EMERGENCY_URSUSBOOT_RU.md
@@ -133,6 +131,8 @@ ursusflasher/tools/selftest_stateui2_humanization.py
 ursusflasher/tools/selftest_stateui3_enum_coverage.py
 ursusflasher/tools/selftest_stateui4_execution_environment.py
 ursusflasher/tools/selftest_stateui5_ru_terms.py
+ursusflasher/tools/selftest_stateui6_action_preflight.py
+ursusflasher/tools/selftest_stateui6_kit_boundary.py
 ursusflasher/tools/selftest_ursusboot_only.py
 ursusflasher/tools/selftest_web_poll_resilience.py
 ursusflasher/tools/verify_manifest_closure.py
