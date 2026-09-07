@@ -168,4 +168,5 @@ jobs:
             "dist-public/${ASSET}" \
             "dist-public/${ASSET}.sha256.txt" \
             "docs/INSTRUCTIONS_RU.md" \
-            "docs/EMERGENCY_URSUSBOOT_RU.md"
+            "docs/EMERGENCY_URSUSBOOT_RU.md" \
+            "docs/CHANGELOG_RU.md"
