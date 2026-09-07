@@ -1,4 +1,7 @@
 51258503a3440ca7aba71237979e1c536dbf33986631f6d08b2367ca6ac11f79  data/payloads/README.md
+67cf593b0f768aa595f37467fded49b30809566e9565cd6a5a0a2ef0f5cc193c  data/payloads/md/bootrom-backup/README.md
+c40c87354566eb44fc933c1ce6c0cd9c81227b525243c67c9932b80a656d01c6  data/payloads/md/bootrom-backup/nokia-xg040gmd-stock-recovery-initramfs.itb
+2ebcbf3981e3e56b6389521fc2caa3320cf259c08f173b660b29366b9290bcc1  data/payloads/md/bootrom-backup/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip
 36be1adb16133ec54753792a756190b933ce9829472c18be2adc9b26a870d238  data/payloads/md/ursusboot/openwrt-6.18.44-mtd-rw.ko
 6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808  data/payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin
 c98f268db69fb3d8ab3ba7bd11f9aa0cc3bfbaacf5b952e7a4e25094476bb629  data/payloads/md/ursusboot/stock_mtd0_reference.bin

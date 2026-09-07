@@ -1,4 +1,4 @@
-# UrsusFlasher 0.2.52 — Nokia XG-040G-MD
+# UrsusFlasher 0.2.55 — Nokia XG-040G-MD
 
 Готовый комплект для установки OpenWrt, резервного копирования и восстановления Nokia XG-040G-MD на Airoha AN7581.
 
@@ -35,7 +35,7 @@ Linux/macOS:
 | Исходное состояние | Управление | Передача файлов |
 |---|---|---|
 | Nokia STOCK | HTTP/Web + Telnet | TFTP |
-| установленная OpenWrt | SSH | SCP |
+| установленная OpenWrt | SSH | SSH-stream/SCP; штатный sysupgrade |
 | OpenWrt/initramfs в RAM | SSH | SCP |
 | UrsusBoot Recovery | HTTP API | HTTP по частям; TFTP для резервной передачи FIP |
 | Airoha BootROM | USB-UART 3,3 В | XMODEM |
@@ -74,7 +74,7 @@ root SSH
 
 ## Полная резервная копия
 
-Пункт 7 EXPERT выполняется в режиме чтения. Для Nokia STOCK сохраняются `mtd0..mtd16` и метаданные устройства. Если безопасный live-read путь недоступен, используется Airoha BootROM и среда в RAM.
+Пункт 7 EXPERT выполняется в режиме чтения. Если для определения текущей OpenWrt/разметки нужен пароль `root`, его интерактивно запрашивает системный OpenSSH; пароль не сохраняется и ключ на роутер не устанавливается. Для Nokia STOCK сохраняются `mtd0..mtd16`. Для OpenWrt UBI путь Airoha BootROM → RAM сохраняет точный 256-МиБ `mtd0_all_flash.bin.gz`, SHA256 и производные `mtd1_bl2`/`mtd2_ubi`.
 
 ## Комплект OpenWrt
 

@@ -23,8 +23,8 @@ ap=ds.action_applicability(partial)
 # STATEUI6: passive completeness is informational; operations with their own
 # authoritative preflight remain selectable. Action-specific gates still apply.
 assert ap[1].enabled and ap[2].enabled and ap[5].enabled
-assert not ap[3].enabled and 'режима восстановления' in ap[3].reason
-assert not ap[4].enabled and 'UrsusBoot' in ap[4].reason
+assert not ap[3].enabled and 'OpenWrt' in ap[3].reason
+assert ap[4].enabled and ap[4].resolved_backend=='ALIAS_TO_ACTION_2'
 assert not ap[6].enabled and 'не реализовано' in ap[6].reason
 assert ap[7].enabled and ap[10].enabled and ap[11].enabled and ap[12].enabled
 
@@ -51,8 +51,8 @@ no_local=ds.DeviceState(probe_status=ds.PROBE_COMPLETE, current_system='RECOVERY
 av=ds.action_applicability(no_local)[8]
 assert av.enabled and av.reason=='' and 'вручную' in av.note
 
-# Custom image limitation belongs to this release, not to device correctness.
+# STATEUI7: custom image from installed OpenWrt uses native sysupgrade over SSH.
 live=ds.DeviceState(probe_status=ds.PROBE_COMPLETE, current_system='OPENWRT_UBI', execution_environment=ds.EXEC_PERSISTENT_ROOT, bootloader='URSUSBOOT')
 ac=ds.action_applicability(live)[3]
-assert not ac.enabled and ac.reason=='в этой версии доступно только из режима восстановления'
+assert ac.enabled and ac.resolved_backend=='SSH_PERSISTENT_OPENWRT_SYSUPGRADE'
 print('STATEUI2_APPLICABILITY_QA=PASS')

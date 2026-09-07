@@ -1,4 +1,4 @@
-# UrsusFlasher 0.2.52 — operating instructions
+# UrsusFlasher 0.2.55 — operating instructions
 
 This document covers Nokia XG-040G-MD on Airoha AN7581.
 
@@ -22,7 +22,7 @@ Control uses the stock HTTP/Web interface and a root Telnet session. TFTP is use
 
 ### Installed OpenWrt or RAM/initramfs OpenWrt
 
-Control uses root SSH and file transfer uses SCP. The flasher distinguishes a persistent flash root from a RAM root. An existing UBI `fip` volume is preferred; a physical boot block is used only when the target and current contents are unambiguous.
+Control uses root SSH and binary SSH streaming/SCP as appropriate. The flasher distinguishes a persistent flash root from a RAM root. An existing UBI `fip` volume is preferred; a physical boot block is used only when the target and current contents are unambiguous.
 
 ### UrsusBoot Recovery
 
@@ -32,7 +32,7 @@ Control and chunked file upload use the UrsusBoot HTTP API at `192.168.1.1`.
 
 Run `START_EXPERT.cmd` or `./START_EXPERT.sh` for manual operations.
 
-Actions marked `!` may write persistent flash/NAND. If required device facts cannot be proven, write-capable actions remain visible but are disabled.
+Actions marked `!` may write persistent flash/NAND. Passive menu detection is informational; each selected action performs its own authoritative preflight and may request credentials when needed.
 
 ## Bootloader update transports
 
@@ -50,7 +50,7 @@ After writing, bootloader objects are read back completely and compared with the
 
 ## Full backup
 
-A full Nokia factory backup captures `mtd0..mtd16` plus device metadata and checksums. If a safe live read path is unavailable, the flasher uses an Airoha BootROM/RAM environment so the installed system is not modifying NAND while it is read.
+A full Nokia factory backup captures `mtd0..mtd16` plus device metadata and checksums. For OpenWrt, selecting item 7 may interactively request the root SSH password to identify the current layout; the password is not stored and no temporary key is installed. OpenWrt UBI exact capture then uses Airoha BootROM/RAM to save the full 256 MiB physical `mtd0_all_flash.bin.gz` plus SHA256 and derived BL2/UBI views, without writing NAND.
 
 ## UrsusBoot Recovery entry
 

@@ -13,8 +13,8 @@ assert app[1].enabled, app[1]
 assert app[2].enabled, app[2]
 assert app[5].enabled, app[5]
 # Action-specific gates remain action-specific.
-assert not app[3].enabled and 'восстанов' in app[3].reason.lower(), app[3]
-assert not app[4].enabled and 'ursusboot' in app[4].reason.lower(), app[4]
+assert not app[3].enabled and 'openwrt' in app[3].reason.lower(), app[3]
+assert app[4].enabled and app[4].resolved_backend == 'ALIAS_TO_ACTION_2', app[4]
 # Informational/read-only actions stay reachable.
 assert app[7].enabled and app[10].enabled and app[11].enabled and app[12].enabled
 

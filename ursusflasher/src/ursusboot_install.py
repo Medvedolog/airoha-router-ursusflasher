@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import hashlib
 import json
 import os
@@ -359,23 +358,12 @@ def _tcp_open(host: str, port: int, timeout: float = 1.5) -> bool:
 
 
 def _ssh_read_binary(host: str, command: str, expected_size: int) -> bytes:
-    """Read a small fixed binary object over the existing system-OpenSSH session.
+    """Read a fixed binary object over the verified system-OpenSSH session.
 
-    Base64 keeps the transport text-safe and avoids adding a second SCP download
-    implementation.  512 KiB is the largest object used by this installer.
+    The remote side is not required to provide base64, xxd, Python or SCP.
+    stdout is captured as bytes and stderr remains separate in proven_backend.
     """
-    _rc, out = pb.ssh_run(
-        host,
-        f"({command}) | base64",
-        timeout=180,
-        quiet=True,
-        batch_mode=True,
-    )
-    compact = "".join(out.split())
-    try:
-        blob = base64.b64decode(compact, validate=True)
-    except Exception as exc:
-        raise RuntimeError(f"SSH binary transfer is not valid base64: {exc}") from exc
+    blob = pb.ssh_read_binary(host, command, timeout=180)
     if len(blob) != expected_size:
         raise RuntimeError(f"SSH binary read size mismatch: {len(blob)} != {expected_size}")
     return blob

@@ -4,6 +4,7 @@ from __future__ import annotations
 import getpass
 import json
 import os
+import shlex
 import socket
 import sys
 import time
@@ -60,6 +61,137 @@ def update_bootloader_network() -> None:
             "Trying TFTP as the fallback transport through the same UrsusBoot console.",
         ))
         ursusboot_update.tftp_update_automated()
+
+
+def _bootloader_menu_detail(state: ds.DeviceState, action: ds.ActionApplicability) -> str:
+    if state.current_system == "RECOVERY":
+        return tr(
+            "UrsusBoot Recovery: HTTP → обновление FIP; при сбое — TFTP",
+            "UrsusBoot Recovery: HTTP → FIP update; TFTP fallback on failure",
+        )
+    if state.current_system.startswith("OPENWRT"):
+        return tr(
+            "OpenWrt: SSH → резервная копия FIP/boot block → запись → обратная проверка",
+            "OpenWrt: SSH → FIP/boot-block backup → write → readback verification",
+        )
+    if state.current_system == "NOKIA_STOCK":
+        return tr(
+            "Nokia STOCK: Web/Telnet → установка UrsusBoot → проверка записи",
+            "Nokia STOCK: Web/Telnet → UrsusBoot install → write verification",
+        )
+    return tr(
+        "Текущая среда проверяется при запуске; подходящий транспорт выбирается автоматически",
+        "The current environment is checked on start; the transport is selected automatically",
+    )
+
+
+def _custom_openwrt_menu_detail(state: ds.DeviceState, action: ds.ActionApplicability) -> str:
+    if action.resolved_backend == "SSH_PERSISTENT_OPENWRT_SYSUPGRADE":
+        return tr(
+            "Установленная OpenWrt: SSH → передача образа → sysupgrade -T → sysupgrade",
+            "Installed OpenWrt: SSH → image upload → sysupgrade -T → sysupgrade",
+        )
+    if action.resolved_backend == "URSUSBOOT_RECOVERY_CUSTOM_IMAGE":
+        return tr(
+            "UrsusBoot Recovery: HTTP → проверка образа → запись OpenWrt",
+            "UrsusBoot Recovery: HTTP → image validation → OpenWrt flash",
+        )
+    return tr(
+        "Доступно из установленной OpenWrt или UrsusBoot Recovery",
+        "Available from installed OpenWrt or UrsusBoot Recovery",
+    )
+
+
+def _choose_sysupgrade_any() -> Path:
+    prompt = tr(
+        "Путь к пользовательскому sysupgrade (.bin/.itb); Enter — открыть окно выбора: ",
+        "Path to custom sysupgrade (.bin/.itb); press Enter to open file picker: ",
+    )
+    raw = input(prompt).strip().strip('"')
+    if not raw:
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk(); root.withdraw(); root.update()
+            raw = filedialog.askopenfilename(
+                title=tr("Выберите sysupgrade OpenWrt", "Select OpenWrt sysupgrade image"),
+                filetypes=[("OpenWrt sysupgrade", "*.bin *.itb"), ("All files", "*.*")],
+            )
+            root.destroy()
+        except Exception:
+            raw = input(tr("Введите путь к sysupgrade: ", "Enter sysupgrade path: ")).strip().strip('"')
+    path = Path(raw).expanduser().resolve()
+    if not path.is_file():
+        raise RuntimeError(tr(f"Файл sysupgrade не найден: {path}", f"Sysupgrade image not found: {path}"))
+    size = path.stat().st_size
+    if size < 1024 * 1024 or size > 128 * 1024 * 1024:
+        raise RuntimeError(tr(f"Неожиданный размер sysupgrade: {size} байт", f"Unexpected sysupgrade size: {size} bytes"))
+    return path
+
+
+def custom_openwrt_running(host: str) -> None:
+    proven.ensure_root_ssh_session(host)
+    image = _choose_sysupgrade_any()
+    digest = proven.sha_file(image)
+    remote = "/tmp/ursus-custom-sysupgrade"
+    print(tr(
+        f"[ОБРАЗ] {image.name} · {image.stat().st_size / 1048576:.1f} MiB · SHA256 {digest}",
+        f"[IMAGE] {image.name} · {image.stat().st_size / 1048576:.1f} MiB · SHA256 {digest}",
+    ))
+    proven.ssh_write_binary(host, image, remote, timeout=1800)
+    quoted = shlex.quote(remote)
+    rc, out = proven.ssh_run(
+        host,
+        f"command -v sysupgrade >/dev/null 2>&1 || exit 40; "
+        f"[ \"$(sha256sum {quoted} | awk '{{print $1}}')\" = {shlex.quote(digest)} ] || exit 41; "
+        f"sysupgrade -T {quoted}",
+        timeout=300, quiet=False, batch_mode=True,
+    )
+    if rc != 0:
+        raise RuntimeError(tr("sysupgrade -T отклонил образ", "sysupgrade -T rejected the image"))
+    print(tr(
+        "[ГОТОВО] Образ принят штатной проверкой sysupgrade -T. Запись ещё не начиналась.",
+        "[READY] The image passed the native sysupgrade -T check. Writing has not started yet.",
+    ))
+    ui.rule(tr("РАЗРЕШЁННОЕ ДЕЙСТВИЕ", "RESOLVED ACTION"), style="amber2")
+    print("  " + tr("Действие: записать пользовательскую прошивку OpenWrt", "Action: flash a custom OpenWrt image"))
+    print("  " + tr("Метод: SSH → /tmp → sysupgrade -T → sysupgrade -v -n", "Method: SSH → /tmp → sysupgrade -T → sysupgrade -v -n"))
+    print("  " + tr("Настройки текущей прошивки не переносятся.", "Current firmware settings will not be preserved."))
+    ans = ui.prompt(tr("Начать запись? [д/Н]: ", "Start flashing? [y/N]: ")).strip().lower()
+    if ans not in ("д", "да", "y", "yes"):
+        ui.status(tr("СТОП", "STOP"), tr("Запись отменена; flash-память не изменялась.", "Flashing cancelled; flash memory was not modified."))
+        return
+    rc, out = proven.ssh_run(
+        host,
+        f"echo __URSUS_SYSUPGRADE_START__; sync; exec sysupgrade -v -n {quoted}",
+        timeout=900, allow_disconnect=True, quiet=False, batch_mode=True,
+    )
+    if "__URSUS_SYSUPGRADE_START__" not in out:
+        raise RuntimeError(tr("Не получен маркер запуска sysupgrade", "Sysupgrade start marker was not received"))
+    print(tr(
+        "[ГОТОВО] sysupgrade запущен. Соединение SSH может оборваться во время перезагрузки — это нормально.",
+        "[READY] sysupgrade started. SSH may disconnect during reboot; this is expected.",
+    ))
+
+
+def run_bootloader_install_or_update(host: str, state: ds.DeviceState) -> None:
+    if state.current_system == "RECOVERY":
+        update_bootloader_network()
+    else:
+        ursusboot_install.run_install(host=host)
+
+
+def run_custom_openwrt(host: str, state: ds.DeviceState, action: ds.ActionApplicability) -> None:
+    if action.resolved_backend == "SSH_PERSISTENT_OPENWRT_SYSUPGRADE":
+        custom_openwrt_running(host)
+        return
+    if action.resolved_backend == "URSUSBOOT_RECOVERY_CUSTOM_IMAGE":
+        ursusboot_update.web_fit_update()
+        return
+    raise RuntimeError(tr(
+        "Не удалось определить безопасный способ записи пользовательской OpenWrt.",
+        "No safe custom OpenWrt flashing method could be resolved.",
+    ))
 
 
 def _tcp_open(host: str, port: int, timeout: float = 1.0) -> bool:
@@ -173,7 +305,10 @@ def full_backup_readonly(state: ds.DeviceState) -> None:
             "[ИНФО] Копия, созданная из запущенной OpenWrt с доступной записью, не считается пригодной для точного восстановления. Для точного копирования используется среда восстановления, запущенная в оперативной памяти.",
             "[INFO] A live writable OpenWrt dump is not marked restore-grade. Exact capture uses the quiescent BootROM/RAM path.",
         ))
-    proven.bootrom_backup_wizard()
+    proven.bootrom_backup_wizard(
+        source_system=state.current_system,
+        source_layout=state.current_layout,
+    )
 
 
 def validate_backup() -> None:
@@ -186,12 +321,45 @@ def validate_backup() -> None:
             raise RuntimeError(tr("Локальные backup не найдены.", "No local backups were found."))
         path = candidates[0]
         print(tr(f"Проверяю последнюю копию: {path}", f"Validating latest backup: {path}"))
+    raw_meta = path / "RAW_BACKUP.json"
+    if raw_meta.is_file():
+        result = proven.verify_raw_bootrom_backup(path)
+        print(tr("[ГОТОВО] BACKUP_STATUS=VERIFIED_EXACT_RAW", "[READY] BACKUP_STATUS=VERIFIED_EXACT_RAW"))
+        print(f"layout={result.get('source_layout')} all_flash_sha256={result.get('all_flash_sha256')}")
+        return
     result = proven.verify_stock_restore_backup(path)
     print(tr("[ГОТОВО] BACKUP_STATUS=RESTORE_READY", "[READY] BACKUP_STATUS=RESTORE_READY"))
     print(f"family={result.get('stock_family')} variant={result.get('stock_variant')}")
     stock = result.get("stock_restore", {})
     if stock:
         print(f"all_flash_sha256={stock.get('all_flash_sha256')}")
+
+
+def _interactive_diagnostic_state(state: ds.DeviceState) -> ds.DeviceState:
+    """Upgrade an operator-requested diagnostic probe without changing the router.
+
+    The menu probe is deliberately non-interactive.  Once the operator selects
+    diagnostics/backup, a single system-OpenSSH command may ask for the root
+    password and read board/layout information.  No temporary key is installed
+    and no router file is modified.
+    """
+    if state.probe_status == ds.PROBE_COMPLETE:
+        return state
+    if not state.access.get("ssh"):
+        return state
+    ui.status(tr("ДИАГНОСТИКА", "DIAGNOSTICS"), tr(
+        "Для полной проверки сейчас будет выполнен read-only вход root по SSH. Если задан пароль, его запросит системный OpenSSH; UrsusFlasher пароль не сохраняет.",
+        "A read-only root SSH login will now be used to complete diagnostics. If a password is set, system OpenSSH will ask for it; UrsusFlasher does not store it.",
+    ))
+    fresh = ds.probe_device_state(state.host, interactive_ssh=True)
+    if fresh.access.get("root") is True:
+        ui.status(tr("ГОТОВО", "READY"), tr(
+            "Root SSH подтверждён; сведения о системе и разметке обновлены.",
+            "Root SSH confirmed; system and layout information was refreshed.",
+        ))
+    else:
+        proven._write_session_only("[INTERACTIVE-DIAGNOSTIC] root SSH was not confirmed")
+    return fresh
 
 
 def print_state_header(state: ds.DeviceState) -> None:
@@ -208,15 +376,17 @@ def capability_report(state: ds.DeviceState) -> None:
     print_state_header(state)
     print()
     print(tr("Доступность действий:", "Action availability:"))
-    for number in range(1, 13):
+    for number in VISIBLE_ACTIONS:
         a = app[number]
         title = terms.action_title(a.key)
         yes = tr("ДА", "YES") if a.enabled else tr("НЕТ", "NO")
         extra = f" — {a.reason}" if (not a.enabled and a.reason) else ""
         marker = "!" if a.write_capable else " "
         print(f" {marker} {number:2d}  {title:<42} {yes}{extra}")
-        if number == 2 and a.enabled:
-            print("       " + tr("Метод: ", "Method: ") + terms.human(a.resolved_backend, "method"))
+        detail_ru, detail_en = _menu_detail(number, state, app)
+        detail = tr(detail_ru, detail_en)
+        if detail:
+            print(f"       {detail}")
         if a.enabled and a.note:
             print(f"       {a.note}")
     print()
@@ -253,6 +423,25 @@ def flash_diagnostics(state: ds.DeviceState) -> bool:
     return False
 
 
+def _operator_error_cause(exc: Exception) -> str:
+    """Return one short operator-useful cause line without replacing the full log."""
+    lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+    if not lines:
+        return exc.__class__.__name__
+    skip_exact = {"Последний вывод SSH:", "Last SSH output:"}
+    for line in reversed(lines):
+        if line in skip_exact:
+            continue
+        if line.startswith("SSH-команда завершилась с кодом "):
+            continue
+        if line.startswith("бинарная SSH-команда завершилась с кодом "):
+            continue
+        if len(line) > 500:
+            line = line[-500:]
+        return line
+    return lines[-1][-500:]
+
+
 def run_action(fn, *, write_may_happen: bool = False) -> None:
     try:
         fn()
@@ -267,7 +456,9 @@ def run_action(fn, *, write_may_happen: bool = False) -> None:
             ui.status(tr("ВНИМАНИЕ", "WARNING"), tr("Если запись уже началась — не выключайте питание до уточнения состояния.",
                      "If writing has already started, do not remove power until the state is known."), stream=sys.stderr)
         proven._write_session_only("[TECH] " + repr(exc))
-        ui.note(tr("Технические подробности записаны в лог сеанса.", "Technical details were written to the session log."))
+        cause = _operator_error_cause(exc)
+        ui.status(tr("ПРИЧИНА", "CAUSE"), cause, stream=sys.stderr)
+        ui.note(tr("Полные технические подробности записаны в лог сеанса.", "Full technical details were written to the session log."))
     finally:
         print()
         ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
@@ -285,6 +476,64 @@ def _show_action(number: int, app: dict[int, ds.ActionApplicability], detail_ru:
     )
 
 
+VISIBLE_ACTIONS = (1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12)
+
+
+def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
+    if number == 1:
+        return (
+            "Полный переход: резервная копия → UrsusBoot → комплектная OpenWrt; транспорт выбирается по текущей системе",
+            "Full workflow: backup → UrsusBoot → bundled OpenWrt; transport follows the current system",
+        )
+    if number == 2:
+        text = _bootloader_menu_detail(state, app[2])
+        return text, text
+    if number == 3:
+        text = _custom_openwrt_menu_detail(state, app[3])
+        return text, text
+    if number == 5:
+        return (
+            "USB-UART → Airoha BootROM → UrsusBoot из RAM → запись и проверка загрузчика",
+            "USB-UART → Airoha BootROM → UrsusBoot from RAM → bootloader write and verification",
+        )
+    if number == 6:
+        return (
+            "Заводской образ Nokia из проверенной резервной копии; backend пока не подключён",
+            "Nokia factory image from a validated backup; backend is not connected yet",
+        )
+    if number == 7:
+        return (
+            "BootROM/USB-UART → среда в RAM → чтение NAND → копия на ПК; flash не изменяется",
+            "BootROM/USB-UART → RAM environment → NAND read → PC backup; flash is not modified",
+        )
+    if number == 8:
+        return (
+            "Проверка на ПК: структура, размеры и SHA256; роутер не изменяется",
+            "PC-side validation: structure, sizes and SHA256; the router is not modified",
+        )
+    if number == 9:
+        return (
+            "Сборка аварийного комплекта из проверенной резервной копии; пока не реализовано",
+            "Build a rescue kit from a validated backup; not implemented yet",
+        )
+    if number == 10:
+        return (
+            "Пассивная диагностика Web/SSH: система, разметка, загрузчик и применимые операции",
+            "Passive Web/SSH diagnostics: system, layout, bootloader and applicable actions",
+        )
+    if number == 11:
+        return (
+            "Web/SSH, при необходимости USB-UART: разметка, NAND и bad blocks; только чтение",
+            "Web/SSH, USB-UART when needed: layout, NAND and bad blocks; read-only",
+        )
+    if number == 12:
+        return (
+            "Локальная проверка SHA256 и состава файлов публичного комплекта",
+            "Local SHA256 and package-content verification",
+        )
+    return "", ""
+
+
 def main() -> int:
     proven.start_session_logging()
     ui.enable()
@@ -300,27 +549,24 @@ def main() -> int:
         ui.banner("UrsusFlasher EXPERT", version=version)
 
         ui.section(tr("Установить", "Install"))
-        _show_action(1, app, "полный сценарий: резервная копия → UrsusBoot → OpenWrt",
-                     "full production workflow: backup → UrsusBoot → OpenWrt")
-        _show_action(2, app, terms.human(app[2].resolved_backend, "method"),
-                     terms.human(app[2].resolved_backend, "method"))
-        _show_action(3, app)
-        _show_action(4, app)
+        for number in (1, 2, 3):
+            detail_ru, detail_en = _menu_detail(number, state, app)
+            _show_action(number, app, detail_ru, detail_en)
 
         ui.section(tr("Если роутер не загружается", "If the router does not boot"), style="amber2")
-        _show_action(5, app, "понадобится USB-UART", "USB-UART is required")
-        _show_action(6, app)
+        for number in (5, 6):
+            detail_ru, detail_en = _menu_detail(number, state, app)
+            _show_action(number, app, detail_ru, detail_en)
 
         ui.section(tr("Резервные копии", "Backups"), style="ok")
-        _show_action(7, app, "только чтение; точная копия OpenWrt создаётся из среды восстановления в оперативной памяти",
-                     "read-only; exact OpenWrt backup uses quiescent RAM/BootROM")
-        _show_action(8, app)
-        _show_action(9, app)
+        for number in (7, 8, 9):
+            detail_ru, detail_en = _menu_detail(number, state, app)
+            _show_action(number, app, detail_ru, detail_en)
 
         ui.section(tr("Посмотреть", "Inspect"), style="amber2")
-        _show_action(10, app)
-        _show_action(11, app)
-        _show_action(12, app)
+        for number in (10, 11, 12):
+            detail_ru, detail_en = _menu_detail(number, state, app)
+            _show_action(number, app, detail_ru, detail_en)
 
         print()
         ui.menu_item(0, tr("Выход", "Exit"))
@@ -331,6 +577,12 @@ def main() -> int:
         if c == "0":
             return 0
         number = int(c)
+        if number == 4:
+            ui.note(tr(
+                "Пункт 4 объединён с пунктом 2: установка и обновление UrsusBoot теперь используют один автоматический сценарий.",
+                "Item 4 was merged into item 2: UrsusBoot install and update now use one automatic workflow.",
+            ))
+            number = 2
         selected = app[number]
         if not selected.enabled:
             print()
@@ -349,17 +601,20 @@ def main() -> int:
                 ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
             ui.section(tr("Разрешённое действие", "Resolved action"), style="amber2")
-            print("  " + tr("Действие: Установить или переустановить загрузчик", "Action: Install or repair the bootloader"))
-            print("  " + tr("Метод: ", "Method: ") + terms.human(fresh_action.resolved_backend, "method"))
+            print("  " + tr("Действие: установить или обновить UrsusBoot", "Action: install or update UrsusBoot"))
+            print("  " + tr("Метод: ", "Method: ") + _bootloader_menu_detail(fresh_state, fresh_action))
             if fresh_state.current_system.startswith("OPENWRT"):
                 print("  " + tr("Среда выполнения: ", "Execution root: ") + terms.human(fresh_state.execution_environment, "execution_environment"))
-            run_action(lambda: ursusboot_install.run_install(host=host), write_may_happen=True)
+            run_action(lambda: run_bootloader_install_or_update(host, fresh_state), write_may_happen=True)
         elif number == 3:
             network_guidance.show()
-            run_action(ursusboot_update.web_fit_update, write_may_happen=True)
-        elif number == 4:
-            network_guidance.show()
-            run_action(update_bootloader_network, write_may_happen=True)
+            fresh_state = ds.probe_device_state(host)
+            fresh_action = ds.action_applicability(fresh_state)[3]
+            if not fresh_action.enabled:
+                ui.status(tr("СТОП", "STOP"), fresh_action.reason or tr("Действие сейчас неприменимо.", "This action is not currently applicable."))
+                ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
+                continue
+            run_action(lambda: run_custom_openwrt(host, fresh_state, fresh_action), write_may_happen=True)
         elif number == 5:
             network_guidance.show()
             if confirm_uart_recovery(
@@ -368,14 +623,14 @@ def main() -> int:
             ):
                 run_action(ursusboot_update.uart_bootrom_recover, write_may_happen=True)
         elif number == 7:
-            run_action(lambda: full_backup_readonly(state))
+            run_action(lambda: full_backup_readonly(_interactive_diagnostic_state(state)))
         elif number == 8:
             run_action(validate_backup)
         elif number == 10:
-            run_action(lambda: capability_report(state))
+            run_action(lambda: capability_report(_interactive_diagnostic_state(state)))
         elif number == 11:
             try:
-                flash_diagnostics(state)
+                flash_diagnostics(_interactive_diagnostic_state(state))
             except Exception as exc:
                 print(); ui.status(tr("ОШИБКА", "ERROR"), str(exc))
             finally:

@@ -299,7 +299,7 @@ def classify_openwrt_execution_environment(root_mount: str, rom_mount: str = "",
     return EXEC_UNKNOWN
 
 
-def _probe_openwrt_ssh(host: str, state: DeviceState) -> bool:
+def _probe_openwrt_ssh(host: str, state: DeviceState, *, interactive: bool = False) -> bool:
     try:
         import proven_backend as pb
         command = (
@@ -314,7 +314,12 @@ def _probe_openwrt_ssh(host: str, state: DeviceState) -> bool:
             "printf 'OVERLAYMOUNT='; awk '$2==\"/overlay\" {print $1 \"|\" $3 \"|\" $4; exit}' /proc/mounts 2>/dev/null; echo; "
             "printf 'RELEASE='; . /etc/openwrt_release 2>/dev/null; printf '%s/%s' \"$DISTRIB_RELEASE\" \"$DISTRIB_REVISION\"; echo"
         )
-        _, out = pb.ssh_run(host, command, timeout=25, quiet=True, batch_mode=True)
+        if interactive:
+            _, out = pb.ssh_run(
+                host, command, timeout=90, quiet=False, batch_mode=False, password_prompts=3
+            )
+        else:
+            _, out = pb.ssh_run(host, command, timeout=25, quiet=True, batch_mode=True)
     except Exception as exc:
         state.evidence["openwrt_ssh_error"] = f"{type(exc).__name__}: {exc}"
         return False
@@ -366,7 +371,7 @@ def _probe_openwrt_ssh(host: str, state: DeviceState) -> bool:
     return True
 
 
-def probe_device_state(host: str = "192.168.1.1") -> DeviceState:
+def probe_device_state(host: str = "192.168.1.1", *, interactive_ssh: bool = False) -> DeviceState:
     # Probe aggregation starts optimistically and may only degrade.
     state = DeviceState(host=host, probe_status=PROBE_COMPLETE)
     ports = {p: _tcp_open(host, p) for p in (22, 23, 80, 443)}
@@ -397,7 +402,7 @@ def probe_device_state(host: str = "192.168.1.1") -> DeviceState:
 
     if http_kind == "openwrt":
         state.access["root"] = "UNKNOWN"
-        if ports[22] and _probe_openwrt_ssh(host, state):
+        if ports[22] and _probe_openwrt_ssh(host, state, interactive=interactive_ssh):
             state.access["root"] = True
             return state
         state.current_system = "UNKNOWN"
@@ -438,21 +443,30 @@ def action_applicability(state: DeviceState) -> dict[int, ActionApplicability]:
             enabled = False
             reason = _spec_text(spec, "unavailable_reason", "не реализовано в этой версии", "not implemented in this version")
         elif key == "install_or_repair_bootloader":
-            if state.current_system.startswith("OPENWRT") and state.execution_environment == EXEC_RAM_ROOT:
+            if state.current_system == "RECOVERY":
+                backend = "URSUSBOOT_RECOVERY_SELFUPDATE"
+            elif state.current_system.startswith("OPENWRT") and state.execution_environment == EXEC_RAM_ROOT:
                 backend = "SSH_RAM_OPENWRT"
             elif state.current_system.startswith("OPENWRT") and state.execution_environment == EXEC_PERSISTENT_ROOT:
                 backend = "SSH_PERSISTENT_OPENWRT"
             elif state.current_system == "NOKIA_STOCK":
                 backend = "TELNET_NOKIA_STOCK"
-        elif key == "update_bootloader" and state.bootloader != "URSUSBOOT":
-            enabled = False
-            reason = terms.tr("установленный UrsusBoot не подтверждён", "the installed UrsusBoot was not confirmed")
-        elif key == "custom_openwrt" and state.current_system != "RECOVERY":
-            enabled = False
-            reason = terms.tr(
-                "в этой версии доступно только из режима восстановления",
-                "in this version this action is available only from recovery mode",
-            )
+        elif key == "update_bootloader":
+            # Hidden compatibility alias for historical EXPERT item 4.
+            backend = "ALIAS_TO_ACTION_2"
+            enabled = out.get(2, ActionApplicability(2, "install_or_repair_bootloader", True, "", "", True, "AUTO_URSUSBOOT_INSTALL_UPDATE")).enabled
+            reason = out.get(2, ActionApplicability(2, "install_or_repair_bootloader", True, "", "", True, "AUTO_URSUSBOOT_INSTALL_UPDATE")).reason
+        elif key == "custom_openwrt":
+            if state.current_system == "RECOVERY":
+                backend = "URSUSBOOT_RECOVERY_CUSTOM_IMAGE"
+            elif state.current_system.startswith("OPENWRT") and state.execution_environment == EXEC_PERSISTENT_ROOT:
+                backend = "SSH_PERSISTENT_OPENWRT_SYSUPGRADE"
+            else:
+                enabled = False
+                reason = terms.tr(
+                    "доступно из установленной OpenWrt или UrsusBoot Recovery",
+                    "available from installed OpenWrt or UrsusBoot Recovery",
+                )
         elif key == "full_backup":
             if state.current_system == "NOKIA_STOCK" and state.probe_status == PROBE_COMPLETE:
                 backend = "STOCK_READONLY_TFTP_OR_BOOTROM"

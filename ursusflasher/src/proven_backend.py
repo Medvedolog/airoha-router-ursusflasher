@@ -37,6 +37,12 @@ _REPO_ROOT = HERE.parent.parent
 REPO_MODE = (_REPO_ROOT / "fw").is_dir() and (_REPO_ROOT / "payloads").is_dir() and (_REPO_ROOT / "config").is_dir()
 KIT = _REPO_ROOT if REPO_MODE else HERE.parent
 DATA = HERE if REPO_MODE else (KIT / "data")
+RUNTIME_PAYLOADS = (_REPO_ROOT / "payloads") if REPO_MODE else (DATA / "payloads")
+MD_URSUSBOOT_PAYLOADS = RUNTIME_PAYLOADS / "md" / "ursusboot"
+BOOTROM_BACKUP_PAYLOADS = RUNTIME_PAYLOADS / "md" / "bootrom-backup"
+BACKUP_RECOVERY_PRELOADER = MD_URSUSBOOT_PAYLOADS / "openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin"
+BACKUP_RECOVERY_FIP = BOOTROM_BACKUP_PAYLOADS / "openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip"
+BACKUP_RECOVERY_INITRAMFS = BOOTROM_BACKUP_PAYLOADS / "nokia-xg040gmd-stock-recovery-initramfs.itb"
 # Ursus production/LAB runtime deliberately has zero third-party Python dependencies.
 # Rich was used only by the old MedveFlasher banner; keep tiny stdlib-only stubs so the
 # hardware-tested transport/backend code can be ported without vendoring Rich.
@@ -73,6 +79,10 @@ RECOVERY_FIP_SIZE = 308154
 RECOVERY_FIP_SOURCE_SHA = "9c29cdbcc3f9c00070cc72262c83dcd1eb212f89f6fb84806ad8657eadec2b8b"
 RECOVERY_INITRAMFS_SHA = "c40c87354566eb44fc933c1ce6c0cd9c81227b525243c67c9932b80a656d01c6"
 RECOVERY_INITRAMFS_SIZE = 11_285_480
+BACKUP_RECOVERY_PRELOADER_SIZE = 113_447
+RAW_NAND_SPAN = 0x10000000
+BACKUP_RECOVERY_BL31_COMPRESSED_SHA = "a81dbbe98acb1dabc2afcbf72e73ad87e24efa8dd88e559612a024c28ece920e"
+BACKUP_RECOVERY_BL33_COMPRESSED_SHA = "df4803b9f70bb35050555947268fc35d61f1724814a1ea59b480689f056fa123"
 RECOVERY_CLIENT_DIR = RECOVERY_DIR / "recovery-clients-bin"
 RECOVERY_TFTP_CLIENT = RECOVERY_CLIENT_DIR / "nokia-tftp"
 RECOVERY_SCP_CLIENT = RECOVERY_CLIENT_DIR / "nokia-scp"
@@ -1185,6 +1195,71 @@ def recovery_profile_for_family(family: str) -> dict[str, object]:
         # recovery fallback when U-Boot capture is missed.
         "allow_linux_fallback": False,
     }
+
+
+
+def _current_kit_version() -> str:
+    """Return the operator-facing UrsusFlasher version, never the legacy backend tag."""
+    for candidate in (KIT / "VERSION", DATA / "VERSION"):
+        if candidate.is_file():
+            value = candidate.read_text(encoding="utf-8", errors="strict").strip()
+            if value:
+                return value
+    return APP_VERSION
+
+
+def backup_recovery_profile_md() -> dict[str, object]:
+    """Verify only the RAM stages actually used by EXPERT item 7.
+
+    This is intentionally narrower than the inherited MedveFlasher verify_kit():
+    a read-only BootROM backup must not depend on transition/install payloads.
+    """
+    _verify_exact_artifact(
+        BACKUP_RECOVERY_PRELOADER,
+        BACKUP_RECOVERY_PRELOADER_SIZE,
+        RECOVERY_PRELOADER_SHA,
+        "AN7581 read-only backup preloader",
+    )
+    _verify_exact_artifact(
+        BACKUP_RECOVERY_FIP,
+        RECOVERY_FIP_SIZE,
+        RECOVERY_FIP_SHA,
+        "AN7581 RC18 RECOVERY_SAFE backup FIP",
+    )
+    _verify_recovery_safe_fip(
+        BACKUP_RECOVERY_FIP,
+        BACKUP_RECOVERY_BL31_COMPRESSED_SHA,
+        BACKUP_RECOVERY_BL33_COMPRESSED_SHA,
+        "AN7581 RC18 RECOVERY_SAFE backup FIP",
+    )
+    _verify_exact_artifact(
+        BACKUP_RECOVERY_INITRAMFS,
+        RECOVERY_INITRAMFS_SIZE,
+        RECOVERY_INITRAMFS_SHA,
+        "AN7581 read-only backup initramfs",
+    )
+    return {
+        "family": "md",
+        "model": "Nokia XG-040G-MD",
+        "soc": "AN7581",
+        "preloader": BACKUP_RECOVERY_PRELOADER,
+        "fip": BACKUP_RECOVERY_FIP,
+        "backup_initramfs": BACKUP_RECOVERY_INITRAMFS,
+        "preloader_sha": RECOVERY_PRELOADER_SHA,
+        "fip_sha": RECOVERY_FIP_SHA,
+        "backup_initramfs_sha": RECOVERY_INITRAMFS_SHA,
+        "allow_linux_fallback": False,
+    }
+
+
+def backup_recovery_dependency_preflight() -> dict[str, object]:
+    """Read-only item-7 dependency gate; no transition/restore payloads are required."""
+    profile = backup_recovery_profile_md()
+    if shutil.which("ssh") is None:
+        # SSH is not needed once UART recovery starts, but the public kit normally
+        # carries workflows that use system OpenSSH.  Do not make it a backup gate.
+        _write_session_only("[BACKUP-PREFLIGHT] system ssh not found; UART/TFTP path remains available")
+    return profile
 
 
 def bundle_release_metadata(bundle_path: Path = BUNDLE) -> dict[str, int | str]:
@@ -4852,6 +4927,108 @@ def ssh_run(host: str, command: str, input_text: str | None = None, timeout: int
     return proc.returncode, output
 
 
+def ssh_read_binary(host: str, command: str, timeout: int = 180) -> bytes:
+    """Run a remote command over the verified SSH session and return stdout bytes exactly.
+
+    This is intentionally independent of remote text encoders such as base64/xxd.
+    It is used for fixed-size flash/FIP readback where byte identity matters.
+    stderr is kept separate so SSH/shell diagnostics can never contaminate the
+    binary stream.  Authentication follows the same ephemeral-key session as
+    ssh_run(); callers are expected to have run ensure_root_ssh_session() first.
+    """
+    ssh = ssh_executable()
+    null = "NUL" if os.name == "nt" else "/dev/null"
+    argv = [
+        ssh, "-T", "-o", "StrictHostKeyChecking=no", "-o", f"UserKnownHostsFile={null}",
+        "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=15",
+        "-o", "ServerAliveCountMax=4", "-o", "NumberOfPasswordPrompts=0", "-o", "BatchMode=yes",
+    ]
+    identity = _URSUS_SSH_SESSION_KEY.get(host)
+    if identity:
+        argv.extend(["-o", "IdentitiesOnly=yes", "-i", str(identity)])
+    argv.extend([f"root@{host}", command])
+    proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate()
+        detail = stderr.decode("utf-8", errors="replace")[-4000:].strip()
+        raise Error("тайм-аут бинарной SSH-команды" + (f"\nПоследний вывод SSH:\n{detail}" if detail else ""))
+    if proc.returncode:
+        detail = stderr.decode("utf-8", errors="replace")[-6000:].strip()
+        raise Error(
+            f"бинарная SSH-команда завершилась с кодом {proc.returncode}"
+            + (f"\nПоследний вывод SSH:\n{detail}" if detail else "")
+        )
+    return stdout
+
+
+def ssh_write_binary(host: str, source: Path, remote_path: str, timeout: int = 1800) -> tuple[int, str]:
+    """Stream one local file to remote /tmp over the verified SSH session.
+
+    The remote side only needs a POSIX shell, cat, mv, wc and sha256sum.  This
+    deliberately avoids requiring scp/sftp/base64 on minimal OpenWrt builds.
+    ensure_root_ssh_session() must have run first so the transfer can use the
+    ephemeral session key without another password prompt.
+    """
+    source = Path(source)
+    if not source.is_file():
+        raise Error(tr(f"локальный файл не найден: {source}", f"local file not found: {source}"))
+    ssh = ssh_executable()
+    null = "NUL" if os.name == "nt" else "/dev/null"
+    partial = remote_path + ".part"
+    command = (
+        f"rm -f {shlex.quote(partial)} {shlex.quote(remote_path)}; "
+        f"cat > {shlex.quote(partial)} && "
+        f"mv {shlex.quote(partial)} {shlex.quote(remote_path)} && "
+        f"wc -c < {shlex.quote(remote_path)}; sha256sum {shlex.quote(remote_path)}"
+    )
+    argv = [
+        ssh, "-T", "-o", "StrictHostKeyChecking=no", "-o", f"UserKnownHostsFile={null}",
+        "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=8", "-o", "ServerAliveInterval=15",
+        "-o", "ServerAliveCountMax=4", "-o", "NumberOfPasswordPrompts=0", "-o", "BatchMode=yes",
+    ]
+    identity = _URSUS_SSH_SESSION_KEY.get(host)
+    if identity:
+        argv.extend(["-o", "IdentitiesOnly=yes", "-i", str(identity)])
+    argv.extend([f"root@{host}", command])
+    size = source.stat().st_size
+    print(tr(
+        f"[SSH] Передаю {source.name}: {size / 1048576:.1f} MiB → {remote_path}",
+        f"[SSH] Streaming {source.name}: {size / 1048576:.1f} MiB → {remote_path}",
+    ))
+    with source.open("rb") as fh:
+        proc = subprocess.Popen(argv, stdin=fh, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            stdout, stderr = proc.communicate()
+            detail = stderr.decode("utf-8", errors="replace")[-4000:].strip()
+            raise Error("тайм-аут передачи файла по SSH" + (f"\nПоследний вывод SSH:\n{detail}" if detail else ""))
+    out = stdout.decode("utf-8", errors="replace")
+    err = stderr.decode("utf-8", errors="replace")
+    if out.strip():
+        _write_session_only(f"[SSH-BINARY-UPLOAD] host={host} remote={remote_path}\n{out}")
+    if err.strip():
+        _write_session_only(f"[SSH-BINARY-UPLOAD-STDERR] host={host} remote={remote_path}\n{err}")
+    if proc.returncode:
+        detail = err[-6000:].strip() or out[-6000:].strip()
+        raise Error(
+            f"передача файла по SSH завершилась с кодом {proc.returncode}"
+            + (f"\nПоследний вывод SSH:\n{detail}" if detail else "")
+        )
+    expected = sha_file(source)
+    if str(size) not in out or expected not in out:
+        raise Error(tr(
+            "размер или SHA256 переданного файла не совпал",
+            "uploaded file size or SHA256 did not match",
+        ))
+    print(tr("[ГОТОВО] Файл передан и проверен SHA256.", "[READY] File uploaded and SHA256 verified."))
+    return proc.returncode, out
+
+
 def scp_executable() -> str:
     exe = shutil.which("scp")
     if exe:
@@ -4919,8 +5096,8 @@ def scp_copy_to_recovery(host: str, source: Path, remote_path: str, timeout: int
         ])
     argv.extend([str(source), f"root@{host}:{remote_path}"])
     print(tr(
-        f"[SCP] Копирую {source.name}: {source.stat().st_size / 1048576:.1f} MiB в оперативную память системы восстановления...",
-        f"[SCP] Copying {source.name}: {source.stat().st_size / 1048576:.1f} MiB into recovery-system memory with legacy SCP...",
+        f"[SCP] Копирую {source.name}: {source.stat().st_size / 1048576:.1f} MiB в /tmp роутера...",
+        f"[SCP] Copying {source.name}: {source.stat().st_size / 1048576:.1f} MiB into router /tmp with legacy SCP...",
     ))
     proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
     started=time.time(); last=-15
@@ -8509,7 +8686,7 @@ def _synthesize_bootrom_backup(destination: Path, family: str, chunk_files: list
 
         metadata = {
             "format": "medveflasher-bootrom-backup-v1",
-            "kit_version": APP_VERSION,
+            "kit_version": _current_kit_version(),
             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "device_family": family,
             "model": "Nokia XG-040G-MD" if family == "md" else "Nokia XG-040G-MF",
@@ -8539,6 +8716,135 @@ def _synthesize_bootrom_backup(destination: Path, family: str, chunk_files: list
         return metadata
     finally:
         raw_tmp.unlink(missing_ok=True)
+
+
+
+def _finalize_raw_bootrom_backup(
+    destination: Path,
+    chunk_files: list[Path],
+    source_info: dict,
+    source_system: str,
+    source_layout: str,
+) -> dict:
+    """Finalize an exact physical all_flash capture without inventing stock partitions."""
+    full_gz = destination / "mtd0_all_flash.bin.gz"
+    with full_gz.open("wb") as out:
+        for chunk in chunk_files:
+            with chunk.open("rb") as fh:
+                shutil.copyfileobj(fh, out, 1024 * 1024)
+    full_size, full_sha = _gzip_raw_info(full_gz)
+    if full_size != RAW_NAND_SPAN:
+        raise Error(f"BootROM raw all_flash: размер {full_size}, ожидается {RAW_NAND_SPAN}")
+
+    raw_tmp = destination / ".mtd0-all-flash.raw.part"
+    try:
+        with gzip.open(full_gz, "rb") as src, raw_tmp.open("wb") as out:
+            shutil.copyfileobj(src, out, 1024 * 1024)
+        if raw_tmp.stat().st_size != RAW_NAND_SPAN:
+            raise Error("внутренняя ошибка сборки raw all_flash")
+
+        # For the known native UBI layout expose convenient derived views, but
+        # keep mtd0_all_flash.bin.gz authoritative for exact recovery/forensics.
+        if source_layout == "OPENWRT_UBI":
+            _gzip_slice(raw_tmp, 0x00000000, 0x00020000, destination / "mtd1_bl2.bin.gz")
+            _gzip_slice(raw_tmp, 0x00020000, 0x0FFE0000, destination / "mtd2_ubi.bin.gz")
+            write_text(
+                destination / "proc_mtd.txt",
+                'dev:    size   erasesize  name\n'
+                'mtd0: 10000000 00020000 "all_flash"\n'
+                'mtd1: 00020000 00020000 "bl2"\n'
+                'mtd2: 0ffe0000 00020000 "ubi"\n',
+            )
+
+        metadata = {
+            "format": "ursusflasher-raw-bootrom-backup-v1",
+            "kit_version": _current_kit_version(),
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "model": "Nokia XG-040G-MD",
+            "soc": "AN7581",
+            "source_system": source_system or "UNKNOWN",
+            "source_layout": source_layout or "UNKNOWN",
+            "capture": "BootROM -> XMODEM RAM U-Boot -> rdinit=/bin/sh -> read-only /dev/mtd0 chunks -> TFTP",
+            "nand_writes": False,
+            "authoritative_image": full_gz.name,
+            "all_flash_size": full_size,
+            "all_flash_sha256": full_sha,
+            "recovery_probe": source_info,
+            "chunks": [path.name for path in chunk_files],
+        }
+        write_text(destination / "RAW_BACKUP.json", json.dumps(metadata, ensure_ascii=False, indent=2) + "\n")
+        write_text(destination / "BACKUP_COMPLETE", "Nokia MD exact raw BootROM read-only backup complete\n")
+
+        sums: list[str] = []
+        for path in sorted(
+            x for x in destination.iterdir()
+            if x.is_file() and x.name != "SHA256SUMS.txt" and not x.name.startswith(".")
+        ):
+            sums.append(f"{sha_file(path)}  {path.name}")
+        write_text(destination / "SHA256SUMS.txt", "\n".join(sums) + "\n")
+        verify_raw_bootrom_backup(destination)
+        return metadata
+    finally:
+        raw_tmp.unlink(missing_ok=True)
+
+
+def verify_raw_bootrom_backup(directory: Path) -> dict:
+    """Validate an exact BootROM physical-NAND backup produced by item 7."""
+    directory = Path(directory)
+    meta_path = directory / "RAW_BACKUP.json"
+    sums_path = directory / "SHA256SUMS.txt"
+    complete = directory / "BACKUP_COMPLETE"
+    if not meta_path.is_file() or not sums_path.is_file() or not complete.is_file():
+        raise Error("raw backup неполон: нужны RAW_BACKUP.json, SHA256SUMS.txt и BACKUP_COMPLETE")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise Error(f"RAW_BACKUP.json повреждён: {exc}") from exc
+    if meta.get("format") != "ursusflasher-raw-bootrom-backup-v1":
+        raise Error("неизвестный формат RAW_BACKUP.json")
+    if meta.get("model") != "Nokia XG-040G-MD" or meta.get("soc") != "AN7581":
+        raise Error("raw backup не относится к Nokia XG-040G-MD / AN7581")
+    if meta.get("nand_writes") is not False:
+        raise Error("RAW_BACKUP.json не подтверждает read-only capture")
+
+    rows = [line.strip() for line in sums_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if not rows:
+        raise Error("SHA256SUMS.txt пуст")
+    for row in rows:
+        try:
+            digest, name = row.split(None, 1)
+        except ValueError as exc:
+            raise Error(f"неверная строка SHA256SUMS.txt: {row}") from exc
+        name = name.strip()
+        if name.startswith("*"):
+            name = name[1:]
+        if Path(name).name != name:
+            raise Error(f"недопустимый путь в SHA256SUMS.txt: {name}")
+        path = directory / name
+        if not path.is_file():
+            raise Error(f"SHA256SUMS.txt ссылается на отсутствующий файл: {name}")
+        if sha_file(path) != digest.lower():
+            raise Error(f"SHA256 не совпал: {name}")
+
+    full_name = str(meta.get("authoritative_image") or "mtd0_all_flash.bin.gz")
+    full = directory / full_name
+    if not full.is_file():
+        raise Error(f"отсутствует authoritative raw image: {full_name}")
+    full_size, full_sha = _gzip_raw_info(full)
+    if full_size != RAW_NAND_SPAN or int(meta.get("all_flash_size", -1)) != RAW_NAND_SPAN:
+        raise Error(f"raw all_flash имеет размер {full_size}, ожидается {RAW_NAND_SPAN}")
+    if full_sha != str(meta.get("all_flash_sha256", "")).lower():
+        raise Error("SHA256 raw all_flash не совпал с RAW_BACKUP.json")
+
+    if meta.get("source_layout") == "OPENWRT_UBI":
+        for name, expected in (("mtd1_bl2.bin.gz", 0x20000), ("mtd2_ubi.bin.gz", 0x0FFE0000)):
+            path = directory / name
+            if not path.is_file():
+                raise Error(f"OPENWRT_UBI backup не содержит {name}")
+            size, _digest = _gzip_raw_info(path)
+            if size != expected:
+                raise Error(f"{name}: размер {size}, ожидается {expected}")
+    return meta
 
 
 def _ram_shell_send_line(serial_port: RecoverySerial, line: str) -> None:
@@ -9096,10 +9402,12 @@ def _probe_backup_recovery(serial_port: RecoverySerial, log, router_ip: str, loc
     return {"model": expected_model, "transport": "UART shell + TFTP PUT", "raw_probe": text[-5000:]}
 
 
-def _capture_bootrom_chunks(serial_port: RecoverySerial, log, router_ip: str, local_ip: str, destination: Path, port: int = BOOTROM_BACKUP_TFTP_PORT) -> list[Path]:
+def _capture_bootrom_chunks(serial_port: RecoverySerial, log, router_ip: str, local_ip: str, destination: Path, port: int = BOOTROM_BACKUP_TFTP_PORT, *, capture_span: int = STOCK_RESTORE_SPAN) -> list[Path]:
     destination.mkdir(parents=True, exist_ok=True)
+    if capture_span <= 0 or capture_span % 0x20000:
+        raise Error(f"неверный размер BootROM capture: {capture_span}")
     chunk_blocks = UBOOT_RESTORE_CHUNK_SIZE // 0x20000
-    total_blocks = STOCK_RESTORE_SPAN // 0x20000
+    total_blocks = capture_span // 0x20000
     chunks: list[Path] = []
     index = 0
     start_block = 0
@@ -9210,37 +9518,40 @@ def _capture_bootrom_chunks(serial_port: RecoverySerial, log, router_ip: str, lo
     return chunks
 
 
-def bootrom_backup_wizard() -> None:
-    verify_kit()
+def bootrom_backup_wizard(*, source_system: str = "UNKNOWN", source_layout: str = "UNKNOWN") -> None:
+    profile = backup_recovery_dependency_preflight()
+    family = "md"
     print(tr("\n=== Read-only backup через BootROM/UART ===", "\n=== Read-only backup through BootROM/UART ==="))
+    print(tr("[ЦЕЛЬ] Nokia XG-040G-MD / Airoha AN7581", "[TARGET] Nokia XG-040G-MD / Airoha AN7581"))
     print(tr(
         "Режим не выполняет erase/write/saveenv. Reset используется только для входа в BootROM; preloader, U-Boot и минимальная recovery shell работают из RAM.",
         "This mode never runs erase/write/saveenv. Reset is used only to enter BootROM; preloader, U-Boot, and the minimal recovery shell run from RAM.",
     ))
+    if source_system != "UNKNOWN" or source_layout != "UNKNOWN":
+        print(tr(
+            f"[ИСТОЧНИК] система={source_system}; разметка={source_layout}",
+            f"[SOURCE] system={source_system}; layout={source_layout}",
+        ))
     transition_lan_policy_notice()
-    print(tr("1 — Nokia XG-040G-MD / AN7581", "1 — Nokia XG-040G-MD / AN7581"))
-    print(tr("2 — Nokia XG-040G-MF / AN7583", "2 — Nokia XG-040G-MF / AN7583"))
-    model_choice = input(tr("Модель [1/2]: ", "Model [1/2]: ")).strip()
-    if model_choice == "1": family = "md"
-    elif model_choice == "2": family = "mf"
-    else: raise Error(tr("неверная модель", "invalid model selection"))
-    profile = recovery_profile_for_family(family)
-    recovery_dependency_preflight(require_ssh=False)
     ports = list_serial_ports()
     if ports:
         print(tr("Обнаруженные UART-порты:", "Detected UART ports:"))
-        for index, item in enumerate(ports, 1): print(f"  {index}. {item}")
+        for index, item in enumerate(ports, 1):
+            print(f"  {index}. {item}")
     entered = input(tr("UART-порт или номер в списке: ", "UART port or list number: ")).strip()
-    if entered.isdigit() and ports and 1 <= int(entered) <= len(ports): uart_port = ports[int(entered) - 1]
-    else: uart_port = entered.upper() if os.name == "nt" else entered
-    if not uart_port: raise Error(tr("UART-порт не указан", "UART port was not specified"))
+    if entered.isdigit() and ports and 1 <= int(entered) <= len(ports):
+        uart_port = ports[int(entered) - 1]
+    else:
+        uart_port = entered.upper() if os.name == "nt" else entered
+    if not uart_port:
+        raise Error(tr("UART-порт не указан", "UART port was not specified"))
     probe_serial_port(uart_port)
     local_ip = input(tr("Статический IP компьютера [192.168.1.254]: ", "Static PC IP [192.168.1.254]: ")).strip() or "192.168.1.254"
     router_ip = input(tr("Временный IP recovery [192.168.1.1]: ", "Temporary recovery IP [192.168.1.1]: ")).strip() or "192.168.1.1"
     port_text = input(tr(f"UDP-порт TFTP backup [{BOOTROM_BACKUP_TFTP_PORT}]: ", f"Backup TFTP UDP port [{BOOTROM_BACKUP_TFTP_PORT}]: ")).strip()
     port = int(port_text) if port_text else BOOTROM_BACKUP_TFTP_PORT
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    default_dest = WORK / "backups" / f"nokia-{family}-bootrom-backup-{stamp}"
+    default_dest = WORK / "backups" / f"nokia-md-bootrom-backup-{stamp}"
     raw_dest = input(tr(f"Каталог backup [{default_dest}]: ", f"Backup directory [{default_dest}]: ")).strip().strip('"')
     destination = Path(raw_dest).expanduser() if raw_dest else default_dest
     destination.mkdir(parents=True, exist_ok=True)
@@ -9253,20 +9564,39 @@ def bootrom_backup_wizard() -> None:
                 "UART is open. Hold Reset and power on Nokia — UART output is shown live; Press x / C is detected automatically, no Enter is required.",
             ))
             wait_bootrom_xmodem(serial_port, log, "preloader", discard_stale=False)
-            xmodem_send(serial_port, Path(profile["preloader"]), f"OpenWrt {profile['soc']} preloader (RAM)", log)
+            xmodem_send(serial_port, Path(profile["preloader"]), "OpenWrt AN7581 preloader (RAM)", log)
             wait_bootrom_xmodem(serial_port, log, "BL31 + U-Boot FIP")
-            xmodem_send(serial_port, Path(profile["fip"]), f"RC18 RECOVERY_SAFE {profile['soc']} BL31 + U-Boot FIP (RAM)", log)
+            xmodem_send(serial_port, Path(profile["fip"]), "RC18 RECOVERY_SAFE AN7581 BL31 + U-Boot FIP (RAM)", log)
             if wait_uboot_prompt(serial_port, log) != "prompt":
                 raise Error("для read-only backup требуется захваченное приглашение RAM U-Boot")
             prove_recovery_safe_uboot(serial_port, log)
             listing = uboot_command(serial_port, log, "mtd list", timeout=60).lower()
-            required = (b"block size: 0x20000 bytes", b'0x000000000000-0x000000020000 : "bl2"', b'0x000000020000-0x000010000000 : "ubi"')
-            if not all(x in listing for x in required):
+            required = (
+                b"block size: 0x20000 bytes",
+                b'0x000000000000-0x000000020000 : "bl2"',
+                b'0x000000020000-0x000010000000 : "ubi"',
+            )
+            if not all(item in listing for item in required):
                 raise Error("RAM U-Boot не подтвердил NAND 256 MiB / erase 0x20000 / bl2+ubi; backup запрещён")
             _boot_backup_recovery_fit(serial_port, log, local_ip, router_ip, profile)
             probe = _probe_backup_recovery(serial_port, log, router_ip, local_ip, family, port)
-            chunks = _capture_bootrom_chunks(serial_port, log, router_ip, local_ip, destination, port)
-            metadata = _synthesize_bootrom_backup(destination, family, chunks, probe)
+
+            stock_like = source_layout in ("NOKIA_STOCK", "STOCK")
+            capture_span = STOCK_RESTORE_SPAN if stock_like else RAW_NAND_SPAN
+            print(tr(
+                f"[BACKUP] read-only capture: {capture_span / 1048576:.1f} MiB из /dev/mtd0; запись NAND запрещена.",
+                f"[BACKUP] read-only capture: {capture_span / 1048576:.1f} MiB from /dev/mtd0; NAND writes are forbidden.",
+            ))
+            chunks = _capture_bootrom_chunks(
+                serial_port, log, router_ip, local_ip, destination, port,
+                capture_span=capture_span,
+            )
+            if stock_like:
+                metadata = _synthesize_bootrom_backup(destination, family, chunks, probe)
+            else:
+                metadata = _finalize_raw_bootrom_backup(
+                    destination, chunks, probe, source_system, source_layout,
+                )
             print(tr(
                 f"[OK] BootROM backup готов: {destination}\nSHA256 all_flash: {metadata['all_flash_sha256']}",
                 f"[OK] BootROM backup completed: {destination}\nall_flash SHA256: {metadata['all_flash_sha256']}",
