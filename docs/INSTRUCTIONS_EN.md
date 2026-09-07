@@ -107,4 +107,6 @@ WRITE_FAILED         the write or reset did not complete
 
 Every destructive action additionally requires an exact confirmation from the page — `INSTALL-UBI`, `INSTALL-OPENWRT-STOCK-LAYOUT`, `UPDATE-URSUSBOOT`, `RESET-OPENWRT-SETTINGS`, `REBOOT`.
 
-**Known behaviour:** the reboot button answers `REBOOTING`, but the actual reset runs after the connection closes. If the browser holds the connection open the router may stay powered on; power-cycle it by hand. In the UART log the successful path is marked `URSUS_UBI_MIGRATION_OPERATOR_REBOOT`.
+**Known behaviour:** the reboot button answers `REBOOTING`, but in `0.1.0-alpha5-UBIUX1` the actual reset runs only after the connection closes. If the browser holds it open the router stays powered on; power-cycle it by hand. In the UART log the successful path is marked `URSUS_UBI_MIGRATION_OPERATOR_REBOOT`.
+
+A fix is built as `0.1.0-alpha5-UBIUX1-WEBREBOOT1`: the full response is queued first, then a 500 ms grace period runs, after which the reset happens regardless of the browser. The earlier fast path is kept. The candidate sits in `payloads/md/ursusboot/` and is **not yet verified on hardware** — the procedure is in `WEBREBOOT1_TEST_RU.md`.
