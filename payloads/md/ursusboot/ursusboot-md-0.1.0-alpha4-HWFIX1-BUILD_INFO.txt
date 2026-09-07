@@ -1,0 +1,26 @@
+UrsusBoot 0.1.0-alpha4-HWFIX1
+Target: Nokia XG-040G-MD / Airoha AN7581
+Build lineage: later alpha4 source tree, repacked into hardware-proven alpha4 LZMAFIX1 FIP container
+Toolchain: OpenWrt aarch64-openwrt-linux-musl GCC 14.4.0
+
+Policy/config deltas verified for HWFIX1:
+CONFIG_CONSOLE_RECORD=y
+CONFIG_NET_LWIP=y
+CONFIG_PROT_TCP_LWIP=y
+CONFIG_CMD_BOOTMENU=n
+CONFIG_AUTOBOOT_MENU_SHOW=n
+bootcmd=ursusdispatch
+HELD_AT_BOOT debounce=750ms retained
+
+Runtime fixes/features present:
+URSUS_WEB_ALREADY_RUNNING owner=active action=noop
+URSUS_NET_ETHERNET_INACTIVE action=clean-stop
+console capture selftest compiled with console recorder
+later staged UBI update / extended status tree
+LED lookup ret diagnostics and honest steady-red status
+
+Artifacts:
+u-boot.bin size=939736 SHA256=947e44618a19f6c4d0e2c3b1148500c294a5a472a3c58e68ffbc2abc3237a038
+u-boot.lzma size=322811 SHA256=46c8cfc3e1d7a0070a1a9266f2389c7bd9f21ee9fe87dc96b55bab49ae57648b
+update.fip size=503808 SHA256=f07245f705227e981260984a63572f9ddee7bc0a8f482c353e2e278ff2bfb04f CRC32=dd0843dd
+Required hardware-proven BL2 CRC32=9f7bf316 SHA256=6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d

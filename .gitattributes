@@ -1,20 +1,23 @@
-# Переводы строк зафиксированы здесь, а не оставлены на усмотрение локального
-# core.autocrlf: SHA256SUMS покрывает весь поставляемый комплект, поэтому байты
-# файлов должны быть одинаковыми на любой машине, где собирается релиз.
-
-# По умолчанию: LF и в репозитории, и в рабочей копии, на всех платформах.
+# SHA256SUMS is computed over LF bytes, so the checkout has to reproduce them
+# on every platform. Without this default, everything not named below follows
+# the client's core.autocrlf: on Windows that rewrites 34 manifest files,
+# including VERSION, both workflow YAMLs, the OpenWrt patch and SHA256SUMS
+# itself, and `scripts/verify_repo.py` then fails on a clean clone.
 * text=auto eol=lf
 
-# *.cmd здесь — это две разные сущности с общим суффиксом, и обе остаются LF.
-# START.cmd запускает cmd.exe, который LF переваривает; а data/payloads/**/ursus_*.cmd
-# это командные скрипты tcboot, которые tcboot_builder зашивает в слоты BL33.
-# CRLF в них сдвинул бы содержимое слота и разошёлся бы с SHA256SUMS комплекта.
-*.cmd text eol=lf
+*.cmd text eol=crlf
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.bin binary
+*.itb binary
+*.fip binary
+*.lzma binary
 
-# Прошивочные payload и образы: байт в байт, никакой нормализации.
-# Ошибка здесь означает испорченный tcboot в mtd0, а не кривой diff.
-*.bin           -text
-*.itb           -text
-*.fip           -text
-*.zip           -text
-*.zip.part-*    -text
+# Archives and build outputs: never normalized, whatever git guesses.
+*.zst binary
+*.bz2 binary
+*.gz binary
+*.zip binary
+*.tar binary

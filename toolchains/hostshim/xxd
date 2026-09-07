@@ -1,0 +1,3 @@
+#!/bin/sh
+: "${URSUS_SDK_ROOT:?URSUS_SDK_ROOT is not set}"
+exec perl "$URSUS_SDK_ROOT/scripts/xxdi.pl" "$@"

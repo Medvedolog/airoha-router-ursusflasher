@@ -1,0 +1,296 @@
+{
+  "version": 9,
+  "layouts": {
+    "STOCK": {
+      "ru": "Заводская прошивка Nokia",
+      "en": "Nokia factory firmware"
+    },
+    "NOKIA_STOCK": {
+      "ru": "Заводская прошивка Nokia",
+      "en": "Nokia factory firmware"
+    },
+    "OPENWRT_UBI": {
+      "ru": "OpenWrt с разметкой UBI",
+      "en": "OpenWrt with UBI layout"
+    },
+    "OPENWRT_STOCK_LAYOUT": {
+      "ru": "OpenWrt в заводской разметке",
+      "en": "OpenWrt in factory layout"
+    },
+    "OPENWRT_FACTORY": {
+      "ru": "OpenWrt в заводской разметке",
+      "en": "OpenWrt in factory layout"
+    },
+    "BROKEN_TRANSITION": {
+      "ru": "Незавершённый переход разметки",
+      "en": "Interrupted layout transition"
+    },
+    "UNKNOWN": {
+      "ru": "Неизвестное состояние разметки",
+      "en": "Unknown layout state"
+    }
+  },
+  "expert_actions": {
+    "install_openwrt": {
+      "number": 1,
+      "ru": "Установить OpenWrt",
+      "en": "Install OpenWrt"
+    },
+    "install_or_repair_bootloader": {
+      "number": 2,
+      "ru": "Установить или переустановить загрузчик",
+      "en": "Install or repair the bootloader"
+    },
+    "custom_openwrt": {
+      "number": 3,
+      "ru": "Записать пользовательскую прошивку OpenWrt",
+      "en": "Flash a custom OpenWrt image"
+    },
+    "update_bootloader": {
+      "number": 4,
+      "ru": "Обновить загрузчик",
+      "en": "Update the bootloader"
+    },
+    "recover_bootloader": {
+      "number": 5,
+      "ru": "Восстановить загрузчик",
+      "en": "Recover the bootloader"
+    },
+    "restore_nokia": {
+      "number": 6,
+      "ru": "Восстановить заводскую прошивку Nokia",
+      "en": "Restore Nokia factory firmware"
+    },
+    "full_backup": {
+      "number": 7,
+      "ru": "Создать полную копию flash-памяти",
+      "en": "Capture a complete flash backup"
+    },
+    "validate_backup": {
+      "number": 8,
+      "ru": "Проверить резервную копию",
+      "en": "Validate a backup"
+    },
+    "disaster_kit": {
+      "number": 9,
+      "ru": "Собрать комплект восстановления",
+      "en": "Build a recovery kit"
+    },
+    "capabilities": {
+      "number": 10,
+      "ru": "Доступные операции для устройства",
+      "en": "What this router can do"
+    },
+    "flash_diagnostics": {
+      "number": 11,
+      "ru": "Flash-память, разметка и сбойные блоки",
+      "en": "Flash memory, layout and bad blocks"
+    },
+    "package_files": {
+      "number": 12,
+      "ru": "Проверить файлы комплекта",
+      "en": "Check package files"
+    }
+  },
+  "contract": "v5.31 stable task-oriented EXPERT menu; STATEUI5 normalizes Russian operator terminology without changing machine action keys or write semantics; ! means persistent-write-capable only; applicability is backend-structured",
+  "systems": {
+    "NOKIA_STOCK": {
+      "ru": "Заводская прошивка Nokia",
+      "en": "Nokia factory firmware"
+    },
+    "OPENWRT_UBI": {
+      "ru": "OpenWrt с разметкой UBI",
+      "en": "OpenWrt with UBI layout"
+    },
+    "OPENWRT_FACTORY": {
+      "ru": "OpenWrt в заводской разметке",
+      "en": "OpenWrt in factory layout"
+    },
+    "RECOVERY": {
+      "ru": "Режим восстановления UrsusBoot",
+      "en": "UrsusBoot recovery mode"
+    },
+    "UNKNOWN": {
+      "ru": "Не определена",
+      "en": "Not determined"
+    },
+    "STOCK": {
+      "ru": "Заводская прошивка Nokia",
+      "en": "Nokia factory firmware"
+    },
+    "OPENWRT_STOCK_LAYOUT": {
+      "ru": "OpenWrt в заводской разметке",
+      "en": "OpenWrt in factory layout"
+    },
+    "BROKEN_TRANSITION": {
+      "ru": "Незавершённый переход разметки",
+      "en": "Interrupted layout transition"
+    }
+  },
+  "bootloaders": {
+    "URSUSBOOT": {
+      "ru": "UrsusBoot",
+      "en": "UrsusBoot"
+    },
+    "STOCK_TCBOOT": {
+      "ru": "Заводской загрузчик Nokia (tcboot)",
+      "en": "Nokia factory bootloader (tcboot)"
+    },
+    "UNKNOWN": {
+      "ru": "Не определён",
+      "en": "Not determined"
+    },
+    "TCBOOT": {
+      "ru": "Заводской загрузчик Nokia (tcboot)",
+      "en": "Nokia factory bootloader (tcboot)"
+    }
+  },
+  "backup_states": {
+    "NOT_FOUND": {
+      "ru": "не найдена",
+      "en": "not found"
+    },
+    "FOUND_UNVERIFIED": {
+      "ru": "найдена, не проверена",
+      "en": "found, not validated"
+    },
+    "VERIFIED": {
+      "ru": "проверена",
+      "en": "validated"
+    },
+    "RESTORE_READY": {
+      "ru": "готова к восстановлению",
+      "en": "ready for restore"
+    },
+    "UNKNOWN": {
+      "ru": "не определено",
+      "en": "not determined"
+    },
+    "FOUND": {
+      "ru": "найдена, не проверена",
+      "en": "found, not validated"
+    }
+  },
+  "probe_states": {
+    "COMPLETE": {
+      "ru": "данные полные",
+      "en": "complete"
+    },
+    "PARTIAL": {
+      "ru": "данные неполные",
+      "en": "partial"
+    },
+    "FAILED": {
+      "ru": "проверка не удалась",
+      "en": "failed"
+    },
+    "UNKNOWN": {
+      "ru": "не определено",
+      "en": "not determined"
+    }
+  },
+  "write_states": {
+    "CLEAN": {
+      "ru": "нет незавершённых операций",
+      "en": "no unfinished operations"
+    },
+    "WRITE_STATE_UNKNOWN": {
+      "ru": "состояние записи неизвестно",
+      "en": "write state unknown"
+    },
+    "LEGACY_UNTRACKED": {
+      "ru": "не отслеживается в этой версии",
+      "en": "not tracked in this version"
+    },
+    "UNKNOWN": {
+      "ru": "не определено",
+      "en": "not determined"
+    }
+  },
+  "tri_bools": {
+    "TRUE": {
+      "ru": "есть",
+      "en": "yes"
+    },
+    "FALSE": {
+      "ru": "нет",
+      "en": "no"
+    },
+    "UNKNOWN": {
+      "ru": "не определён",
+      "en": "not determined"
+    }
+  },
+  "generic_values": {
+    "UNKNOWN": {
+      "ru": "не определено",
+      "en": "not determined"
+    }
+  },
+  "probe_reasons": {
+    "URSUS_MODEL_UNCONFIRMED": {
+      "ru": "UrsusBoot отвечает, но модель не подтверждена",
+      "en": "UrsusBoot responds, but the model was not confirmed"
+    },
+    "STOCK_MODEL_SOC_MISMATCH": {
+      "ru": "Заводской веб-интерфейс отвечает, но модель и SoC не совпали с XG-040G-MD / AN7581",
+      "en": "The factory web interface responds, but the model and SoC do not match XG-040G-MD / AN7581"
+    },
+    "OPENWRT_BOARD_LAYOUT_UNCONFIRMED": {
+      "ru": "OpenWrt отвечает по SSH, но модель платы и разметка не подтверждены",
+      "en": "OpenWrt responds over SSH, but the board model and layout were not confirmed"
+    },
+    "OPENWRT_ROOT_SSH_UNAVAILABLE": {
+      "ru": "OpenWrt отвечает по HTTP, но проверить доступ root по SSH не удалось",
+      "en": "OpenWrt responds over HTTP, but root access over SSH could not be checked"
+    },
+    "NO_NETWORK_ENDPOINT": {
+      "ru": "Роутер не отвечает ни по одному известному адресу",
+      "en": "The router does not respond on any known network endpoint"
+    },
+    "NETWORK_IDENTITY_AMBIGUOUS": {
+      "ru": "Устройство отвечает по сети, но определить его точно не удалось",
+      "en": "The device responds over the network, but it could not be identified unambiguously"
+    },
+    "UNKNOWN": {
+      "ru": "Причина не определена",
+      "en": "Reason not determined"
+    },
+    "EXECUTION_ENVIRONMENT_UNCONFIRMED": {
+      "ru": "OpenWrt подтверждена, но не удалось определить, запущена она из flash-памяти или из оперативной памяти",
+      "en": "OpenWrt was confirmed, but it was not possible to determine whether it is running from flash or RAM"
+    }
+  },
+  "execution_environments": {
+    "PERSISTENT_ROOT": {
+      "ru": "установленная OpenWrt во flash-памяти",
+      "en": "installed OpenWrt from flash"
+    },
+    "RAM_ROOT": {
+      "ru": "OpenWrt запущена из оперативной памяти",
+      "en": "OpenWrt running from RAM"
+    },
+    "UNKNOWN": {
+      "ru": "не определена",
+      "en": "not determined"
+    }
+  },
+  "methods": {
+    "AUTO_BOOTLOADER_INSTALL_REPAIR": {
+      "ru": "Подходящий способ определяется автоматически",
+      "en": "The applicable method is selected automatically"
+    },
+    "SSH_PERSISTENT_OPENWRT": {
+      "ru": "Через SSH из установленной OpenWrt",
+      "en": "Over SSH from installed OpenWrt"
+    },
+    "SSH_RAM_OPENWRT": {
+      "ru": "Через SSH из OpenWrt, запущенной из оперативной памяти",
+      "en": "Over SSH from OpenWrt running in RAM"
+    },
+    "TELNET_NOKIA_STOCK": {
+      "ru": "Через Telnet из запущенной заводской прошивки Nokia",
+      "en": "Over Telnet from Nokia factory firmware"
+    }
+  }
+}

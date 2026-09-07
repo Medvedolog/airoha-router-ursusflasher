@@ -1,19 +1,13 @@
 __pycache__/
 *.py[cod]
-.venv/
-venv/
-build/
+.dist/
 dist/
-bundle/
-
-# Рабочий каталог запуска: сессионные логи, персонализированный tcboot и снятые
-# STOCKSET-бэкапы остаются локальными, сам каталог должен существовать в комплекте.
-work/*
-!work/.gitkeep
+work/
+results/
 *.log
+.DS_Store
 
-# Поставляемые payload — data/payloads/**/*.bin, fw/*.itb — и SHA256SUMS лежат
-# в репозитории намеренно: релизный ZIP собирается из дерева, а CI сверяет
-# каждый байт по SHA256SUMS. Отдельного правила, отсекающего их, тут нет — иначе
-# каждый импорт пришлось бы протаскивать через `git add -f`, и однажды кто-нибудь
-# этого не сделает.
+# SHA256SUMS covers the FUDAN1 reproducible-build evidence logs, so the
+# blanket *.log rule above must not swallow them: a clone that cannot
+# satisfy its own manifest is worse than a slightly longer ignore file.
+!ursusboot/artifacts/*.log

@@ -1,0 +1,9 @@
+BUILD=PASS
+nt_off=0x27800
+nt_size=0x4f3c3
+nt_end=0x76bc3
+cert_first=0x77800
+checksum_off=0x7ac00
+fip_end=0x7b000
+physical_end=0x7b800
+sha256=ce43b56d86321ccb7657d2e9b7ddf58e811efc73927855bbb75e896c83b18600

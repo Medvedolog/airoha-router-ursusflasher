@@ -1,0 +1,20 @@
+UrsusBoot 0.1.0-alpha4-FUDAN1
+Target: Nokia XG-040G-MD / Airoha AN7581
+U-Boot: v2026.07
+OpenWrt baseline: 3d1645ee26d6a2e20be71d7fa1716721bac78e53
+Toolchain: OpenWrt GCC 14.4.0 r35906+7-3d1645ee26
+SOURCE_DATE_EPOCH: 1788446468 (2026-09-03 14:41:08 UTC)
+UIFIX1 baseline exact raw SHA256: 921d53f396bec54613c792e6a31388e5a12a481fdcf963875dda2fad86499a67
+Fudan upstream: openwrt/openwrt PR #24025, head c58a6187fe9fb77b1e691c642fccc7de6f4b2966
+Patches:
+  120-mtd-spinand-fmsh-add-support-for-FM25G01B-FM25G02B.patch
+  121-mtd-spinand-fmsh-fix-FM25G01B-FM25G02B-Quad-IO-read-dummy-cycles.patch
+Raw BL33: 948608 bytes, SHA256 a41a81a011e19d1498d5ff0773dfd6bf9bd4c56beb3e7a46ce4622a643a30703
+LZMA1EXT/no-EOPM: 324547 bytes, SHA256 450add116075477311cbf794da2541ddbdb33fb0c9eade39a47cf8d1fc0a81b7
+LZMA contract: prop=0x9b; lc=2 lp=2 pb=3; dict=1MiB; exact usize=948608
+NT_FW slot: 327680 bytes; margin: 3133 bytes
+FIP: 503808 bytes, SHA256 ce43b56d86321ccb7657d2e9b7ddf58e811efc73927855bbb75e896c83b18600, CRC32 27ee17f0
+FIP checksum: offset 0x7ac00, CRC32 beee65a2, SHA256 7e0dbb63163a9d5a8e6684e2197b8154ff97acaf32f6d87184238905f4c54a96
+Lineage: exact alpha3 FIP header and all entries except NT_FW/checksum byte-identical; Trusted Boot Firmware payload SHA256 07c9e1542a3de845055faa2244bbd07adc8c5a136811a61a0d678ec8fff5ee5e
+PXE/UBIFS/BOOTSTD: unchanged from UIFIX1; no SLIM required.
+Hardware status: FUDAN_UNVERIFIED_ON_HARDWARE; SkyHigh regression required.
