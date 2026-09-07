@@ -42,4 +42,11 @@ required = (
 for phrase in required:
     assert phrase in text, phrase
 
+# The full VERSION string is build identity: a hundred-odd characters of feature
+# flags that nobody can read back over the phone or spot a typo in. It belongs in
+# VERSION, where the tooling reads it, and not on the front page.
+version = (ROOT / 'VERSION').read_text(encoding='utf-8').strip()
+if '-' in version:
+    assert version not in text, 'full build string must not appear in README'
+
 print('README_RU_OPERATIONS_QA=PASS')
