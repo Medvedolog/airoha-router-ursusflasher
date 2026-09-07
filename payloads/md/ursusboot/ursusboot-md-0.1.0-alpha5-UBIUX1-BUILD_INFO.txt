@@ -6,8 +6,12 @@ Build date: 2026-09-07
 
 Runtime changes over alpha4-FUDAN1:
 - UrsusBoot Recovery accepts OPENWRT_STOCK_LAYOUT -> OPENWRT_UBI using the same Recovery-only migration backend as STOCK -> OPENWRT_UBI.
-- Web Recovery UBI update has Keep OpenWrt settings checkbox.
-- Web Recovery has Reset OpenWrt settings for UBI and stock-layout OpenWrt.
+- Web Recovery UBI update has a Keep OpenWrt settings checkbox. It is shown only when the
+  router is already in the UBI layout and the uploaded image is a UBI sysupgrade; on a
+  migration there are no settings to keep and the flag is forced to 0.
+- Web Recovery has a Reset OpenWrt settings button. It appears only when the current layout
+  is already OPENWRT_UBI or OPENWRT_STOCK_LAYOUT and no flash operation is running, so it is
+  not offered while installing from Nokia stock.
 - UART/U-Boot command: ursussettings reset.
 - Fresh/reset UBI rootfs_data uses MAX minus 16 free PEBs and persists rootfs_data_max for later OpenWrt sysupgrade.
 - UBI update automatically selects staged mode when headroom permits, otherwise direct Recovery-safe replacement; UrsusBoot Recovery remains available on interrupted direct replacement.
