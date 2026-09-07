@@ -20,6 +20,15 @@ Use **LAN2 or LAN3** for flashing.
 
 ## ONE-CLICK
 
+**ONE-CLICK always installs OpenWrt with the UBI layout.** The kit carries two images — one for UBI and one for the factory layout — but every ONE-CLICK path uses the UBI one and offers no choice.
+
+If you need the **factory layout**, do it manually in one of two ways:
+
+- **EXPERT item 3, "Записать пользовательскую прошивку OpenWrt"** — point it at the bundled `fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin`. The item accepts any `.bin`/`.itb`, the image class is detected automatically, and the write takes the factory-layout path.
+- **The UrsusBoot web UI** — upload the same file in Recovery and press "Install into factory layout".
+
+The transition is one-way: the factory layout can be installed from Nokia stock, but not from an already installed OpenWrt UBI — such an image is refused before any write.
+
 Run `START_ONECLICK.cmd` on Windows or `./START_ONECLICK.sh` on Linux/macOS.
 
 The flasher detects the current state first and then selects the transport.
