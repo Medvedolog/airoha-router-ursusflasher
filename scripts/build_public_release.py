@@ -16,6 +16,16 @@ KEEP_DOCS = {
 }
 
 
+def public_name(version: str) -> str:
+    """User-facing package name: the release number, not the build identity.
+
+    VERSION carries the full build string (feature flags and all). It belongs
+    inside the kit, where tooling reads it, and not in a filename someone has
+    to type, quote in a bug report or read out loud.
+    """
+    return f'UrsusFlasher-{version.split("-", 1)[0]}-PUBLIC-TEST'
+
+
 def prune_public_tree(root: Path) -> None:
     # Developer/test utilities are not needed to flash a router.
     shutil.rmtree(root / 'tools', ignore_errors=True)
@@ -68,7 +78,7 @@ def main() -> None:
 
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
-    name = f'UrsusFlasher-{version}-PUBLIC-TEST'
+    name = public_name(version)
 
     with tempfile.TemporaryDirectory() as td:
         tree = export_tree(Path(td) / name)

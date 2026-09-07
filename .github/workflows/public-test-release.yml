@@ -1,10 +1,14 @@
 name: Public test release - Nokia XG-040G-MD
 
+# The only workflow that publishes a release. The full repository kit is not
+# published: it carries SDK parts, build trees and engineering material that
+# nobody needs in order to flash a router.
+
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Test tag. Leave empty for test-v<VERSION>-run<RUN_NUMBER>"
+        description: "Test tag. Leave empty for test-v<RELEASE>-run<RUN_NUMBER>"
         required: false
         type: string
 
@@ -48,19 +52,24 @@ jobs:
           REQUESTED_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
+          # VERSION is the full build identity. Everything a person reads — the
+          # archive, the folder it unpacks to, the tag, the title — uses only the
+          # release number in front of the first dash.
           VERSION="$(tr -d '\r\n' < VERSION)"
+          RELEASE="${VERSION%%-*}"
           if [ -n "${REQUESTED_TAG:-}" ]; then
             TAG="$REQUESTED_TAG"
           else
-            TAG="test-v${VERSION}-run${GITHUB_RUN_NUMBER}"
+            TAG="test-v${RELEASE}-run${GITHUB_RUN_NUMBER}"
           fi
           case "$TAG" in
             test-*) ;;
             *) echo "Public test-release tag must start with test-" >&2; exit 2 ;;
           esac
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "asset=UrsusFlasher-${VERSION}-PUBLIC-TEST.zip" >> "$GITHUB_OUTPUT"
+          echo "asset=UrsusFlasher-${RELEASE}-PUBLIC-TEST.zip" >> "$GITHUB_OUTPUT"
 
       - name: Refuse to overwrite an existing release
         shell: bash
@@ -77,20 +86,69 @@ jobs:
       - name: Prepare release notes
         shell: bash
         env:
+          RELEASE: ${{ steps.meta.outputs.release }}
           VERSION: ${{ steps.meta.outputs.version }}
+          ASSET: ${{ steps.meta.outputs.asset }}
         run: |
+          set -euo pipefail
+          DIGEST="$(awk '{print $1; exit}' "dist-public/${ASSET}.sha256.txt")"
           cat > dist-public/RELEASE_NOTES_RU.md <<EOF
-          # UrsusFlasher TEST ${VERSION}
+          # UrsusFlasher ${RELEASE} — Nokia XG-040G-MD
 
-          **Публичная тестовая сборка для Nokia XG-040G-MD.**
+          Установка OpenWrt на Nokia XG-040G-MD. Нужен только Python 3 и кабель Ethernet.
 
-          Готовый комплект для запуска флешера и прошивки: необходимые boot/recovery payload, два OpenWrt sysupgrade-образа и пользовательская документация. SDK, toolchain/GCC, дерево исходников OpenWrt, внутренние инженерные документы, QA-архивы и self-test tools в asset не включаются.
+          ## С чего начать
 
-          Для прошивки рекомендуется использовать **LAN2 или LAN3**. LAN1 работает через отдельный PHY EN8811H; LAN4 в комплектной OpenWrt-сборке после загрузки назначается WAN.
+          Распакуйте архив и запустите из папки:
 
-          **FUDAN1 остаётся HW_TEST_REQUIRED до отдельного аппаратного acceptance-прогона.**
+          | | Windows | Linux / macOS |
+          |---|---|---|
+          | **Обычная установка** | \`START_ONECLICK.cmd\` | \`./START_ONECLICK.sh\` |
+          | **Ручной режим** | \`START_EXPERT.cmd\` | \`./START_EXPERT.sh\` |
 
-          Перед использованием сверяйте SHA256 прикреплённого ZIP.
+          Если вы просто хотите поставить OpenWrt — запускайте **ONE-CLICK**. Он сам определит,
+          в каком состоянии роутер (заводская Nokia, уже установленная OpenWrt или режим
+          восстановления), и выберет способ подключения.
+
+          **Подключайтесь в LAN2 или LAN3.** LAN1 идёт через отдельный чип и для перепрошивки
+          не годится, а LAN4 после загрузки OpenWrt становится WAN — и \`192.168.1.1\` по нему пропадёт.
+
+          ## Ручной режим: что когда запускать
+
+          \`START_EXPERT\` открывает меню. Пункты со знаком \`!\` пишут во flash-память.
+
+          | Пункт | Когда нужен |
+          |---|---|
+          | \`1\` Установить OpenWrt | то же, что ONE-CLICK, но каждый шаг подтверждаете вы |
+          | \`2\` Установить или обновить UrsusBoot | обновить загрузчик на уже работающем роутере |
+          | \`3\` Записать свою прошивку OpenWrt | поставить собственный образ вместо комплектного |
+          | \`5\` Восстановить загрузчик | роутер не включается; нужен USB-UART 3,3 В |
+          | \`7\` Создать полную копию flash | снять резервную копию до любых записей |
+          | \`8\` Проверить резервную копию | убедиться, что копия пригодна для восстановления |
+          | \`10\` Состояние устройства | посмотреть, что за роутер и что с ним сейчас можно |
+          | \`11\` Flash-память и разметка | разделы и сбойные блоки, только чтение |
+          | \`12\` Проверить файлы комплекта | сверить сам архив перед работой |
+
+          Пункты \`6\` и \`9\` в этой сборке ещё не реализованы.
+
+          ## Перед первой записью
+
+          Сделайте резервную копию (пункт \`7\`) и проверьте её (пункт \`8\`). Не выключайте
+          питание во время записи. Для аварийного восстановления понадобится USB-UART 3,3 В:
+          подключаются TX, RX и GND, **VCC не подключается**.
+
+          Подробности — в приложенных \`INSTRUCTIONS_RU.md\` и \`EMERGENCY_URSUSBOOT_RU.md\`.
+
+          > **Роутеры с NAND Fudan:** поддержка есть, но отдельный аппаратный acceptance-прогон
+          > ещё не завершён.
+
+          ## Проверка архива
+
+          \`\`\`text
+          ${DIGEST}
+          \`\`\`
+
+          Сборка: \`${VERSION}\`
           EOF
 
       - name: Publish GitHub prerelease
@@ -98,17 +156,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.meta.outputs.tag }}
-          VERSION: ${{ steps.meta.outputs.version }}
+          RELEASE: ${{ steps.meta.outputs.release }}
           ASSET: ${{ steps.meta.outputs.asset }}
         run: |
           set -euo pipefail
           gh release create "$TAG" \
             --target "$GITHUB_SHA" \
-            --title "UrsusFlasher TEST ${VERSION}" \
+            --title "UrsusFlasher ${RELEASE} — публичный тест" \
             --prerelease \
             --notes-file dist-public/RELEASE_NOTES_RU.md \
             "dist-public/${ASSET}" \
             "dist-public/${ASSET}.sha256.txt" \
             "docs/INSTRUCTIONS_RU.md" \
-            "docs/EMERGENCY_URSUSBOOT_RU.md" \
-            "docs/CHANGELOG_RU.md"
+            "docs/EMERGENCY_URSUSBOOT_RU.md"
