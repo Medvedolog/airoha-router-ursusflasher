@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "layouts": {
     "STOCK": {
       "ru": "Заводская прошивка Nokia",
@@ -78,8 +78,8 @@
     },
     "capabilities": {
       "number": 10,
-      "ru": "Доступные операции для устройства",
-      "en": "What this router can do"
+      "ru": "Состояние устройства и доступные операции",
+      "en": "Device state and available operations"
     },
     "flash_diagnostics": {
       "number": 11,
@@ -92,7 +92,7 @@
       "en": "Check package files"
     }
   },
-  "contract": "v5.31 stable task-oriented EXPERT menu; STATEUI5 normalizes Russian operator terminology without changing machine action keys or write semantics; ! means persistent-write-capable only; applicability is backend-structured",
+  "contract": "stable task-oriented EXPERT menu; STATEUI6 makes passive DeviceState informational and moves authorization to per-action preflight; ! means persistent-write-capable only",
   "systems": {
     "NOKIA_STOCK": {
       "ru": "Заводская прошивка Nokia",

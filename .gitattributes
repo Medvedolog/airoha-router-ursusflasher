@@ -1,23 +1,18 @@
-# SHA256SUMS is computed over LF bytes, so the checkout has to reproduce them
-# on every platform. Without this default, everything not named below follows
-# the client's core.autocrlf: on Windows that rewrites 34 manifest files,
-# including VERSION, both workflow YAMLs, the OpenWrt patch and SHA256SUMS
-# itself, and `scripts/verify_repo.py` then fails on a clean clone.
 * text=auto eol=lf
-
 *.cmd text eol=crlf
 *.sh text eol=lf
 *.py text eol=lf
 *.md text eol=lf
 *.json text eol=lf
-*.bin binary
-*.itb binary
-*.fip binary
-*.lzma binary
-
-# Archives and build outputs: never normalized, whatever git guesses.
-*.zst binary
-*.bz2 binary
-*.gz binary
-*.zip binary
-*.tar binary
+*.yml text eol=lf
+*.yaml text eol=lf
+*.patch text eol=lf
+*.bin -text
+*.itb -text
+*.fip -text
+*.lzma -text
+*.zst -text
+*.bz2 -text
+*.zip -text
+*.ko -text
+*.elf -text

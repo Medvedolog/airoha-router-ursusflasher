@@ -1,4 +1,4 @@
-# UrsusFlasher 0.2.51 — Nokia XG-040G-MD
+# UrsusFlasher 0.2.52 — Nokia XG-040G-MD
 
 Готовый комплект для установки OpenWrt, резервного копирования и восстановления Nokia XG-040G-MD на Airoha AN7581.
 

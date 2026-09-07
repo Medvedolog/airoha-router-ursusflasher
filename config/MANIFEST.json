@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "project": "UrsusFlasher",
-  "version": "0.2.51-md-alpha4-fudan1-stateui5-payloadrefresh1-rootfsmax2",
+  "version": "0.2.52-md-alpha4-fudan1-stateui6-actionpreflight1-payloadrefresh1-rootfsmax2",
   "build_date": "2026-09-06",
   "target": {
     "model": "Nokia XG-040G-MD",
@@ -10,11 +10,12 @@
   },
   "runtime": {
     "python": "3.x stdlib only",
-    "pip_required": false
+    "pip_required": false,
+    "policy": "STATEUI6 ACTIONPREFLIGHT1: passive DeviceState diagnostics no longer globally gate write-capable actions. Each action performs its own authoritative preflight and may request credentials when selected. FUDAN1, OpenWrt production sysupgrade payloads and service/recovery assets are unchanged from 0.2.51."
   },
   "orchestration": {
     "host_ui": "data/expert.py",
-    "policy": "STATEUI5 + PAYLOADREFRESH1. Russian operator terminology is normalized while machine contracts remain unchanged. DeviceState still distinguishes installed OpenWrt from RAM-root OpenWrt using actual mount topology. FUDAN1, OpenWrt production sysupgrade payloads, service/recovery assets and destructive writer backends remain unchanged from 0.2.50.",
+    "policy": "STATEUI6 ACTIONPREFLIGHT1. Passive DeviceState is informational in EXPERT; write authorization is resolved by each action preflight. SSH credentials may be requested only after an operation is selected.",
     "ursusboot_inputs": [
       "webfailsafe",
       "tftp",
@@ -29,8 +30,8 @@
     ],
     "one_key_password_prompts": false,
     "one_key_confirmation_tokens": false,
-    "running_openwrt_detection": "HTTP fingerprint -> root SSH; board/layout plus actual /,/rom,/overlay mount topology classify PERSISTENT_ROOT vs RAM_ROOT; unknown execution environment degrades DeviceState to PARTIAL",
-    "emergency_confirmation": "legacy destructive backend retained pending transaction refactor; no new confirmation ceremony added by 0.2.51 STATEUI5",
+    "running_openwrt_detection": "HTTP fingerprint plus non-interactive SSH probe for menu information; if root auth is not available in batch mode, the selected action may perform interactive root SSH authentication during its own preflight.",
+    "emergency_confirmation": "legacy destructive backend retained; no extra confirmation ceremony added by 0.2.52 STATEUI6",
     "recovery_user_instruction": "After a software reboot, wait for the router-wide LED reboot blink/restart cue, then immediately hold Reset through 2-short+3-long red flashes and steady red. If missed: power OFF, power ON, wait about 1 second, hold Reset 5-10 seconds until the same red sequence. Reset held before power-on is Airoha BootROM.",
     "bootrom_emergency_ursusboot": "EXPERT BootROM uses exact alpha3 preloader + alpha3 RAM installer + alpha3 emergency FIP/BL2. This emergency lineage is separate from the FUDAN1 production target.",
     "console_palette": "UrsusBoot WebFailsafe palette: amber #D99A4D / amber2 #C8873A / ink #F2E8DA / muted #A89179 / success #7CC493 / error #E8837A / UART-XMODEM-prompt sand #EFC079; no cyan/blue/magenta in main UI",
@@ -358,7 +359,7 @@
     "hostflow_rootfsmax2": "0.2.43-md-alpha4-hwfix3-rootfsmax2"
   },
   "baseline": {
-    "policy": "STATEUI5 terminology/readability refinement over STATEUI4 + PAYLOADREFRESH1; firmware payloads and legacy write backends are unchanged.",
-    "emergency_confirmation": "legacy destructive backend retained pending transaction refactor; no new confirmation ceremony added by 0.2.51"
+    "policy": "STATEUI6 ACTIONPREFLIGHT1 over 0.2.51 STATEUI5; operator diagnostics are informational, while destructive authorization is action-local. Firmware payloads are unchanged.",
+    "emergency_confirmation": "legacy destructive backend retained; no extra confirmation ceremony added by 0.2.52"
   }
 }

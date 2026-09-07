@@ -9,7 +9,7 @@ assert a["install_or_repair_bootloader"]["ru"] == "Установить или �
 assert a["custom_openwrt"]["ru"] == "Записать пользовательскую прошивку OpenWrt"
 assert a["restore_nokia"]["ru"] == "Восстановить заводскую прошивку Nokia"
 assert a["full_backup"]["ru"] == "Создать полную копию flash-памяти"
-assert a["capabilities"]["ru"] == "Доступные операции для устройства"
+assert a["capabilities"]["ru"] == "Состояние устройства и доступные операции"
 expert = (ROOT / "data/expert.py").read_text(encoding="utf-8")
 network = (ROOT / "data/network_guidance.py").read_text(encoding="utf-8")
 assert "! — операция может выполнять запись во flash-память (NAND)" in expert

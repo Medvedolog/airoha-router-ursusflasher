@@ -297,15 +297,7 @@ def main() -> int:
         state = ds.probe_device_state(host)
         app = ds.action_applicability(state)
 
-        ui.banner(
-            "UrsusFlasher EXPERT",
-            version=version,
-            subtitle=tr(
-                "STATEUI5 + PAYLOADREFRESH1. Русская терминология интерфейса уточнена; FUDAN1 и образы OpenWrt не изменены.",
-                "STATEUI5 + PAYLOADREFRESH1. Russian operator terminology is refined; FUDAN1 and OpenWrt payloads are unchanged.",
-            ),
-        )
-        print_state_header(state)
+        ui.banner("UrsusFlasher EXPERT", version=version)
 
         ui.section(tr("Установить", "Install"))
         _show_action(1, app, "полный сценарий: резервная копия → UrsusBoot → OpenWrt",

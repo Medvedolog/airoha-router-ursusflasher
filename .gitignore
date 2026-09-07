@@ -7,7 +7,4 @@ results/
 *.log
 .DS_Store
 
-# SHA256SUMS covers the FUDAN1 reproducible-build evidence logs, so the
-# blanket *.log rule above must not swallow them: a clone that cannot
-# satisfy its own manifest is worse than a slightly longer ignore file.
 !ursusboot/artifacts/*.log
