@@ -11,12 +11,10 @@ import ui_terms as terms
 
 CHUNK = 0x10000
 
-# 0.2.44 UIFIX1/ROOTFSMAX2 policy. HWFIX3 migration itself creates the historical
-# 1693-LEB empty rootfs_data volume and proves that exact geometry before BL2
-# commit. ONE-CLICK then runs this host-side post-migration step *before the
-# first OpenWrt boot*: recreate only that still-empty volume so all allocatable
-# UBI space except a small explicit 16-PEB operational headroom belongs to
-# OpenWrt. UBI's own bad-block reserve is separate and is never consumed here.
+# alpha5-UBIUX1 owns fresh rootfs_data sizing in UrsusBoot itself. Migration
+# and explicit settings reset keep 16 free PEBs and persist rootfs_data_max so
+# later OpenWrt sysupgrade recreates the same overlay size. The legacy helper
+# below is retained only for backward compatibility with alpha4 Recovery.
 ROOTFS_MIGRATION_LEBS = 1693
 ROOTFS_KEEP_FREE_PEBS = 16
 ROOTFS_LEGACY_REQUEST = 0x0CD00000
@@ -198,15 +196,15 @@ def update_bootloader(host: str, fip: Path, *, confirm=True) -> dict:
     return _poll(host, bootloader=True)
 
 
-def update_firmware(host: str, image: Path, *, confirm=True, preloader: Path | None = None) -> dict:
+def update_firmware(host: str, image: Path, *, confirm=True, preloader: Path | None = None, keep_settings: bool = True) -> dict:
     st0 = status(host)
     layout = st0.get('current_layout')
     print(terms.tr(f"[ИНФО] UrsusBoot {st0.get('version')}; разметка: {terms.layout_label(layout)}",
                    f"[INFO] UrsusBoot {st0.get('version')}; layout: {terms.layout_label(layout)}"))
 
-    # For the only destructive layout transition, validate the transition BL2/preloader
-    # before arming the firmware operation. OPENWRT_STOCK_LAYOUT is intentionally not migratable.
-    if layout == 'STOCK' and preloader is not None:
+    # STOCK and OPENWRT_STOCK_LAYOUT share the same physical migration contract.
+    # Validate the transition BL2/preloader before any destructive conversion.
+    if layout in ('STOCK', 'OPENWRT_STOCK_LAYOUT') and preloader is not None:
         pack = upload(host, preloader, 'preloader')
         if pack.get('result') != 'VALID':
             raise UrsusWebError(f'UBI preloader rejected: {pack}')
@@ -222,13 +220,14 @@ def update_firmware(host: str, image: Path, *, confirm=True, preloader: Path | N
         if layout == 'OPENWRT_UBI':
             endpoint, phrase, header = '/api/install-ubi', 'FLASH', 'INSTALL-UBI'
             print(terms.tr('[ИНФО] Выбрано обновление OpenWrt в текущей разметке UBI с последующей сверкой записи.', '[INFO] Updating OpenWrt in the current UBI layout with post-write readback.'))
-        elif layout == 'STOCK':
+        elif layout in ('STOCK', 'OPENWRT_STOCK_LAYOUT'):
             if not st.get('ubi_migration_available'):
-                raise UrsusWebError('STOCK -> OPENWRT_UBI requires a validated transition preloader/BL2 candidate')
+                raise UrsusWebError(f'{layout} -> OPENWRT_UBI requires a validated transition preloader/BL2 candidate')
             endpoint, phrase, header = '/api/install-ubi', 'FLASH', 'INSTALL-UBI'
-            print(terms.tr('[ИНФО] Выбран односторонний переход с заводской прошивки Nokia на OpenWrt с разметкой UBI.', '[INFO] One-way migration from Nokia factory firmware to OpenWrt with UBI layout selected.'))
-        elif layout == 'OPENWRT_STOCK_LAYOUT':
-            raise UrsusWebError('one-way policy: OPENWRT_STOCK_LAYOUT -> OPENWRT_UBI is forbidden')
+            if layout == 'STOCK':
+                print(terms.tr('[ИНФО] Выбран переход с заводской прошивки Nokia на OpenWrt UBI.', '[INFO] Migration from Nokia factory firmware to OpenWrt UBI selected.'))
+            else:
+                print(terms.tr('[ИНФО] Выбран переход OpenWrt с заводской физической разметки на UBI через UrsusBoot Recovery.', '[INFO] Migration of stock-layout OpenWrt to UBI through UrsusBoot Recovery selected.'))
         else:
             raise UrsusWebError(f'unsupported current layout for UBI sysupgrade: {layout}')
     elif image_type == 'OPENWRT_NONUBI_SYSUPGRADE':
@@ -246,8 +245,30 @@ def update_firmware(host: str, image: Path, *, confirm=True, preloader: Path | N
         if answer not in ('y', 'yes', 'д', 'да'):
             print(terms.tr('Запись отменена до изменения флеш-памяти.', 'Cancelled before flash write.'))
             return st
-    _json(host, 'POST', endpoint, headers={'X-Ursus-Confirm': header}, timeout=20)
+    headers = {'X-Ursus-Confirm': header}
+    if endpoint == '/api/install-ubi':
+        effective_keep = keep_settings if layout == 'OPENWRT_UBI' else False
+        headers['X-Ursus-Keep-Settings'] = '1' if effective_keep else '0'
+    _json(host, 'POST', endpoint, headers=headers, timeout=20)
     return _poll(host, bootloader=False)
+
+
+
+def reset_openwrt_settings(host: str, *, confirm: bool = True) -> dict:
+    """Reset only OpenWrt rootfs_data through UrsusBoot Recovery."""
+    st = status(host)
+    layout = st.get('current_layout')
+    if layout not in ('OPENWRT_UBI', 'OPENWRT_STOCK_LAYOUT'):
+        raise UrsusWebError(f'OpenWrt settings reset is not applicable to {layout}')
+    if confirm:
+        answer = input(terms.tr(
+            'Сбросить настройки OpenWrt (rootfs_data), не меняя прошивку? [y/N]: ',
+            'Reset OpenWrt settings (rootfs_data) without replacing firmware? [y/N]: '
+        )).strip().lower()
+        if answer not in ('y', 'yes', 'д', 'да'):
+            return st
+    return _json(host, 'POST', '/api/reset-openwrt-settings',
+                 headers={'X-Ursus-Confirm': 'RESET-OPENWRT-SETTINGS'}, timeout=30)
 
 
 

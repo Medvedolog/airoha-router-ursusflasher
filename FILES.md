@@ -1,4 +1,4 @@
-# Состав репозитория UrsusFlasher 0.2.55
+# Состав репозитория UrsusFlasher 0.2.56
 
 Этот файл описывает назначение основных каталогов и файлов текущего GitHub-снимка.
 
@@ -63,7 +63,7 @@ ursusboot/source/           снимок исходников U-Boot
 ursusboot/configs/          конфигурации
 ursusboot/artifacts/        воспроизводимые результаты сборки
 ursusboot/scripts/          сценарий пересборки
-openwrt/source/             исходная база OpenWrt, использованная для FUDAN1
+openwrt/source/             исходная база OpenWrt для линии alpha4-FUDAN1/alpha5-UBIUX1
 openwrt/patches/            сохранённые внешние патчи
 toolchains/                 SDK/GCC, разбитые на GitHub-safe части
 ```

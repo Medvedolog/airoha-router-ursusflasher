@@ -60,7 +60,7 @@ def prune_public_tree(root: Path) -> None:
         'UrsusFlasher public test release for Nokia XG-040G-MD\n'
         'Contains the runnable flasher, required boot/recovery payloads, OpenWrt sysupgrade images, and user documentation.\n'
         'Excluded: repository sources, SDK/toolchains/GCC, build trees, QA archives, self-test tools, internal engineering documents, and helper C source.\n'
-        'FUDAN1 hardware status remains HW_TEST_REQUIRED until dedicated hardware acceptance is complete.\n',
+        'UrsusBoot alpha5-UBIUX1 is SOURCE/BUILD/PACKAGE_QA_PROVEN; hardware regression for the new Recovery/UBI behavior is still required.\n',
         encoding='utf-8',
     )
     write_manifest(root)

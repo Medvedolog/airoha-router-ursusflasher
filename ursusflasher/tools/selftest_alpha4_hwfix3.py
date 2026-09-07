@@ -52,7 +52,8 @@ assert 'alpha4_ab_install' not in terms['expert_actions']
 assert 'alpha4_ab_rollback' not in terms['expert_actions']
 
 m = json.loads((D / 'data/MANIFEST.json').read_text(encoding='utf-8'))
-assert m['version'] == '0.2.55-md-alpha4-fudan1-stateui8-diagauth1-backupraw1-menuops1-actionpreflight1-errorui1-sshbin1-payloadrefresh1-rootfsmax2'
+assert m['version'] == (D / 'VERSION').read_text(encoding='utf-8').strip()
+assert m['version'].startswith('0.2.56-md-alpha5-ubiux1-')
 c = m['ursusboot']['alpha4_hwfix3_candidate']
 assert c['fip_crc32'] == '470b3b69'
 assert c['fip_sha256'] == h.HWFIX_FIP_SHA

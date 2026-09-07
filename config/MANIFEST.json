@@ -1,8 +1,8 @@
 {
   "schema": 2,
   "project": "UrsusFlasher",
-  "version": "0.2.55-md-alpha4-fudan1-stateui8-diagauth1-backupraw1-menuops1-actionpreflight1-errorui1-sshbin1-payloadrefresh1-rootfsmax2",
-  "build_date": "2026-09-06",
+  "version": "0.2.56-md-alpha5-ubiux1-stateui8-diagauth1-route1-backupraw1-menuops1-actionpreflight1-errorui1-sshbin1-rootfsenv1",
+  "build_date": "2026-09-07",
   "target": {
     "model": "Nokia XG-040G-MD",
     "soc": "Airoha AN7581",
@@ -15,7 +15,7 @@
   },
   "orchestration": {
     "host_ui": "data/expert.py",
-    "policy": "STATEUI8 DIAGAUTH1/BACKUPRAW1 over STATEUI7 MENUOPS1. Action-local write preflight is unchanged; explicit diagnostic/backup actions may request read-only root SSH credentials.",
+    "policy": "STATEUI8 DIAGAUTH1/BACKUPRAW1 + ROUTE1 + alpha5 UBIUX1/ROOTFSENV1. Environment routing requires positive proof; Telnet presence never proves Nokia STOCK. Action-local destructive preflight remains fail-closed.",
     "ursusboot_inputs": [
       "webfailsafe",
       "tftp",
@@ -23,17 +23,17 @@
     ],
     "usb": "future after AN7581 USB host bring-up",
     "uart_fixes": "UrsusBoot prompt recognition + clean live UART + auto native/RAM-bootstrap updater selection + bootdelay=9 RAM updater FIP; physical UART shell remains available in WebFailsafe",
-    "installed_uart_upgrade": "installed-UrsusBoot ordinary service targets FUDAN1; EXPERT BootROM emergency remains exact alpha3",
+    "installed_uart_upgrade": "installed-UrsusBoot ordinary service targets alpha5-UBIUX1; EXPERT BootROM emergency remains exact alpha3",
     "one_key_interactive_choices": [
       "language (Enter=ru)",
       "stock_ipv4_only_when_stock (Enter=192.168.1.1)"
     ],
     "one_key_password_prompts": false,
     "one_key_confirmation_tokens": false,
-    "running_openwrt_detection": "HTTP fingerprint plus non-interactive SSH probe for menu information; items 7/10/11 and write-action preflights may perform interactive system-OpenSSH authentication when explicitly selected.",
-    "emergency_confirmation": "legacy destructive backend retained; no extra confirmation ceremony added by 0.2.55",
+    "running_openwrt_detection": "HTTP fingerprint plus passive SSH for menu information; selected diagnostics/write preflight may perform interactive root SSH. Positive OpenWrt proof routes item 2 to SSH; positive Nokia STOCK proof routes to Web/Telnet; unknown state stops instead of falling back to stock.",
+    "emergency_confirmation": "legacy destructive backend retained; no extra confirmation ceremony added by 0.2.56",
     "recovery_user_instruction": "After a software reboot, wait for the router-wide LED reboot blink/restart cue, then immediately hold Reset through 2-short+3-long red flashes and steady red. If missed: power OFF, power ON, wait about 1 second, hold Reset 5-10 seconds until the same red sequence. Reset held before power-on is Airoha BootROM.",
-    "bootrom_emergency_ursusboot": "EXPERT BootROM uses exact alpha3 preloader + alpha3 RAM installer + alpha3 emergency FIP/BL2. This emergency lineage is separate from the FUDAN1 production target.",
+    "bootrom_emergency_ursusboot": "EXPERT BootROM uses exact alpha3 preloader + alpha3 RAM installer + alpha3 emergency FIP/BL2. Emergency lineage is separate from alpha5-UBIUX1 production target.",
     "console_palette": "UrsusBoot WebFailsafe palette: amber #D99A4D / amber2 #C8873A / ink #F2E8DA / muted #A89179 / success #7CC493 / error #E8837A / UART-XMODEM-prompt sand #EFC079; no cyan/blue/magenta in main UI",
     "console_startup_mark": "fixed-width 11-column ASCII bear; ASCII-only face, amber/sand UrsusBoot palette; printed once before language selection",
     "gate_policy": "STOP only for wrong/corrupt source, wrong destructive target, missing required transport/writer, the single destructive confirmation, or failed post-write readback. SHA/CRC checks are automatic backend truth, not additional operator gates.",
@@ -54,14 +54,14 @@
     "stock_guard": 2048,
     "shared_updater": "ursusupdate",
     "stock_commit": "preserve ROM prefix + stock boot environment; full 512 KiB mtd0 readback",
-    "ubi_commit": "HWFIX3 WebFailsafe UBI updater uses fit.new -> full readback -> fit.old -> fit -> final readback. ROOTFSMAX2 intentionally prioritizes OpenWrt rootfs_data capacity and leaves only 16 free PEBs; normal post-install OpenWrt updates are expected through OpenWrt sysupgrade/LuCI. The HWFIX3 staged recovery updater may reject large updates on this low-headroom layout.",
+    "ubi_commit": "alpha5-UBIUX1 WebFailsafe UBI update validates the complete image in RAM, then selects staged fit.new/fit.old update when headroom permits or a direct Recovery-safe FIT replacement when MAX-16 rootfs_data leaves insufficient staging PEBs. Every write is read back. Keep-settings preserves rootfs_data; clean update recreates rootfs_data with 16 free PEBs and persists rootfs_data_max.",
     "bl2_policy": "Routine self-update must not change BL2. BootROM recovery may restore exact alpha3 BL2 only after the live storage contract has been established; 0.2.29 showed the old universal fip-ID4 assumption is false on the tested migrated layout.",
     "ram_installer_fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-ram-installer.fip",
     "ram_installer_fip_size": 503808,
     "ram_installer_fip_sha256": "dc08ed0be1b1d68f6bc247ae45293e6ab0ca9df7695541b664e4060a145228c8",
     "ram_installer_policy": "exact alpha3 RAM installer; no alpha4/HF payload participates in emergency recovery",
-    "migration_rootfs_data": "HWFIX3 migration proves the historical empty 1693-LEB rootfs_data. UrsusFlasher 0.2.43 ROOTFSMAX2 then, before first OpenWrt boot only, uses live ubi_free_pebs + ubi_leb_size, removes that empty volume, recreates ID6 to consume all allocatable PEBs except 16, verifies rootfs_data and exact 16-PEB headroom. UBI internal bad-block reserve is separate and untouched.",
-    "migration_volume_manifest": "ubootenv,ubootenv2,bosa,ri,fip,fit,rootfs_data; BL2 commit only after manifest/rootfs_data/headroom/readback gates",
+    "migration_rootfs_data": "alpha5-UBIUX1 creates fresh rootfs_data inside the Recovery migration transaction at the live maximum minus 16 free PEBs and persists the exact byte size as rootfs_data_max before final boot. This applies to STOCK and OPENWRT_STOCK_LAYOUT -> OPENWRT_UBI; the old host-side ROOTFSMAX2 post-step is not used.",
+    "migration_volume_manifest": "ubootenv,ubootenv2,bosa,ri,fip,fit,rootfs_data; BOSA/RI/FIP readback and MAX-16 rootfs_data/rootfs_data_max are verified before BL2 commit; full BL2 is committed last.",
     "uart_device_log": "English printable ASCII only",
     "web_alternate_transport_help": "removed from UI",
     "lan_led_auto": "LAN2-LAN4 enabled automatically in WebFailsafe after HW validation",
@@ -79,7 +79,7 @@
       "STOCK->OPENWRT_STOCK_LAYOUT": "ALLOW",
       "STOCK->OPENWRT_UBI": "ALLOW",
       "OPENWRT_STOCK_LAYOUT->OPENWRT_STOCK_LAYOUT": "ALLOW",
-      "OPENWRT_STOCK_LAYOUT->OPENWRT_UBI": "DENY",
+      "OPENWRT_STOCK_LAYOUT->OPENWRT_UBI": "ALLOW_RECOVERY_ONLY",
       "OPENWRT_UBI->OPENWRT_UBI": "ALLOW",
       "OPENWRT_UBI->OPENWRT_STOCK_LAYOUT": "DENY",
       "OPENWRT_UBI->STOCK": "DENY"
@@ -88,7 +88,7 @@
     "web_led_reference": "removed; LED patterns documented in doc/INSTRUCTIONS_RU.md",
     "disaster_tftp": "SPEC_ONLY",
     "stock_boot_env_offset": 507904,
-    "release_revision": "ALPHA4_HWFIX3_ROOTFSMAX2",
+    "release_revision": "ALPHA5_UBIUX1_ROUTE1_ROOTFSENV1",
     "ram_installer_raw_sha256": "b2a8c49002c33a44774da4b14903773ace030e10a04a48d5531708691ba9cc05",
     "ram_installer_lzma_sha256": "e819920374fcb049bd40033fbe24385cf0871c9d2e426d323c4e0f1460a1776f",
     "ram_installer_lzma_size": 321399,
@@ -116,7 +116,7 @@
     "emergency_recovery": "BootROM recovery first performs read-only UBI/FIP/BL2 diagnostics. The legacy fixed-ID4 destructive transaction is disabled before any write when ID4 is occupied by a non-fip volume. Exact alpha3 payloads remain pinned; no new destructive storage contract is assumed.",
     "emergency_boot_storage_policy": "Root cause of the second post-rollback LZMA failure is CLOSED: BL2 CRC32 09fb6b36 was incompatible with exact alpha3 FIP; exact alpha3 BL2 9f7bf316 restored boot. BL2+FIP are a compatibility boundary.",
     "ram_installer_version": "0.1.0-alpha3",
-    "persistent_hardware_status": "HW PROVEN 2026-09-03: exact alpha3 BL2 CRC32 9f7bf316 + alpha4 LZMAFIX1 active fip CRC32 b1b313a5 cold-boots through BL31, U-Boot alpha4, UBI/FIT verification and Linux. Prior post-rollback LZMA res1/PANIC was caused by incompatible raw BL2 lineage, not by alpha4 BL33.",
+    "persistent_hardware_status": "alpha5-UBIUX1 exact bytes are SOURCE/BUILD/PACKAGE_QA_PROVEN and require hardware regression. Hardware-proven alpha3/alpha4 baselines remain historical evidence; no alpha5 behavior is claimed HW_PROVEN yet.",
     "bl2_image_sha256": "6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d",
     "bl2_image_size": 131072,
     "bootrom_emergency_ursusboot": "EXPERT BootROM paths: read-only UBI/FIP/BL2 evidence; current BL2-only single-variable experiment; legacy fixed-ID4 recovery remains blocked on conflicting layouts. Exact alpha3 payloads remain pinned.",
@@ -218,18 +218,18 @@
       "rollback": "active fip only -> hardware-proven HWFIX2 CRC32 1917ed23",
       "build_info": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-UIFIX1-BUILD_INFO.txt"
     },
-    "production_target_version": "0.1.0-alpha4-FUDAN1",
-    "production_target_fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip",
-    "production_target_fip_sha256": "ce43b56d86321ccb7657d2e9b7ddf58e811efc73927855bbb75e896c83b18600",
+    "production_target_version": "0.1.0-alpha5-UBIUX1",
+    "production_target_fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip",
+    "production_target_fip_sha256": "548c446555231ee1b6ec4666000831226e0749c576d702c06dc5f501a6f510db",
     "stock_bootstrap_version": "REMOVED_FROM_ONECLICK",
-    "stock_bootstrap_policy": "ONE-CLICK no longer writes alpha3 first. FUDAN1 is written directly into the stock 512-KiB mtd0 while preserving 0x0..0x7ff BootROM prefix and 0x7c000..0x7ffff tcboot environment, then fully read back. Exact alpha3 remains BootROM emergency-only.",
-    "direct_stock_target_version": "0.1.0-alpha4-FUDAN1",
-    "direct_stock_target_fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip",
-    "direct_stock_target_fip_sha256": "ce43b56d86321ccb7657d2e9b7ddf58e811efc73927855bbb75e896c83b18600",
+    "stock_bootstrap_policy": "ONE-CLICK writes the alpha5-UBIUX1 production FIP directly into the content-proven stock-style 512-KiB mtd0 while preserving 0x0..0x7ff BootROM prefix and 0x7c000..0x7ffff tcboot environment, then performs a full readback. Exact alpha3 remains BootROM emergency-only.",
+    "direct_stock_target_version": "0.1.0-alpha5-UBIUX1",
+    "direct_stock_target_fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip",
+    "direct_stock_target_fip_sha256": "548c446555231ee1b6ec4666000831226e0749c576d702c06dc5f501a6f510db",
     "direct_stock_lineage_gate": "All FIP entries except NT_FW/BL33 and the checksum record must be byte-for-byte identical to exact alpha3 FIP; Trusted Boot Firmware entry SHA256 must remain 07c9e1542a3de845055faa2244bbd07adc8c5a136811a61a0d678ec8fff5ee5e.",
-    "direct_stock_write_scope": "mtd0 only: preserve BootROM prefix 0x0..0x7ff and stock tcboot env 0x7c000..0x7ffff; replace FIP window with FUDAN1; full 512-KiB SHA256 readback; stock master/slave untouched.",
+    "direct_stock_write_scope": "mtd0 only: preserve BootROM prefix 0x0..0x7ff and stock tcboot env 0x7c000..0x7ffff; replace the FIP window with alpha5-UBIUX1; full 512-KiB SHA256 readback; system partitions untouched.",
     "directstock1": "0.2.41: first direct-stock HWFIX3 hardware A/B candidate. Removes alpha3 as an ordinary ONE-CLICK intermediate. Emergency alpha3 payloads and BootROM path remain unchanged.",
-    "rootfsmax2": "0.2.43: after successful fresh STOCK->UBI migration, resize still-empty rootfs_data to live maximum minus 16 free PEB before first OpenWrt boot; HWFIX3 firmware unchanged.",
+    "rootfsmax2": "SUPERSEDED_BY_ALPHA5_ROOTFSENV1: old host-side fresh-migration resize retained only as compatibility code for historical alpha4; alpha5 creates MAX-16 rootfs_data and persists rootfs_data_max inside Recovery.",
     "uifix1": "0.2.44: UI-only UrsusBoot rebuild on HWFIX3 baseline; NAND diagnostic label is BadBlocks in RU/EN. ROOTFSMAX2 host policy retained.",
     "alpha4_fudan1_candidate": {
       "status": "HW_TEST_REQUIRED_FUDAN1",
@@ -303,7 +303,83 @@
         "policy": "statically linked aarch64 helper; erases/writes only offset 0 for the exact 0x80000 boot range; refuses bad blocks; full SSH readback SHA256 remains mandatory"
       }
     },
-    "fudan1": "0.2.45: exact UIFIX1 lineage rebuild plus upstream Fudan FM25G01B/FM25G02B SPI-NAND support; OpenWrt root SSH install/recovery path added; ROOTFSMAX2 retained; no SLIM required."
+    "fudan1": "alpha4-FUDAN1 remains the prior production baseline and rollback reference. alpha5-UBIUX1 inherits its Fudan FM25G01B/FM25G02B driver changes unchanged and adds Recovery/UBI UX and rootfs policy changes.",
+    "alpha5_ubiux1_candidate": {
+      "status": "SOURCE_BUILD_PACKAGE_QA_PROVEN_HW_REGRESSION_REQUIRED",
+      "version": "0.1.0-alpha5-UBIUX1",
+      "persistent_fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip",
+      "fip_size": 503808,
+      "fip_sha256": "548c446555231ee1b6ec4666000831226e0749c576d702c06dc5f501a6f510db",
+      "fip_crc32": "f85beabc",
+      "raw_bl33": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-u-boot.bin",
+      "raw_bl33_size": 954864,
+      "raw_bl33_sha256": "06397f68ba876e01ba6a07ebbdbbcfac1e5341b9d82926fd6b4a54ae1bf7e552",
+      "lzma": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-u-boot.lzma",
+      "lzma_size": 326367,
+      "lzma_sha256": "648fe1e12616068a99305645b34bee74d669ee9219f51c26ddd0b6b5003e0b1f",
+      "compression": "LZMA1EXT/no-EOPM prop=0x9b lc=2 lp=2 pb=3 dict=1MiB exact usize=954864; 1313-byte margin before first certificate",
+      "required_bl2_fip_payload_sha256": "07c9e1542a3de845055faa2244bbd07adc8c5a136811a61a0d678ec8fff5ee5e",
+      "required_baseline": "alpha4-FUDAN1 exact FIP donor; non-NT_FW FIP lineage preserved by deterministic repack; exact alpha3 BL2 emergency lineage unchanged",
+      "upstream_pr": "openwrt/openwrt#24025",
+      "upstream_pr_head": "c58a6187fe9fb77b1e691c642fccc7de6f4b2966",
+      "patches": [
+        "120-mtd-spinand-fmsh-add-support-for-FM25G01B-FM25G02B.patch",
+        "121-mtd-spinand-fmsh-fix-FM25G01B-FM25G02B-Quad-IO-read-dummy-cycles.patch"
+      ],
+      "spinand_added": [
+        "FM25G01B id=0xd1 manufacturer=0xa1",
+        "FM25G02B id=0xd2 manufacturer=0xa1"
+      ],
+      "spinand_unchanged": [
+        "FM25S01A",
+        "SkyHigh S35ML02G300",
+        "Winbond W25N02JW/W25N02KV/W25N02KW"
+      ],
+      "fip_lineage": "FIP header and 8 non-NT_FW/non-checksum entries byte-identical to exact alpha3; NT_FW offset remains 0x27800; next entry 0x77800; checksum 0x7ac00",
+      "write_scope": "OPENWRT_UBI: existing fip volume or Recovery updater; stock-style OpenWrt/Nokia stock: content-proven 512-KiB hybrid boot block preserving ROM prefix and tcboot env; no routine BL2 write",
+      "confirmation": "one ordinary y/N immediately before persistent write; no extra Fudan read-only acceptance stage",
+      "rollback": "production alpha5 may be rolled back to exact alpha4-FUDAN1 through the same validated bootloader update path; exact alpha3 remains BootROM emergency lineage",
+      "hardware_status": "HW_REGRESSION_REQUIRED_FOR_ALPHA5_BEHAVIOR; inherited Fudan/SkyHigh driver lineage from alpha4-FUDAN1 is unchanged",
+      "ssh_install": {
+        "openwrt_initramfs": "root SSH; passwordless/key/password supported",
+        "openwrt_production": "root SSH; system OpenSSH may ask root password once and install one-run session key",
+        "healthy_openwrt_ubi": "update exactly existing fip UBI volume with ubiupdatevol + exact readback",
+        "stock_style_openwrt": "content-proven first 0x80000 hybrid; raw MTD write + full readback; mtd-rw only when kernel marks target read-only",
+        "layout_unknown": "does not block; operation depends on an unambiguous content-proven boot target"
+      },
+      "mtd_rw": {
+        "path": "data/payloads/md/ursusboot/openwrt-6.18.44-mtd-rw.ko",
+        "kernel": "6.18.44",
+        "sha256": "36be1adb16133ec54753792a756190b933ce9829472c18be2adc9b26a870d238",
+        "vermagic": "6.18.44 SMP mod_unload aarch64",
+        "policy": "used only for raw boot target when current kernel reports MTD read-only; healthy UBI fip update does not require it"
+      },
+      "build_info": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-BUILD_INFO.txt",
+      "raw_mtd_helper": {
+        "ursus_mtd_raw": {
+          "path": "data/payloads/md/ursusboot/ursus-mtd-raw",
+          "size": 67088,
+          "sha256": "27ad32ee423feac749d51f02edbd96b274c7e2f08120a367855ff94b3362a63a"
+        },
+        "ursus_mtd_raw_c": {
+          "path": "data/payloads/md/ursusboot/ursus-mtd-raw.c",
+          "size": 3638,
+          "sha256": "299254b32d82c62bb196ac958f30587ee5f39bc08b94b877478e88b66d01bfab"
+        },
+        "policy": "statically linked aarch64 helper; erases/writes only offset 0 for the exact 0x80000 boot range; refuses bad blocks; full SSH readback SHA256 remains mandatory"
+      },
+      "source_tar": "ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-source.tar.zst",
+      "source_tar_sha256": "57736bb74e2efd198e56e687dba50b945c160ada8ee9a3f25e3534842aa7f8c3",
+      "features": [
+        "RECOVERY_OPENWRT_STOCK_LAYOUT_TO_OPENWRT_UBI",
+        "WEB_KEEP_OPENWRT_SETTINGS",
+        "WEB_RESET_OPENWRT_SETTINGS",
+        "UART_URSUSSETTINGS_RESET",
+        "ROOTFS_DATA_MAX_MINUS_16_PEB",
+        "PERSIST_ROOTFS_DATA_MAX_FOR_OPENWRT_SYSUPGRADE",
+        "STAGED_OR_DIRECT_RECOVERY_SAFE_UBI_UPDATE"
+      ]
+    }
   },
   "openwrt": {
     "default_sysupgrade": "fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb",
@@ -339,8 +415,11 @@
     "accept2_identity": "0.2.39: host-only MD identity fix; fixed-offset serial/G.984 cross-check; authoritative ri@0x3e MAC mirrored to ri_mac; HWFIX3 firmware unchanged.",
     "accept3_recovery_ux": "0.2.40: host-only Recovery instruction cleanup; primary reboot cue is all-LED reboot blink then immediate Reset hold; missed Recovery fallback is power OFF/ON, wait about 1 second, hold Reset 5-10 seconds until 2-short + 3-long + steady red; HWFIX3 firmware unchanged.",
     "rootfsmax2": "0.2.43: after successful fresh STOCK->UBI migration, resize still-empty rootfs_data to live maximum minus 16 free PEB before first OpenWrt boot; HWFIX3 firmware unchanged.",
-    "release_revision": "ALPHA4_FUDAN1_SSH1_ROOTFSMAX2",
-    "fudan1_ssh1": "0.2.45: exact byte-repro UIFIX1 baseline plus OpenWrt PR #24025 patches 120/121 for FM25G01B/FM25G02B; no SLIM required. Host adds root-SSH install/recovery from OpenWrt initramfs/production, including password auth, native UBI fip update, and content-proven raw first-512KiB recovery with bundled static raw-MTD helper."
+    "release_revision": "ALPHA5_UBIUX1_ROUTE1_ROOTFSENV1",
+    "fudan1_ssh1": "0.2.45: exact byte-repro UIFIX1 baseline plus OpenWrt PR #24025 patches 120/121 for FM25G01B/FM25G02B; no SLIM required. Host adds root-SSH install/recovery from OpenWrt initramfs/production, including password auth, native UBI fip update, and content-proven raw first-512KiB recovery with bundled static raw-MTD helper.",
+    "route1": "0.2.56: item 2 uses positive environment proof. OpenWrt routes to root SSH; Nokia STOCK routes to Web/Telnet; an open Telnet port alone never authorizes the stock path.",
+    "ubiux1": "0.2.56 / UrsusBoot alpha5-UBIUX1: Recovery permits OPENWRT_STOCK_LAYOUT->OPENWRT_UBI using the same physical migration backend as STOCK->UBI; Web keep-settings/reset-settings controls and UART ursussettings reset are added.",
+    "rootfsenv1": "alpha5 creates/resets UBI rootfs_data to live MAX-16 PEB and persists rootfs_data_max so subsequent standard OpenWrt sysupgrade recreates the same overlay size. Existing user rootfs_data is never shrunk when settings are preserved."
   },
   "ui": {
     "operator_text_refactor": "0.2.28",

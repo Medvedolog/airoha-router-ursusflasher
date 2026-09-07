@@ -40,7 +40,7 @@ def main() -> None:
     required_suffixes = (
         '/START_ONECLICK.cmd', '/START_EXPERT.cmd', '/README.md', '/VERSION',
         '/data/one_key.py', '/data/expert.py', '/data/proven_backend.py',
-        '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip',
+        '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip',
         '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-ram-installer.fip',
         '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-bl2.bin',
         '/data/payloads/md/bootrom-backup/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip',

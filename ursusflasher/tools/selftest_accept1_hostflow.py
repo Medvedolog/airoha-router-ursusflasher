@@ -9,9 +9,9 @@ import one_key as ok
 import ursusboot_update as u
 import expert
 
-assert ok.TARGET_URSUS == '0.1.0-alpha4-FUDAN1'
-assert u.PRODUCTION_PAYLOAD.name == 'ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip'
-assert hashlib.sha256(u.PRODUCTION_PAYLOAD.read_bytes()).hexdigest() == 'ce43b56d86321ccb7657d2e9b7ddf58e811efc73927855bbb75e896c83b18600'
+assert ok.TARGET_URSUS == '0.1.0-alpha5-UBIUX1'
+assert u.PRODUCTION_PAYLOAD.name == 'ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip'
+assert hashlib.sha256(u.PRODUCTION_PAYLOAD.read_bytes()).hexdigest() == '548c446555231ee1b6ec4666000831226e0749c576d702c06dc5f501a6f510db'
 assert u.EMERGENCY_PAYLOAD.name == 'ursusboot-md-0.1.0-alpha3-update.fip'
 assert hashlib.sha256(u.EMERGENCY_PAYLOAD.read_bytes()).hexdigest() == '597071e178470bfda23aab9738ad7ddb0b25e9b21ef336fd3eceb39c39f983ce'
 u.require_fip_payload()
@@ -37,9 +37,10 @@ assert st['_runtime_ursus_version']=='0.1.0-alpha3'
 assert not hasattr(ok,'physical_reboot_to_recovery')
 
 src=inspect.getsource(ok.main)
-assert 'recovery_after=True' in src
+install_src=inspect.getsource(ok.install_ursus_from_openwrt)+inspect.getsource(ok.install_ursus_from_stock)
+assert 'recovery_after=True' in install_src
 assert 'No intermediate alpha3 bootstrap is used.' in (D/'data/one_key.py').read_text(encoding='utf-8')
-assert 'wait_for_manual_recovery()' in src
+assert 'wait_for_manual_recovery()' in install_src
 assert '_persistent_ursus_target' in src
 assert '5 секунд' not in (D/'data/one_key.py').read_text(encoding='utf-8')
 assert 'at least 5 seconds' not in (D/'data/one_key.py').read_text(encoding='utf-8')
@@ -60,8 +61,8 @@ one=(D/'START_ONECLICK.cmd').read_text(encoding='utf-8')
 assert 'pause >nul' in one and 'data\\one_key.py' in one
 
 print('HWFIX3_ACCEPT1_HOSTFLOW_QA=PASS')
-print('ONECLICK_TARGET=FUDAN1')
+print('ONECLICK_TARGET=ALPHA5_UBIUX1')
 print('STOCK_BOOTSTRAP=REMOVED_FROM_ONECLICK')
-print('INTERMEDIATE_REBOOT_AFTER_FUDAN1_UPDATE=NO')
+print('INTERMEDIATE_REBOOT_AFTER_ALPHA5_UPDATE=NO')
 print('EXPERT_ACTION_RETURN=ENTER_GATED')
 print('DUPLICATE_START_LAUNCHER=REMOVED')

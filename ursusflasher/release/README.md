@@ -1,6 +1,14 @@
-# UrsusFlasher 0.2.55 — Nokia XG-040G-MD
+# UrsusFlasher 0.2.56 — Nokia XG-040G-MD
 
 Готовый комплект для установки OpenWrt, резервного копирования и восстановления Nokia XG-040G-MD на Airoha AN7581.
+
+## Что нового в 0.2.56
+
+- пункт 2 различает OpenWrt и Nokia STOCK только по положительному доказательству среды; открытый Telnet больше не переводит OpenWrt в stock-сценарий;
+- UrsusBoot Recovery разрешает `OPENWRT_STOCK_LAYOUT → OPENWRT_UBI` с тем же Recovery-only migration backend, что Nokia STOCK → UBI;
+- UBI update имеет выбор сохранения настроек; отдельная кнопка Recovery и UART-команда `ursussettings reset` очищают только OpenWrt `rootfs_data`;
+- чистая UBI-установка/сброс создаёт `rootfs_data` по политике MAX−16 PEB и сохраняет `rootfs_data_max`, чтобы последующий штатный OpenWrt `sysupgrade` сохранял тот же размер overlay.
+
 
 ## Запуск
 
@@ -87,14 +95,14 @@ Kernel   6.18.44
 
 ## UrsusBoot
 
-Текущий комплект содержит UrsusBoot `0.1.0-alpha4-FUDAN1`.
+Текущий комплект содержит UrsusBoot `0.1.0-alpha5-UBIUX1`.
 
 ```text
-BL33 SHA256  a41a81a011e19d1498d5ff0773dfd6bf9bd4c56beb3e7a46ce4622a643a30703
+BL33 SHA256  06397f68ba876e01ba6a07ebbdbbcfac1e5341b9d82926fd6b4a54ae1bf7e552
 FIP  SHA256  ce43b56d86321ccb7657d2e9b7ddf58e811efc73927855bbb75e896c83b18600
 ```
 
-Статус FUDAN1: **HW_TEST_REQUIRED**.
+Статус alpha5-UBIUX1: **SOURCE/BUILD/PACKAGE_QA_PROVEN; HW_REGRESSION_REQUIRED**.
 
 ## Документация
 

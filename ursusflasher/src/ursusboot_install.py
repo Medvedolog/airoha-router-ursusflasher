@@ -22,7 +22,7 @@ REPO_MODE = (_REPO_ROOT / "fw").is_dir() and (_REPO_ROOT / "payloads").is_dir() 
 ROOT = _REPO_ROOT if REPO_MODE else HERE.parent
 DATA = HERE if REPO_MODE else (ROOT / "data")
 PAYLOAD_DIR = (ROOT / "payloads" / "md" / "ursusboot") if REPO_MODE else (ROOT / "data" / "payloads" / "md" / "ursusboot")
-PAYLOAD = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip"
+PAYLOAD = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip"
 ALPHA3_REFERENCE_PAYLOAD = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha3-update.fip"
 WORK = ROOT / "work"
 PRIVATE = WORK / "private"
@@ -42,7 +42,7 @@ EXPECTED_ROM_HEADER_SHA256 = "82830140f4f8842702d0569065c27071b7cc24e0876e6c487c
 EXPECTED_HYBRID_FIP_SIZE = 0x7B000
 MANIFEST_PATH = (ROOT / 'config' / 'MANIFEST.json') if REPO_MODE else (ROOT / 'data' / 'MANIFEST.json')
 _URSUS_ROOT_META = json.loads(MANIFEST_PATH.read_text(encoding='utf-8'))['ursusboot']
-_URSUS_META = _URSUS_ROOT_META['alpha4_fudan1_candidate']
+_URSUS_META = _URSUS_ROOT_META['alpha5_ubiux1_candidate']
 EXPECTED_HYBRID_FIP_SHA256 = _URSUS_META['fip_sha256']
 EXPECTED_U_BOOT_SHA256 = _URSUS_META['raw_bl33_sha256']
 TARGET_URSUS = _URSUS_META['version']
@@ -122,12 +122,12 @@ def require_payload() -> bytes:
         raise RuntimeError(f"payload missing: {PAYLOAD}")
     data = PAYLOAD.read_bytes()
     if len(data) != EXPECTED_HYBRID_FIP_SIZE:
-        raise RuntimeError(f"target FUDAN1 FIP size mismatch: {len(data)} != {EXPECTED_HYBRID_FIP_SIZE}")
+        raise RuntimeError(f"target UrsusBoot FIP size mismatch: {len(data)} != {EXPECTED_HYBRID_FIP_SIZE}")
     got = sha_bytes(data)
     if got != EXPECTED_HYBRID_FIP_SHA256:
-        raise RuntimeError(f"target FUDAN1 FIP SHA256 mismatch: {got}")
+        raise RuntimeError(f"target UrsusBoot FIP SHA256 mismatch: {got}")
     if data[:4] != b"\x01\x00\x64\xaa":
-        raise RuntimeError("target FUDAN1 FIP magic mismatch")
+        raise RuntimeError("target UrsusBoot FIP magic mismatch")
     return data
 
 
@@ -180,7 +180,7 @@ def fip_entries_from(data: bytes, base: int = 0) -> list[tuple[bytes,int,int,int
 
 
 def validate_direct_stock_lineage(target: bytes) -> dict:
-    """Prove that direct STOCK FUDAN1 keeps the alpha3 early-boot lineage.
+    """Prove that direct STOCK target keeps the alpha3 early-boot lineage.
 
     All FIP entries except NT_FW/BL33 and the checksum record must be byte-for-byte
     identical to the exact hardware-proven alpha3 FIP. This makes the direct stock
@@ -194,7 +194,7 @@ def validate_direct_stock_lineage(target: bytes) -> dict:
     validate_checksum_entry(alpha3)
     validate_checksum_entry(target)
     if alpha3[:16] != target[:16]:
-        raise RuntimeError("FUDAN1 FIP header differs from proven alpha3 lineage")
+        raise RuntimeError("target FIP header differs from proven alpha3 lineage")
     a_list = fip_entries_from(alpha3)
     t_list = fip_entries_from(target)
     a_entries = {u: (off, size, flags) for u, off, size, flags in a_list}
@@ -202,24 +202,24 @@ def validate_direct_stock_lineage(target: bytes) -> dict:
     if len(a_entries) != len(a_list) or len(t_entries) != len(t_list):
         raise RuntimeError("duplicate FIP UUID entry in lineage comparison")
     if set(a_entries) != set(t_entries):
-        raise RuntimeError("FUDAN1 FIP entry set differs from proven alpha3 lineage")
+        raise RuntimeError("target FIP entry set differs from proven alpha3 lineage")
     compared = 0
     for uuid, (a_off, a_size, a_flags) in a_entries.items():
         t_off, t_size, t_flags = t_entries[uuid]
         if uuid in (NT_FW_UUID, CHECKSUM_UUID):
             continue
         if (a_off, a_size, a_flags) != (t_off, t_size, t_flags):
-            raise RuntimeError(f"FUDAN1 lineage metadata changed for UUID {uuid.hex()}")
+            raise RuntimeError(f"target lineage metadata changed for UUID {uuid.hex()}")
         if alpha3[a_off:a_off+a_size] != target[t_off:t_off+t_size]:
-            raise RuntimeError(f"FUDAN1 lineage payload changed for UUID {uuid.hex()}")
+            raise RuntimeError(f"target lineage payload changed for UUID {uuid.hex()}")
         compared += 1
     tb = t_entries.get(TB_FW_UUID)
     if not tb:
-        raise RuntimeError("FUDAN1 FIP has no Trusted Boot Firmware entry")
+        raise RuntimeError("target FIP has no Trusted Boot Firmware entry")
     tb_off, tb_size, _ = tb
     tb_sha = sha_bytes(target[tb_off:tb_off+tb_size])
     if tb_sha != EXPECTED_STOCK_BL2_SHA256:
-        raise RuntimeError(f"FUDAN1 Trusted Boot Firmware differs from proven lineage: {tb_sha}")
+        raise RuntimeError(f"target Trusted Boot Firmware differs from proven lineage: {tb_sha}")
     return {
         "reference": "alpha3",
         "reference_sha256": sha_bytes(alpha3),
@@ -627,15 +627,15 @@ def run_install_ssh(*, host: str, hybrid: bytes, unattended: bool = False) -> in
             result["readback_sha256"] = target_sha
             result["completed_at"] = stamp()
             result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            _status_line("[ГОТОВО] Existing UBI fip already contains exact FUDAN1; NAND write skipped.")
+            _status_line("[ГОТОВО] Existing UBI fip already contains the exact target UrsusBoot; NAND write skipped.")
             return 0
-        remote = "/tmp/ursusboot-FUDAN1.fip"
-        temp = PRIVATE / f"FUDAN1-{run_stamp}.fip"
+        remote = "/tmp/ursusboot-target.fip"
+        temp = PRIVATE / f"target-{run_stamp}.fip"
         temp.write_bytes(hybrid)
         pb.scp_copy_to_recovery(host, temp, remote, timeout=600)
         _rc, check = pb.ssh_run(host, f"wc -c < {remote}; sha256sum {remote}", timeout=60, quiet=True, batch_mode=True)
         if str(EXPECTED_HYBRID_FIP_SIZE) not in check or target_sha not in check.lower():
-            raise RuntimeError("remote FUDAN1 FIP transfer verification failed")
+            raise RuntimeError("remote target UrsusBoot FIP transfer verification failed")
         if not _ssh_confirm_write(unattended, f"Обновляется только {fipvol['device']} (UBI volume fip), {EXPECTED_HYBRID_FIP_SIZE} байт.", before):
             result["status"] = "CANCELLED_BEFORE_WRITE"
             result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -671,7 +671,7 @@ def run_install_ssh(*, host: str, hybrid: bytes, unattended: bool = False) -> in
     before = PRIVATE / f"bootblock-before-{run_stamp}.bin"
     target, live, meta = _ssh_resolve_raw_boot_target(host, hybrid, before)
     candidate, _ = build_candidate(live, hybrid)
-    candidate_path = PRIVATE / f"bootblock-FUDAN1-{run_stamp}.bin"
+    candidate_path = PRIVATE / f"bootblock-target-{run_stamp}.bin"
     candidate_path.write_bytes(candidate)
     result["backend"] = "raw_boot_block"
     result["raw_target"] = target
@@ -683,12 +683,12 @@ def run_install_ssh(*, host: str, hybrid: bytes, unattended: bool = False) -> in
         result["readback_sha256"] = expected
         result["completed_at"] = stamp()
         result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        _status_line("[ГОТОВО] Physical boot block already contains exact FUDAN1 hybrid; write skipped.")
+        _status_line("[ГОТОВО] Physical boot block already contains the exact target UrsusBoot hybrid; write skipped.")
         return 0
     _ssh_make_mtd_writable_if_needed(host, target)
     writer = _ssh_raw_writer(host, target)
     result["writer"] = writer
-    remote = "/tmp/ursusboot-bootblock-FUDAN1.bin"
+    remote = "/tmp/ursusboot-bootblock-target.bin"
     pb.scp_copy_to_recovery(host, candidate_path, remote, timeout=600)
     _rc, check = pb.ssh_run(host, f"wc -c < {remote}; sha256sum {remote}", timeout=60, quiet=True, batch_mode=True)
     if str(MTD0_SIZE) not in check or expected not in check.lower():
@@ -910,8 +910,14 @@ def probe_http_kind(host: str) -> str | None:
             low = bytes(data).lower()
             if b"ursusboot" in low or b"web recovery" in low:
                 return "ursus_recovery"
-            if low.startswith(b"http/"):
+            if b"openwrt" in low or b"luci" in low or b"/cgi-bin/luci" in low:
+                return "openwrt_http"
+            stock_markers = (b"newmethodlogin", b"login.cgi", b"cmccadmin", b"crypto_page", b"jsencrypt", b"encrypted=1")
+            hits = sum(marker in low for marker in stock_markers)
+            if hits >= 2 and (b"login.cgi" in low or b"newmethodlogin" in low):
                 return "stock_http"
+            if low.startswith(b"http/"):
+                return "generic_http"
     except OSError:
         return None
     return None
@@ -950,38 +956,57 @@ def run_preflight_only() -> int:
     return run_stock_access_check()
 
 
-def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery_after: bool = False, recovery_host: str = "192.168.1.1") -> int:
+def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery_after: bool = False, recovery_host: str = "192.168.1.1", route: str = "auto") -> int:
     ui.enable()
     hybrid = require_payload()
     checksum = validate_checksum_entry(hybrid)
     lineage = validate_direct_stock_lineage(hybrid)
 
-    # OpenWrt is a first-class install/recovery environment.  Prefer root SSH
-    # when port 22 is present and the board identity is positively confirmed;
-    # stock Nokia continues through the proven Web/Telnet path below.
-    if _tcp_open(host, 22):
-        try:
-            _ssh_openwrt_identity(host)
-        except Exception:
-            # A non-OpenWrt service on port 22 must not steal the stock path.
-            # If stock Telnet is not present either, surface the SSH identity
-            # error rather than attempting factory login against an OpenWrt box.
-            if not _tcp_open(host, 23):
-                raise
+    route = route.strip().lower()
+    if route not in ("auto", "openwrt", "stock"):
+        raise RuntimeError(f"unsupported install route: {route}")
+
+    # ROUTE1: transports are selected only from positive environment proof.
+    # An open TCP/23 is never evidence of Nokia STOCK.  This matters for
+    # third-party OpenWrt builds that expose both SSH and Telnet.
+    if route == "auto":
+        if _tcp_open(host, 22):
+            try:
+                _ssh_openwrt_identity(host)
+            except Exception as ssh_exc:
+                kind = probe_http_kind(host)
+                if kind != "stock_http":
+                    raise RuntimeError(
+                        "AUTO route could not positively identify OpenWrt or Nokia STOCK; "
+                        "stock Web/Telnet fallback is disabled. SSH cause: " + str(ssh_exc)
+                    ) from ssh_exc
+                route = "stock"
+            else:
+                route = "openwrt"
         else:
-            rc = run_install_ssh(host=host, hybrid=hybrid, unattended=unattended)
-            if rc == 0 and recovery_after:
-                print()
-                _status_line(pb.tr(
-                    "[СДЕЛАЙТЕ] FUDAN1 уже записан и сверен. После reboot сразу зажмите Reset и держите до 2 коротких + 3 длинных красных миганий и постоянного красного света; затем отпустите.",
-                    "[ACTION] FUDAN1 is written and verified. After reboot immediately hold Reset through 2 short + 3 long red flashes and steady red, then release.",
-                ))
-                ui.prompt(pb.tr("Нажмите Enter для перезагрузки OpenWrt: ", "Press Enter to reboot OpenWrt: "))
-                try:
-                    pb.ssh_run(host, "sync; reboot -f", timeout=30, allow_disconnect=True, quiet=True)
-                except Exception:
-                    pass
-            return rc
+            kind = probe_http_kind(host)
+            if kind == "stock_http":
+                route = "stock"
+            elif kind == "openwrt_http":
+                raise RuntimeError("OpenWrt HTTP was detected but root SSH is unavailable")
+            else:
+                raise RuntimeError("AUTO route could not positively identify OpenWrt or Nokia STOCK")
+
+    if route == "openwrt":
+        _ssh_openwrt_identity(host)
+        rc = run_install_ssh(host=host, hybrid=hybrid, unattended=unattended)
+        if rc == 0 and recovery_after:
+            print()
+            _status_line(pb.tr(
+                f"[СДЕЛАЙТЕ] UrsusBoot {TARGET_URSUS} уже записан и сверен. После reboot сразу зажмите Reset и держите до 2 коротких + 3 длинных красных миганий и постоянного красного света; затем отпустите.",
+                f"[ACTION] UrsusBoot {TARGET_URSUS} is written and verified. After reboot immediately hold Reset through 2 short + 3 long red flashes and steady red, then release.",
+            ))
+            ui.prompt(pb.tr("Нажмите Enter для перезагрузки OpenWrt: ", "Press Enter to reboot OpenWrt: "))
+            try:
+                pb.ssh_run(host, "sync; reboot -f", timeout=30, allow_disconnect=True, quiet=True)
+            except Exception:
+                pass
+        return rc
 
     PRIVATE.mkdir(parents=True, exist_ok=True)
     RESULTS.mkdir(parents=True, exist_ok=True)
@@ -1069,7 +1094,7 @@ def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery
             result["target_already_exact"] = already_exact
 
             if already_exact:
-                _status_line("[ГОТОВО] В mtd0 уже находится точный UrsusBoot FUDAN1; SHA256 совпадает с подготовленным образом.")
+                _status_line(f"[ГОТОВО] В mtd0 уже находится точный UrsusBoot {TARGET_URSUS}; SHA256 совпадает с подготовленным образом.")
                 _status_line("[ИНФО] Повторная запись NAND не нужна и будет пропущена. Перехожу только к входу в Recovery.")
                 after_sha = remote_sha
                 result["readback_sha256"] = after_sha
@@ -1128,13 +1153,13 @@ def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery
                 print()
                 if already_exact:
                     _status_line(pb.tr(
-                        "[ГОТОВО] Точный UrsusBoot FUDAN1 уже был в mtd0; повторная запись пропущена.",
-                        "[OK] Exact UrsusBoot FUDAN1 was already present in mtd0; the rewrite was skipped.",
+                        f"[ГОТОВО] Точный UrsusBoot {TARGET_URSUS} уже был в mtd0; повторная запись пропущена.",
+                        f"[OK] Exact UrsusBoot {TARGET_URSUS} was already present in mtd0; the rewrite was skipped.",
                     ))
                 else:
                     _status_line(pb.tr(
-                        "[ГОТОВО] UrsusBoot FUDAN1 напрямую записан в mtd0 и считан обратно для сверки.",
-                        "[OK] UrsusBoot FUDAN1 was written directly to mtd0 and passed readback.",
+                        f"[ГОТОВО] UrsusBoot {TARGET_URSUS} напрямую записан в mtd0 и считан обратно для сверки.",
+                        f"[OK] UrsusBoot {TARGET_URSUS} was written directly to mtd0 and passed readback.",
                     ))
                 _status_line(pb.tr(
                     "[СДЕЛАЙТЕ] После перезагрузки следите за индикаторами роутера: когда они все мигнут/перезапустятся, сразу зажмите Reset. Держите до красной последовательности 2 коротких + 3 длинных и постоянного красного света; затем отпустите.",
@@ -1158,7 +1183,7 @@ def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery
             elif unattended:
                 reboot = ""
             else:
-                prompt = ("Точный UrsusBoot FUDAN1 уже находится в mtd0. Нажмите Enter для перезагрузки или N, чтобы остаться в текущей системе: "
+                prompt = (f"Точный UrsusBoot {TARGET_URSUS} уже находится в mtd0. Нажмите Enter для перезагрузки или N, чтобы остаться в текущей системе: "
                           if already_exact else
                           "mtd0 записан и сверен. Нажмите Enter для перезагрузки или N, чтобы остаться в текущей системе: ")
                 reboot = ui.prompt(prompt).strip().lower()
@@ -1184,7 +1209,7 @@ def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery
             kind = wait_http_kind(recovery_host if (unattended and recovery_after) else str(result.get("host") or "192.168.1.1"), 180)
             result["post_reboot_http_kind"] = kind
             if kind == "stock_http":
-                _status_line("[ИНФО] Загрузилась заводская прошивка Nokia. Запись FUDAN1 уже проверена; если нужен Recovery, повторять запись mtd0 не требуется.")
+                _status_line(f"[ИНФО] Загрузилась заводская прошивка Nokia. Запись UrsusBoot {TARGET_URSUS} уже проверена; если нужен Recovery, повторять запись mtd0 не требуется.")
                 result["status"] = "PASS"
             elif kind == "ursus_recovery":
                 if unattended and recovery_after:
@@ -1314,7 +1339,7 @@ def selftest() -> int:
     candidate, meta = build_candidate(live, hybrid)
     if candidate[:FIP_PHYS_OFF] != live[:FIP_PHYS_OFF] or candidate[STOCK_BOOT_ENV_OFF:] != live[STOCK_BOOT_ENV_OFF:]:
         raise RuntimeError("candidate preservation selftest failed")
-    uboot = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha4-FUDAN1-u-boot.bin"
+    uboot = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha5-UBIUX1-u-boot.bin"
     if sha_file(uboot) != EXPECTED_U_BOOT_SHA256:
         raise RuntimeError("UrsusBoot u-boot hash mismatch")
     reserves=control_fdt_memreserves(uboot.read_bytes())
