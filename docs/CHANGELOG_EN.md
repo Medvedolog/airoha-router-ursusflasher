@@ -2,6 +2,29 @@
 
 This file lists released behavior only.
 
+## 0.2.55 — STATEUI8 / DIAGAUTH1 / BACKUPRAW1
+
+- EXPERT items 7, 10 and 11 may perform an interactive read-only root SSH probe when passive detection is incomplete. System OpenSSH asks for the password; UrsusFlasher does not store it or install a temporary key.
+- Item 7 no longer calls the inherited global `verify_kit()` and no longer depends on legacy `transition-bundle.bin` payloads.
+- The MD read-only BootROM path pins only the required RAM preloader, RC18 RECOVERY_SAFE FIP and recovery initramfs by exact size/SHA256.
+- OpenWrt UBI exact backup captures the full physical 256 MiB `mtd0_all_flash.bin.gz` through BootROM → RAM → read-only `/dev/mtd0` → TFTP, with per-chunk reread SHA256 and a final full-image SHA256.
+- UBI backups also contain `mtd1_bl2.bin.gz`, `mtd2_ubi.bin.gz`, `RAW_BACKUP.json` and `SHA256SUMS.txt`; EXPERT item 8 validates this format.
+- Nokia STOCK keeps the existing `mtd0..mtd16` backup format. FUDAN1 and bundled OpenWrt images are unchanged.
+
+## 0.2.54 — STATEUI7 / MENUOPS1
+
+- EXPERT item 2 now covers both UrsusBoot install and update; item 4 is hidden and retained as a compatibility alias.
+- Every EXPERT item has a short action/transport explanation.
+- Custom OpenWrt can be flashed from installed OpenWrt via SSH upload, `sysupgrade -T`, and `sysupgrade -v -n`, or from UrsusBoot Recovery over HTTP.
+- FUDAN1 and bundled OpenWrt images are unchanged.
+
+## 0.2.53 — ERRORUI1 / SSHBIN1
+
+- EXPERT and ONE-CLICK now print one short `[CAUSE] ...` line in the operator UI while retaining the full exception in the session log.
+- UrsusBoot installation from OpenWrt no longer depends on a remote `base64` utility for FIP/boot-block reads; binary stdout is captured directly over system OpenSSH with stderr kept separate.
+- Fixes the observed Chinese OpenWrt failure `ash: line 0: base64: not found` before any FIP write began.
+- FUDAN1 and OpenWrt firmware images are unchanged.
+
 ## 0.2.52 — STATEUI6 / ACTIONPREFLIGHT1
 
 - Passive `DeviceState` no longer acts as a global write gate.

@@ -5,6 +5,7 @@
 FILES.md
 LICENSE-NOTICE.md
 README.md
+ROLLUP_FILELIST.txt
 ROLLUP_QA.txt
 START_EXPERT.cmd
 START_EXPERT.sh
@@ -29,6 +30,9 @@ openwrt/payload-2026-09-06/config.buildinfo
 openwrt/payload-2026-09-06/feeds.buildinfo
 openwrt/source/openwrt-3d1645ee26d6a2e20be71d7fa1716721bac78e53.zip
 payloads/README.md
+payloads/md/bootrom-backup/README.md
+payloads/md/bootrom-backup/nokia-xg040gmd-stock-recovery-initramfs.itb
+payloads/md/bootrom-backup/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip
 payloads/md/ursusboot/openwrt-6.18.44-mtd-rw.ko
 payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin
 payloads/md/ursusboot/stock_mtd0_reference.bin
@@ -119,6 +123,7 @@ ursusflasher/tools/selftest_accept1_hostflow.py
 ursusflasher/tools/selftest_alpha4_hwfix3.py
 ursusflasher/tools/selftest_device_state_v529.py
 ursusflasher/tools/selftest_directstock1.py
+ursusflasher/tools/selftest_errorui_sshbin.py
 ursusflasher/tools/selftest_expert_menu_clean.py
 ursusflasher/tools/selftest_fudan1_ssh.py
 ursusflasher/tools/selftest_mainline.py
@@ -133,6 +138,8 @@ ursusflasher/tools/selftest_stateui4_execution_environment.py
 ursusflasher/tools/selftest_stateui5_ru_terms.py
 ursusflasher/tools/selftest_stateui6_action_preflight.py
 ursusflasher/tools/selftest_stateui6_kit_boundary.py
+ursusflasher/tools/selftest_stateui7_menuops.py
+ursusflasher/tools/selftest_stateui8_diagbackup.py
 ursusflasher/tools/selftest_ursusboot_only.py
 ursusflasher/tools/selftest_web_poll_resilience.py
 ursusflasher/tools/verify_manifest_closure.py

@@ -43,6 +43,8 @@ def main() -> None:
         '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip',
         '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-ram-installer.fip',
         '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-bl2.bin',
+        '/data/payloads/md/bootrom-backup/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip',
+        '/data/payloads/md/bootrom-backup/nokia-xg040gmd-stock-recovery-initramfs.itb',
         '/fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin',
         '/fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb',
         '/doc/INSTRUCTIONS_RU.md', '/doc/EMERGENCY_URSUSBOOT_RU.md',

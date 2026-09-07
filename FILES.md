@@ -1,4 +1,4 @@
-# Состав репозитория UrsusFlasher 0.2.52
+# Состав репозитория UrsusFlasher 0.2.55
 
 Этот файл описывает назначение основных каталогов и файлов текущего GitHub-снимка.
 
@@ -23,7 +23,7 @@ config/                     манифесты, возможности, UI-сл�
 
 ```text
 one_key.py                  автоматический сценарий ONE-CLICK
-expert.py                   меню EXPERT
+expert.py                   меню EXPERT; пункт 2 объединяет установку/обновление UrsusBoot, пункт 3 выбирает SSH/sysupgrade или Recovery HTTP
 proven_backend.py           работа с Nokia STOCK, backup, BootROM и низкоуровневыми путями
 device_state.py             read-only определение состояния устройства
 ursusboot_install.py        установка/переустановка UrsusBoot через Telnet или SSH
@@ -52,7 +52,7 @@ openwrt/payload-2026-09-06/README.md
 
 ## Служебные компоненты
 
-Каталог `payloads/` содержит рабочие и аварийные компоненты UrsusBoot, preloader, RAM installer, служебные recovery-образы и helper-файлы, которые используются исполняемыми сценариями.
+Каталог `payloads/` содержит рабочие и аварийные компоненты UrsusBoot, preloader, RAM installer и служебные recovery-образы. `payloads/md/bootrom-backup/` содержит закреплённые FIP/initramfs только для read-only пункта 7; они проверяются по точным размеру и SHA256 и не зависят от старых `transition-bundle.bin`.
 
 Контрольные суммы служебного набора формируются в `PAYLOAD_SHA256SUMS.txt` экспортируемого релиза.
 

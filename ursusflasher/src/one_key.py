@@ -459,6 +459,19 @@ def main() -> int:
     return 0
 
 
+def _operator_error_cause(exc: Exception) -> str:
+    lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
+    if not lines:
+        return exc.__class__.__name__
+    for line in reversed(lines):
+        if line in {"Последний вывод SSH:", "Last SSH output:"}:
+            continue
+        if line.startswith("SSH-команда завершилась с кодом ") or line.startswith("бинарная SSH-команда завершилась с кодом "):
+            continue
+        return line[-500:]
+    return lines[-1][-500:]
+
+
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
@@ -468,5 +481,6 @@ if __name__ == "__main__":
     except Exception as exc:
         print(tr("\n[ОШИБКА] Операция не завершена.", "\n[ERROR] Operation did not complete."), file=sys.stderr)
         proven._write_session_only("[TECH] " + repr(exc))
-        print(tr("Технические подробности записаны в лог сеанса.", "Technical details were written to the session log."), file=sys.stderr)
+        print(tr("[ПРИЧИНА] ", "[CAUSE] ") + _operator_error_cause(exc), file=sys.stderr)
+        print(tr("Полные технические подробности записаны в лог сеанса.", "Full technical details were written to the session log."), file=sys.stderr)
         raise SystemExit(1)

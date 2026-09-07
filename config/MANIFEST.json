@@ -1,7 +1,7 @@
 {
   "schema": 2,
   "project": "UrsusFlasher",
-  "version": "0.2.52-md-alpha4-fudan1-stateui6-actionpreflight1-payloadrefresh1-rootfsmax2",
+  "version": "0.2.55-md-alpha4-fudan1-stateui8-diagauth1-backupraw1-menuops1-actionpreflight1-errorui1-sshbin1-payloadrefresh1-rootfsmax2",
   "build_date": "2026-09-06",
   "target": {
     "model": "Nokia XG-040G-MD",
@@ -11,11 +11,11 @@
   "runtime": {
     "python": "3.x stdlib only",
     "pip_required": false,
-    "policy": "STATEUI6 ACTIONPREFLIGHT1: passive DeviceState diagnostics no longer globally gate write-capable actions. Each action performs its own authoritative preflight and may request credentials when selected. FUDAN1, OpenWrt production sysupgrade payloads and service/recovery assets are unchanged from 0.2.51."
+    "policy": "STATEUI8 DIAGAUTH1/BACKUPRAW1: passive DeviceState remains informational; explicitly selected diagnostics/backup may perform interactive read-only root SSH authentication without installing a key. Item 7 uses a narrow pinned BootROM/RAM backup profile and exact raw NAND capture for OpenWrt."
   },
   "orchestration": {
     "host_ui": "data/expert.py",
-    "policy": "STATEUI6 ACTIONPREFLIGHT1. Passive DeviceState is informational in EXPERT; write authorization is resolved by each action preflight. SSH credentials may be requested only after an operation is selected.",
+    "policy": "STATEUI8 DIAGAUTH1/BACKUPRAW1 over STATEUI7 MENUOPS1. Action-local write preflight is unchanged; explicit diagnostic/backup actions may request read-only root SSH credentials.",
     "ursusboot_inputs": [
       "webfailsafe",
       "tftp",
@@ -30,8 +30,8 @@
     ],
     "one_key_password_prompts": false,
     "one_key_confirmation_tokens": false,
-    "running_openwrt_detection": "HTTP fingerprint plus non-interactive SSH probe for menu information; if root auth is not available in batch mode, the selected action may perform interactive root SSH authentication during its own preflight.",
-    "emergency_confirmation": "legacy destructive backend retained; no extra confirmation ceremony added by 0.2.52 STATEUI6",
+    "running_openwrt_detection": "HTTP fingerprint plus non-interactive SSH probe for menu information; items 7/10/11 and write-action preflights may perform interactive system-OpenSSH authentication when explicitly selected.",
+    "emergency_confirmation": "legacy destructive backend retained; no extra confirmation ceremony added by 0.2.55",
     "recovery_user_instruction": "After a software reboot, wait for the router-wide LED reboot blink/restart cue, then immediately hold Reset through 2-short+3-long red flashes and steady red. If missed: power OFF, power ON, wait about 1 second, hold Reset 5-10 seconds until the same red sequence. Reset held before power-on is Airoha BootROM.",
     "bootrom_emergency_ursusboot": "EXPERT BootROM uses exact alpha3 preloader + alpha3 RAM installer + alpha3 emergency FIP/BL2. This emergency lineage is separate from the FUDAN1 production target.",
     "console_palette": "UrsusBoot WebFailsafe palette: amber #D99A4D / amber2 #C8873A / ink #F2E8DA / muted #A89179 / success #7CC493 / error #E8837A / UART-XMODEM-prompt sand #EFC079; no cyan/blue/magenta in main UI",
@@ -356,10 +356,11 @@
     "hostflow_accept2": "0.2.39-md-alpha4-hwfix3-accept2",
     "hostflow_accept3": "0.2.41-md-alpha4-hwfix3-directstock1",
     "hostflow_directstock1": "0.2.41-md-alpha4-hwfix3-directstock1",
-    "hostflow_rootfsmax2": "0.2.43-md-alpha4-hwfix3-rootfsmax2"
+    "hostflow_rootfsmax2": "0.2.43-md-alpha4-hwfix3-rootfsmax2",
+    "policy": "STATEUI8 DIAGAUTH1/BACKUPRAW1 over STATEUI7 MENUOPS1; menu remains task-oriented, explicit diagnostics may authenticate read-only, and item 7 has a self-contained raw BootROM backup path."
   },
   "baseline": {
-    "policy": "STATEUI6 ACTIONPREFLIGHT1 over 0.2.51 STATEUI5; operator diagnostics are informational, while destructive authorization is action-local. Firmware payloads are unchanged.",
-    "emergency_confirmation": "legacy destructive backend retained; no extra confirmation ceremony added by 0.2.52"
+    "policy": "STATEUI8 DIAGAUTH1/BACKUPRAW1: passive state is informational; explicit diagnostics may ask for root SSH; OpenWrt UBI backup is exact 256 MiB raw NAND capture through RAM. Firmware payloads are unchanged.",
+    "emergency_confirmation": "legacy destructive backend retained; no extra confirmation ceremony added by 0.2.55"
   }
 }

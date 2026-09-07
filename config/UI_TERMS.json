@@ -1,5 +1,5 @@
 {
-  "version": 10,
+  "version": 11,
   "layouts": {
     "STOCK": {
       "ru": "Заводская прошивка Nokia",
@@ -38,8 +38,8 @@
     },
     "install_or_repair_bootloader": {
       "number": 2,
-      "ru": "Установить или переустановить загрузчик",
-      "en": "Install or repair the bootloader"
+      "ru": "Установить или обновить UrsusBoot",
+      "en": "Install or update UrsusBoot"
     },
     "custom_openwrt": {
       "number": 3,
@@ -48,8 +48,8 @@
     },
     "update_bootloader": {
       "number": 4,
-      "ru": "Обновить загрузчик",
-      "en": "Update the bootloader"
+      "ru": "Обновить UrsusBoot (совместимость)",
+      "en": "Update UrsusBoot (compatibility alias)"
     },
     "recover_bootloader": {
       "number": 5,
@@ -92,7 +92,7 @@
       "en": "Check package files"
     }
   },
-  "contract": "stable task-oriented EXPERT menu; STATEUI6 makes passive DeviceState informational and moves authorization to per-action preflight; ! means persistent-write-capable only",
+  "contract": "STATEUI8 DIAGAUTH1/BACKUPRAW1 over STATEUI7 MENUOPS1: task-oriented menu; passive DeviceState is informational; explicit items 7/10/11 may authenticate read-only via system OpenSSH; item 7 uses self-contained exact raw BootROM backup; authorization remains per-action; ! means persistent-write-capable only",
   "systems": {
     "NOKIA_STOCK": {
       "ru": "Заводская прошивка Nokia",
@@ -291,6 +291,26 @@
     "TELNET_NOKIA_STOCK": {
       "ru": "Через Telnet из запущенной заводской прошивки Nokia",
       "en": "Over Telnet from Nokia factory firmware"
+    },
+    "AUTO_URSUSBOOT_INSTALL_UPDATE": {
+      "ru": "Установка или обновление UrsusBoot с автоматическим выбором транспорта",
+      "en": "Install or update UrsusBoot with automatic transport selection"
+    },
+    "URSUSBOOT_RECOVERY_SELFUPDATE": {
+      "ru": "Через HTTP из UrsusBoot Recovery; при сбое — TFTP",
+      "en": "Over HTTP from UrsusBoot Recovery; TFTP fallback on failure"
+    },
+    "SSH_PERSISTENT_OPENWRT_SYSUPGRADE": {
+      "ru": "Через SSH и штатный sysupgrade из установленной OpenWrt",
+      "en": "Over SSH and native sysupgrade from installed OpenWrt"
+    },
+    "URSUSBOOT_RECOVERY_CUSTOM_IMAGE": {
+      "ru": "Через HTTP из UrsusBoot Recovery",
+      "en": "Over HTTP from UrsusBoot Recovery"
+    },
+    "ALIAS_TO_ACTION_2": {
+      "ru": "Совместимый псевдоним пункта 2",
+      "en": "Compatibility alias for item 2"
     }
   }
 }

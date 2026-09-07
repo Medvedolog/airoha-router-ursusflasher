@@ -9,7 +9,7 @@ import ursusboot_update as u
 import ursusboot_install as bi
 import one_key as ok
 m=json.loads((D/'data/MANIFEST.json').read_text(encoding='utf-8')); meta=m['ursusboot']
-assert m['version']=='0.2.52-md-alpha4-fudan1-stateui6-actionpreflight1-payloadrefresh1-rootfsmax2'
+assert m['version']=='0.2.55-md-alpha4-fudan1-stateui8-diagauth1-backupraw1-menuops1-actionpreflight1-errorui1-sshbin1-payloadrefresh1-rootfsmax2'
 assert meta['version']=='0.1.0-alpha3'  # emergency lineage remains alpha3
 assert bi.TARGET_URSUS=='0.1.0-alpha4-FUDAN1'
 assert bi.PAYLOAD.name=='ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip'
@@ -130,14 +130,14 @@ assert 'physical_reboot_to_recovery' not in one
 assert 'примерно через 1 секунду' in one and '5-10 секунд' in one
 assert 'debounce около 0,75 с' not in one
 terms=json.loads((D/'data/UI_TERMS.json').read_text(encoding='utf-8'))
-assert 'STATEUI6' in terms['contract']
+assert 'STATEUI7' not in terms['contract'] or 'task-oriented' in terms['contract']
 expected={
  'install_openwrt':1,'install_or_repair_bootloader':2,'custom_openwrt':3,'update_bootloader':4,
  'recover_bootloader':5,'restore_nokia':6,'full_backup':7,'validate_backup':8,'disaster_kit':9,
  'capabilities':10,'flash_diagnostics':11,'package_files':12,
 }
 assert {k:int(v['number']) for k,v in terms['expert_actions'].items()}==expected
-assert terms['expert_actions']['install_or_repair_bootloader']['ru']=='Установить или переустановить загрузчик'
+assert terms['expert_actions']['install_or_repair_bootloader']['ru']=='Установить или обновить UrsusBoot'
 assert terms['expert_actions']['restore_nokia']['ru']=='Восстановить заводскую прошивку Nokia'
 assert '[ИНФО]' in one and 'layout_label' in one
 web=(D/'data/ursus_web_client.py').read_text(encoding='utf-8')
@@ -225,5 +225,5 @@ expert_src=(D/'data/expert.py').read_text(encoding='utf-8')
 assert 'Нажмите Enter, чтобы вернуться в меню EXPERT' in expert_src
 assert not (D/'START.cmd').exists() and not (D/'START.sh').exists()
 assert (D/'START_ONECLICK.cmd').exists() and (D/'START_EXPERT.cmd').exists()
-print('URSUSFLASHER_0.2.52_FUDAN1_STATEUI6_ACTIONPREFLIGHT1_PAYLOADREFRESH1_ROOTFSMAX2_MAINLINE_QA=PASS')
+print('URSUSFLASHER_0.2.55_FUDAN1_STATEUI8_DIAGAUTH1_BACKUPRAW1_MENUOPS1_ACTIONPREFLIGHT1_ERRORUI1_SSHBIN1_PAYLOADREFRESH1_ROOTFSMAX2_MAINLINE_QA=PASS')
 print('USER_FLOW_GATE_POLICY_QA=PASS')

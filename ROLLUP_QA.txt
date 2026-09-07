@@ -1,40 +1,38 @@
-UrsusFlasher 0.2.52 STATEUI6 / ACTIONPREFLIGHT1 roll-up QA
+UrsusFlasher 0.2.55 STATEUI8 / DIAGAUTH1 / BACKUPRAW1 roll-up QA
 
-README_RU_OPERATIONS_QA=PASS
-STATEUI5_RU_TERMS_QA=PASS
-STATEUI6_ACTION_PREFLIGHT_QA=PASS
-STATEUI6_KIT_BOUNDARY_QA=PASS
+STATUS=PASS
+
+Changes:
+- EXPERT items 7, 10 and 11 may perform an explicit interactive read-only root SSH probe when passive DeviceState is incomplete.
+- The password prompt belongs to system OpenSSH; UrsusFlasher does not store the password and does not install a temporary SSH key for diagnostics.
+- EXPERT item 7 no longer calls inherited verify_kit() and no longer depends on transition-bundle.bin or the legacy MedveFlasher transition tree.
+- Item 7 uses exact pinned MD RAM stages: shared AN7581 preloader + RC18 RECOVERY_SAFE FIP + recovery initramfs.
+- OpenWrt UBI backup captures the full physical 256 MiB /dev/mtd0 and records an authoritative mtd0_all_flash.bin.gz with full SHA256.
+- OpenWrt UBI backup also emits derived mtd1_bl2.bin.gz and mtd2_ubi.bin.gz plus RAW_BACKUP.json and SHA256SUMS.txt.
+- EXPERT item 8 validates the new exact raw backup format; Nokia STOCK retains the existing mtd0..mtd16 format.
+- Item 2/3 MENUOPS1 behavior and action-local destructive preflights are retained.
+
+QA:
 GITHUB_ROLLUP_REPO_QA=PASS
-RELEASE_ZIP_QA=PASS files=88
-PUBLIC_RELEASE_QA=PASS files=65
-PAYLOAD_TREE_IDENTITY_0.2.51=PASS files=34
-FW_TREE_IDENTITY_0.2.51=PASS files=3
-WINDOWS_UTF8_SELFTEST_FIX=PASS
-GITATTRIBUTES_AUTOCRLF_POLICY=PASS
-REPRODUCIBLE_LOG_GITIGNORE_EXCEPTION=PASS
-CMD_CRLF_POLICY=PASS
-WINDOWS_STYLE_CHECKOUT_AUTOCRLF_SHA256=PASS files=139
-REPRODUCIBLE_LOGS_TRACKED=PASS files=4
-GITHUB_MAX_BLOB=90000000
-LEGACY_USB_BACKUP_AGENT_NOT_REQUIRED_BY_KIT_VERIFIER=PASS
-PROJECT_TRANSFER_DOCS_ABSENT=PASS
-ROADMAP_STYLE_DOCS_ABSENT=PASS
+STATEUI8_DIAGAUTH1_BACKUPRAW1_QA=PASS
+RAW_BACKUP_SYNTH_QA=PASS size=268435456
+RELEASE_ZIP_QA=PASS files=94
+PUBLIC_RELEASE_QA=PASS files=68
+MANIFEST_CLOSURE_QA=PASS files=94
+URSUSBOOT_PAYLOAD_TREE_BYTE_IDENTITY_0.2.54=PASS files=33
+FW_TREE_BYTE_IDENTITY_0.2.54=PASS files=3
+URSUSBOOT_ARTIFACTS_BYTE_IDENTITY_0.2.54=PASS files=12
 
-Behavioral change:
-- Passive DeviceState is informational and no longer globally blocks write-capable actions.
-- EXPERT main header shows only UrsusFlasher EXPERT + version.
-- Device state moved to action 10 (Device state and available operations).
-- Actions 1, 2 and 5 remain selectable under PARTIAL passive detection and perform their own operation-specific preflight.
-- Action-specific gates remain active for operations that require confirmed UrsusBoot/Recovery state.
-- Root SSH password is not requested by passive menu probing; the selected operation invokes normal OpenSSH authentication when needed.
+Read-only backup pinned RAM payloads:
+- preloader size=113447 sha256=6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808
+- RECOVERY_SAFE FIP size=308154 sha256=2ebcbf3981e3e56b6389521fc2caa3320cf259c08f173b660b29366b9290bcc1
+- recovery initramfs size=11285480 sha256=c40c87354566eb44fc933c1ce6c0cd9c81227b525243c67c9932b80a656d01c6
 
-Firmware identity:
-- payloads/: byte-identical to 0.2.51 (34 files)
-- fw/: byte-identical to 0.2.51 (3 files)
-- FUDAN1 firmware artifacts unchanged
+Firmware status:
+- FUDAN1 unchanged
+- OpenWrt factory sysupgrade unchanged
+- OpenWrt UBI sysupgrade unchanged
 
-Release ZIP SHA256:
-6291475b3479a543903cf72efaf1855ef153cedfd954dd12bb2aad4f9568e355
-
-PUBLIC-TEST ZIP SHA256:
-92b39ccf33a5f898e59c5ad0ca791098e27a63070f5770e300deb3eef0bb8499
+ROLLUP_SHA256_CLOSURE=PASS files=145
+GIT_WINDOWS_EOL_POLICY=PRESERVED (.cmd=CRLF; text=LF)
+GITHUB_MAX_SINGLE_FILE=90000000

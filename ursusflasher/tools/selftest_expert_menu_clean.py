@@ -12,7 +12,9 @@ expected={
 }
 assert {k:int(v['number']) for k,v in a.items()}==expected
 assert sorted(int(v['number']) for v in a.values())==list(range(1,13))
-assert a['install_or_repair_bootloader']['ru']=='Установить или переустановить загрузчик'
+assert 'VISIBLE_ACTIONS = (1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12)' in expert
+assert '_show_action(4' not in expert
+assert a['install_or_repair_bootloader']['ru']=='Установить или обновить UrsusBoot'
 assert '/' not in a['install_or_repair_bootloader']['ru']
 assert a['restore_nokia']['ru']=='Восстановить заводскую прошивку Nokia'
 assert 'device_state as ds' in expert
@@ -24,7 +26,7 @@ for historical in ('bootrom_bl2_experiment','alpha4_ab_install','alpha4_ab_rollb
     assert historical not in a
 assert 'import alpha4_hwfix_test' not in expert
 print('EXPERT_MENU_V529_QA=PASS')
-print('VISIBLE_ACTIONS=1..12_CONTIGUOUS')
+print('VISIBLE_ACTIONS=1,2,3,5..12; ITEM4=HIDDEN_ALIAS_TO_2')
 print('WRITE_MARKER=STRUCTURED_WRITE_CAPABLE_ONLY')
 
 assert 'json.dumps(state.to_dict()' in expert  # raw state is still logged for diagnostics
