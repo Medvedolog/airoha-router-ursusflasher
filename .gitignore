@@ -8,3 +8,9 @@ results/
 .DS_Store
 
 !ursusboot/artifacts/*.log
+
+# The SDK is committed as parts/ because the whole tarball is 121.5 MB and
+# GitHub refuses any blob over 100 MB. reassemble-sdk.sh recreates it locally
+# and SDK_SHA256SUMS proves the result; the reassembled file itself must never
+# be committed, or the push is rejected outright.
+toolchains/openwrt-sdk-r35906/openwrt-sdk-r35906.tar.zst

@@ -8,9 +8,9 @@ sys.path.insert(0,str(D/'data'))
 import ursusboot_install as bi
 import one_key as ok
 
-assert bi.TARGET_URSUS == '0.1.0-alpha4-FUDAN1'
-assert bi.PAYLOAD.name == 'ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip'
-assert hashlib.sha256(bi.PAYLOAD.read_bytes()).hexdigest() == 'ce43b56d86321ccb7657d2e9b7ddf58e811efc73927855bbb75e896c83b18600'
+assert bi.TARGET_URSUS == '0.1.0-alpha5-UBIUX1'
+assert bi.PAYLOAD.name == 'ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip'
+assert hashlib.sha256(bi.PAYLOAD.read_bytes()).hexdigest() == '548c446555231ee1b6ec4666000831226e0749c576d702c06dc5f501a6f510db'
 assert bi.ALPHA3_REFERENCE_PAYLOAD.name == 'ursusboot-md-0.1.0-alpha3-update.fip'
 assert hashlib.sha256(bi.ALPHA3_REFERENCE_PAYLOAD.read_bytes()).hexdigest() == '597071e178470bfda23aab9738ad7ddb0b25e9b21ef336fd3eceb39c39f983ce'
 
@@ -28,14 +28,14 @@ assert candidate[bi.FIP_PHYS_OFF:bi.FIP_PHYS_OFF+len(target)] == target
 assert meta['hybrid_fip_sha256'] == hashlib.sha256(target).hexdigest()
 
 src=(D/'data/one_key.py').read_text(encoding='utf-8')
-assert 'Промежуточная alpha3 больше не используется.' in src
-assert 'No intermediate alpha3 bootstrap is used.' in src
+assert 'route="stock"' in src
+assert 'alpha5-UBIUX1' in src
 assert 'Служебный alpha3 bootstrap записан' not in src
 assert 'first stock write uses exact alpha3' not in src.lower()
 
 m=json.loads((D/'data/MANIFEST.json').read_text(encoding='utf-8'))
 assert m['ursusboot']['stock_bootstrap_version'] == 'REMOVED_FROM_ONECLICK'
-assert m['ursusboot']['direct_stock_target_version'] == '0.1.0-alpha4-FUDAN1'
+assert m['ursusboot']['direct_stock_target_version'] == '0.1.0-alpha5-UBIUX1'
 
 print('DIRECT_STOCK_HWFIX3_LINEAGE_QA=PASS')
 print('DIRECT_STOCK_HWFIX3_CANDIDATE_QA=PASS')

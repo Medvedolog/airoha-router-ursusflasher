@@ -9,10 +9,10 @@ import ursusboot_update as u
 import ursusboot_install as bi
 import one_key as ok
 m=json.loads((D/'data/MANIFEST.json').read_text(encoding='utf-8')); meta=m['ursusboot']
-assert m['version']=='0.2.55-md-alpha4-fudan1-stateui8-diagauth1-backupraw1-menuops1-actionpreflight1-errorui1-sshbin1-payloadrefresh1-rootfsmax2'
+assert m['version']=='0.2.56-md-alpha5-ubiux1-stateui8-diagauth1-route1-backupraw1-menuops1-actionpreflight1-errorui1-sshbin1-rootfsenv1'
 assert meta['version']=='0.1.0-alpha3'  # emergency lineage remains alpha3
-assert bi.TARGET_URSUS=='0.1.0-alpha4-FUDAN1'
-assert bi.PAYLOAD.name=='ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip'
+assert bi.TARGET_URSUS=='0.1.0-alpha5-UBIUX1'
+assert bi.PAYLOAD.name=='ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip'
 assert bi.ALPHA3_REFERENCE_PAYLOAD.name=='ursusboot-md-0.1.0-alpha3-update.fip'
 assert meta['fip_sha256']=='597071e178470bfda23aab9738ad7ddb0b25e9b21ef336fd3eceb39c39f983ce'
 assert meta['preloader_sha256']=='6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808'
@@ -124,7 +124,7 @@ assert 'device_state as ds' in expert
 assert 'full_backup_readonly' in expert
 assert 'capability_report' in expert
 assert 'restore_mtd0' not in expert
-one=(D/'data/one_key.py').read_text(encoding='utf-8'); assert 'TARGET_URSUS = "0.1.0-alpha4-FUDAN1"' in one
+one=(D/'data/one_key.py').read_text(encoding='utf-8'); assert 'TARGET_URSUS = "0.1.0-alpha5-UBIUX1"' in one
 assert 'PRODUCTION_PAYLOAD' in inspect.getsource(ok.ensure_target_ursus)
 assert 'physical_reboot_to_recovery' not in one
 assert 'примерно через 1 секунду' in one and '5-10 секунд' in one
@@ -218,12 +218,12 @@ bb=u._require_bl2_experiment_baseline(post_fipold_view)
 assert bb['fip_old_id']==6 and bb['fip_id']==7 and bb['bl2_crc32_before']=='09fb6b36'
 assert u.BL2_CRC32=='9f7bf316'
 
-assert u.PRODUCTION_PAYLOAD.name=='ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip'
-assert hashlib.sha256(u.PRODUCTION_PAYLOAD.read_bytes()).hexdigest()==meta['alpha4_fudan1_candidate']['fip_sha256']
+assert u.PRODUCTION_PAYLOAD.name=='ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip'
+assert hashlib.sha256(u.PRODUCTION_PAYLOAD.read_bytes()).hexdigest()==meta['alpha5_ubiux1_candidate']['fip_sha256']
 assert u.EMERGENCY_PAYLOAD.name=='ursusboot-md-0.1.0-alpha3-update.fip'
 expert_src=(D/'data/expert.py').read_text(encoding='utf-8')
 assert 'Нажмите Enter, чтобы вернуться в меню EXPERT' in expert_src
 assert not (D/'START.cmd').exists() and not (D/'START.sh').exists()
 assert (D/'START_ONECLICK.cmd').exists() and (D/'START_EXPERT.cmd').exists()
-print('URSUSFLASHER_0.2.55_FUDAN1_STATEUI8_DIAGAUTH1_BACKUPRAW1_MENUOPS1_ACTIONPREFLIGHT1_ERRORUI1_SSHBIN1_PAYLOADREFRESH1_ROOTFSMAX2_MAINLINE_QA=PASS')
+print('URSUSFLASHER_0.2.56_ALPHA5_UBIUX1_ROUTE1_ROOTFSENV1_MAINLINE_QA=PASS')
 print('USER_FLOW_GATE_POLICY_QA=PASS')

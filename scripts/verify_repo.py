@@ -11,10 +11,10 @@ VERSION = (ROOT / 'VERSION').read_text(encoding='utf-8').strip()
 for _d in list(ROOT.rglob('__pycache__')):
     shutil.rmtree(_d)
 EXPECTED = {
-    'ursusboot/artifacts/u-boot.bin': 'a41a81a011e19d1498d5ff0773dfd6bf9bd4c56beb3e7a46ce4622a643a30703',
-    'ursusboot/artifacts/u-boot.lzma': '450add116075477311cbf794da2541ddbdb33fb0c9eade39a47cf8d1fc0a81b7',
-    'ursusboot/artifacts/ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip': 'ce43b56d86321ccb7657d2e9b7ddf58e811efc73927855bbb75e896c83b18600',
-    'ursusboot/source/ursusboot-0.1.0-alpha4-FUDAN1-source.tar.zst': 'a8229334d7ef23ef196f6f5e90283196fd117d22083bd0d5709587ea124c04c5',
+    'ursusboot/artifacts/u-boot.bin': '06397f68ba876e01ba6a07ebbdbbcfac1e5341b9d82926fd6b4a54ae1bf7e552',
+    'ursusboot/artifacts/u-boot.lzma': '648fe1e12616068a99305645b34bee74d669ee9219f51c26ddd0b6b5003e0b1f',
+    'ursusboot/artifacts/ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip': '548c446555231ee1b6ec4666000831226e0749c576d702c06dc5f501a6f510db',
+    'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-source.tar.zst': '57736bb74e2efd198e56e687dba50b945c160ada8ee9a3f25e3534842aa7f8c3',
     'ursusboot/upstream/u-boot-2026.07.tar.bz2': '78e8bfc382fe388f9b55aa1daf8c563522a037779b5d4c349d1415e381f1243e',
     'openwrt/source/openwrt-3d1645ee26d6a2e20be71d7fa1716721bac78e53.zip': '648ed194e7de773c4c5eb7cfbac545d2d38569dba94da1873954a859897f715b',
     'openwrt/patches/24025.patch': 'a3e843e60c7efdf6f103c04153c40b711a369962a533f370ffbc38aa0dcf314e',
@@ -63,8 +63,8 @@ if repo_manifest.is_file():
 
 m = json.loads((ROOT / 'config/MANIFEST.json').read_text(encoding='utf-8'))
 assert m['version'] == VERSION
-assert 'FUDAN1' in (ROOT / 'README.md').read_text(encoding='utf-8')
-assert '0.1.0-alpha4-FUDAN1' in (ROOT / 'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-FUDAN1-BUILD_INFO.txt').read_text(encoding='utf-8')
+assert 'alpha5-UBIUX1' in (ROOT / 'README.md').read_text(encoding='utf-8')
+assert '0.1.0-alpha5-UBIUX1' in (ROOT / 'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-BUILD_INFO.txt').read_text(encoding='utf-8')
 subprocess.run([sys.executable, str(ROOT / 'scripts/verify_readme_ru.py')], cwd=ROOT, check=True, env={**os.environ, 'PYTHONDONTWRITEBYTECODE':'1'})
 
 # Runtime syntax and current package self-tests. Compile in-process so QA does not

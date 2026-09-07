@@ -139,8 +139,8 @@ jobs:
 
           Подробности — в приложенных \`INSTRUCTIONS_RU.md\` и \`EMERGENCY_URSUSBOOT_RU.md\`.
 
-          > **Роутеры с NAND Fudan:** поддержка есть, но отдельный аппаратный acceptance-прогон
-          > ещё не завершён.
+          > **UrsusBoot alpha5-UBIUX1:** сборка и упаковка проверены, но отдельный
+          > аппаратный regression новой логики Recovery/UBI ещё не проведён.
 
           ## Проверка архива
 

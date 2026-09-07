@@ -20,7 +20,7 @@ REPO_MODE = (_REPO_ROOT / 'fw').is_dir() and (_REPO_ROOT / 'payloads').is_dir() 
 ROOT = _REPO_ROOT if REPO_MODE else HERE.parent
 PAYLOAD_DIR = (ROOT / 'payloads' / 'md' / 'ursusboot') if REPO_MODE else (HERE / 'payloads' / 'md' / 'ursusboot')
 EMERGENCY_PAYLOAD = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-update.fip'
-PRODUCTION_PAYLOAD = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip'
+PRODUCTION_PAYLOAD = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip'
 PAYLOAD = EMERGENCY_PAYLOAD  # compatibility alias for BootROM/emergency alpha3 paths
 RAM_INSTALLER = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-ram-installer.fip'
 BL2_IMAGE = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-bl2.bin'
@@ -84,9 +84,9 @@ def _ursus_meta() -> dict:
 
 def _production_meta() -> dict:
     meta = _ursus_meta()
-    candidate = meta.get('alpha4_fudan1_candidate') or {}
-    if candidate.get('version') != '0.1.0-alpha4-FUDAN1':
-        raise Error('FUDAN1 production metadata missing from MANIFEST')
+    candidate = meta.get('alpha5_ubiux1_candidate') or {}
+    if candidate.get('version') != '0.1.0-alpha5-UBIUX1':
+        raise Error('alpha5-UBIUX1 production metadata missing from MANIFEST')
     return candidate
 
 def validate_emergency_fip_host() -> dict:
@@ -1126,7 +1126,7 @@ def _require_exact_file(path: Path, expected_sha256: str, label: str) -> None:
 def require_fip_payload() -> None:
     """Gate the ordinary production UrsusBoot FIP; emergency alpha3 is separate."""
     meta = _production_meta()
-    _require_exact_file(PRODUCTION_PAYLOAD, meta['fip_sha256'], 'UrsusBoot FUDAN1 production FIP')
+    _require_exact_file(PRODUCTION_PAYLOAD, meta['fip_sha256'], 'UrsusBoot alpha5-UBIUX1 production FIP')
     if PRODUCTION_PAYLOAD.stat().st_size >= (0x7C000 - 0x800):
         raise Error(f'FIP не помещается в STOCK окно: 0x{PRODUCTION_PAYLOAD.stat().st_size:x}')
 
@@ -1287,7 +1287,7 @@ def load_fip_xmodem(sp: RecoverySerial, log, *, require_native: bool = True) -> 
     print(f'Передаю production UrsusBoot FIP через XMODEM в RAM 0x{LOADADDR:08x}; FIP={size} bytes / 0x{size:x}.')
     _uboot_wait_quiet(sp, log, quiet=0.15, timeout=1.0); sp.reset_input()
     _uboot_send_line(sp, f'loadx 0x{LOADADDR:x}'); time.sleep(0.35)
-    xmodem_send(sp, PRODUCTION_PAYLOAD, 'production UrsusBoot FUDAN1 FIP', log)
+    xmodem_send(sp, PRODUCTION_PAYLOAD, 'production UrsusBoot alpha5-UBIUX1 FIP', log)
     _uboot_read_until_prompt(sp, log, 45, 'loadx production UrsusBoot FIP')
     print('[OK] Production FIP передан в RAM. Валидация выполняется самим ursusupdate write перед записью.')
 
@@ -1458,8 +1458,17 @@ def web_fit_update(image: Path | None = None) -> None:
         image = Path(raw.strip('"')).expanduser() if raw else DEFAULT_FIT
     image = image.resolve()
     if not image.is_file(): raise Error(f'FIT/sysupgrade не найден: {image}')
-    st = uw.update_firmware(host, image, confirm=True)
-    _write_session_only(f"[TECH] firmware operation_stage={st.get('operation_stage')!r} operation_detail={st.get('operation_detail')!r}")
+    keep_settings = True
+    try:
+        before = uw.status(host)
+    except Exception:
+        before = {}
+    if before.get('current_layout') == 'OPENWRT_UBI':
+        answer = input('Сохранить текущие настройки OpenWrt? [Y/n]: ').strip().lower()
+        keep_settings = answer not in ('n', 'no', 'н', 'нет')
+        print('[ИНФО] Настройки OpenWrt: ' + ('сохранить' if keep_settings else 'очистить после проверки новой прошивки'))
+    st = uw.update_firmware(host, image, confirm=True, keep_settings=keep_settings)
+    _write_session_only(f"[TECH] firmware operation_stage={st.get('operation_stage')!r} operation_detail={st.get('operation_detail')!r} keep_settings={keep_settings}")
     print('[ГОТОВО] Прошивка записана и проверена.')
 
 
@@ -1521,7 +1530,7 @@ def show_info() -> None:
         fw_info = {}
 
     rows: list[tuple[str, Path, str | None]] = [
-        ('Production UrsusBoot FUDAN1 FIP', PRODUCTION_PAYLOAD, (_production_meta()).get('fip_sha256')),
+        ('Production UrsusBoot alpha5-UBIUX1 FIP', PRODUCTION_PAYLOAD, (_production_meta()).get('fip_sha256')),
         ('Emergency UrsusBoot alpha3 FIP', EMERGENCY_PAYLOAD, meta.get('fip_sha256')),
         ('BootROM preloader', PRELOADER, meta.get('preloader_sha256')),
         ('RAM installer FIP', RAM_INSTALLER, meta.get('ram_installer_fip_sha256')),

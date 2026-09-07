@@ -1,3 +1,14 @@
+# Changelog UrsusFlasher
+
+## 0.2.56 — alpha5-UBIUX1 / ROUTE1 / ROOTFSENV1
+
+- Текущий постоянный UrsusBoot обновлён до `0.1.0-alpha5-UBIUX1`; Fudan/SkyHigh NAND-драйверная линия унаследована без изменений от alpha4-FUDAN1.
+- В UrsusBoot Recovery разрешён `OPENWRT_STOCK_LAYOUT → OPENWRT_UBI` через тот же физический migration backend, что и `NOKIA_STOCK → OPENWRT_UBI`; BOSA/RI/FIP сохраняются, полный BL2 записывается последним.
+- Web Recovery получил флаг «Сохранить настройки OpenWrt» для UBI-обновления и отдельную кнопку «Сбросить настройки OpenWrt». UART/U-Boot получил `ursussettings reset`.
+- Чистый/сброшенный `rootfs_data` создаётся как MAX−16 PEB; фактический размер сохраняется в `rootfs_data_max`, чтобы обычный OpenWrt `sysupgrade` создавал overlay того же размера. Существующий пользовательский `rootfs_data` при сохранении настроек не уменьшается.
+- ROUTE1: Telnet/порт 23 больше не считается доказательством Nokia STOCK. OpenWrt → SSH только после положительного подтверждения; Nokia STOCK → Web/Telnet только после положительного vendor fingerprint. Неопределённая среда останавливается без stock fallback.
+- Путь `web-fit` на UBI теперь спрашивает, сохранять ли текущие настройки.
+
 # История изменений UrsusFlasher
 
 Документ перечисляет опубликованные изменения рабочих версий без описания незавершённых разработческих задач.

@@ -24,7 +24,7 @@ import console_ui as ui
 import ui_terms as terms
 import network_guidance
 
-TARGET_URSUS = "0.1.0-alpha4-FUDAN1"
+TARGET_URSUS = "0.1.0-alpha5-UBIUX1"
 RECOVERY_HOST = os.environ.get("URSUS_RECOVERY_HOST", "192.168.1.1")
 DEFAULT_STOCK_HOST = os.environ.get("NOKIA_HOST", "192.168.1.1")
 
@@ -209,7 +209,12 @@ def wait_ursus(host: str = RECOVERY_HOST, seconds: int = 120) -> dict | None:
 
 
 def probe_http_identity(host: str) -> str:
-    """Read-only fingerprint: openwrt, http, or none. UrsusBoot is probed via /api/status."""
+    """Read-only HTTP fingerprint: openwrt, nokia_stock, http, or none.
+
+    A generic HTTP response is never proof of Nokia STOCK.  The stock route is
+    returned only when multiple XG-040G-MD vendor-login markers are present.
+    UrsusBoot itself is probed separately through /api/status.
+    """
     try:
         conn = http.client.HTTPConnection(host, 80, timeout=2.5)
         try:
@@ -224,6 +229,13 @@ def probe_http_identity(host: str) -> str:
     low = (headers + b"\n" + body).lower()
     if b"openwrt" in low or b"luci" in low or b"/cgi-bin/luci" in low:
         return "openwrt"
+    stock_markers = (
+        b"newmethodlogin", b"login.cgi", b"cmccadmin",
+        b"crypto_page", b"jsencrypt", b"encrypted=1",
+    )
+    hits = sum(marker in low for marker in stock_markers)
+    if hits >= 2 and (b"login.cgi" in low or b"newmethodlogin" in low):
+        return "nokia_stock"
     return "http"
 
 
@@ -268,8 +280,8 @@ def ensure_target_ursus(st: dict) -> dict:
         "Updating UrsusBoot",
         f"Сейчас в RAM работает {version or 'неизвестная версия'}. Целевая постоянная версия — {TARGET_URSUS}.",
         f"The current RAM runtime is {version or 'unknown'}. The persistent target is {TARGET_URSUS}.",
-        "Загружаю FUDAN1, UrsusBoot сам проверит FIP, запишет его и считает обратно. Перезагрузка между обновлением загрузчика и записью OpenWrt не нужна: текущая Recovery-сессия остаётся в RAM, а при STOCK→UBI миграции уже записанный FUDAN1 FIP копируется в новый UBI volume fip.",
-        "FUDAN1 is uploaded, validated, committed and read back by UrsusBoot. No intermediate reboot is required: the current Recovery runtime stays in RAM, and STOCK-to-UBI migration copies the already committed FUDAN1 FIP into the new UBI fip volume.",
+        "Загружаю alpha5-UBIUX1, UrsusBoot сам проверит FIP, запишет его и считает обратно. Перезагрузка между обновлением загрузчика и записью OpenWrt не нужна: текущая Recovery-сессия остаётся в RAM, а при STOCK→UBI миграции уже записанный alpha5-UBIUX1 FIP копируется в новый UBI volume fip.",
+        "alpha5-UBIUX1 is uploaded, validated, committed and read back by UrsusBoot. No intermediate reboot is required: the current Recovery runtime stays in RAM, and STOCK-to-UBI migration copies the already committed alpha5-UBIUX1 FIP into the new UBI fip volume.",
     )
     ursusboot_update.require_fip_payload()
     st2 = uw.update_bootloader(RECOVERY_HOST, ursusboot_update.PRODUCTION_PAYLOAD, confirm=False)
@@ -294,16 +306,50 @@ def install_ursus_from_openwrt(host: str) -> dict:
         host=host,
         recovery_after=True,
         recovery_host=RECOVERY_HOST,
+        route="openwrt",
     )
     if rc:
         raise RuntimeError(f"OpenWrt SSH UrsusBoot install returned rc={rc}")
     st = wait_ursus(RECOVERY_HOST, 20)
     if not st:
         say(tr(
-            "[ИНФО] FUDAN1 записан и сверен, но Recovery не пойман автоматически. Повторять запись не нужно.",
-            "[INFO] FUDAN1 was written and verified, but Recovery was not caught automatically. Do not repeat the write.",
+            "[ИНФО] alpha5-UBIUX1 записан и сверен, но Recovery не пойман автоматически. Повторять запись не нужно.",
+            "[INFO] alpha5-UBIUX1 was written and verified, but Recovery was not caught automatically. Do not repeat the write.",
         ))
         st = wait_for_manual_recovery()
+    return st
+
+
+def install_ursus_from_stock(host: str) -> dict:
+    """Install the production UrsusBoot only after positive Nokia STOCK proof."""
+    stage(
+        "Заводская прошивка Nokia: установка UrsusBoot",
+        "Nokia factory firmware: installing UrsusBoot",
+        f"Штатный Nokia Web на {host} подтверждён по vendor-маркерам. Универсальные Web-реквизиты используются автоматически; индивидуальный Telnet-пароль читается из самого роутера.",
+        f"The Nokia factory Web UI at {host} was positively identified by vendor markers. Universal Web credentials are used automatically; the device-specific Telnet password is read from the router itself.",
+        "Сначала проверяю модель и доступ, затем сохраняю и валидирую полную резервную копию. После этого alpha5-UBIUX1 напрямую записывается в mtd0 с сохранением заводского BootROM prefix и tcboot env, полностью считывается обратно и проверяется. Промежуточная alpha3 больше не используется.",
+        "After model/root confirmation, a complete backup is captured and validated. alpha5-UBIUX1 is written directly to mtd0 while preserving the factory BootROM prefix and tcboot environment, followed by a full readback. No intermediate alpha3 bootstrap is used.",
+    )
+    rc = ursusboot_install.run_install(
+        unattended=True, host=host, recovery_after=True,
+        recovery_host=RECOVERY_HOST, route="stock",
+    )
+    if rc:
+        raise RuntimeError(tr(
+            "Не удалось установить alpha5-UBIUX1 из подтверждённой Nokia STOCK. Дальнейшая запись не начнётся.",
+            "Failed to install alpha5-UBIUX1 from positively identified Nokia STOCK. No further write will start.",
+        ))
+    st = wait_ursus(RECOVERY_HOST, 10)
+    if not st:
+        say(tr(
+            "[ИНФО] alpha5-UBIUX1 записан и сверен. Recovery не пойман с первого раза; повторять запись mtd0 не нужно.",
+            "[INFO] alpha5-UBIUX1 was written and verified. Recovery was missed on the first attempt; do not rewrite mtd0.",
+        ))
+        st = wait_for_manual_recovery()
+    say(tr(
+        f"[ИНФО] Роутер в режиме восстановления UrsusBoot {st.get('version')}. Система: {terms.layout_label(st.get('current_layout'))}.",
+        f"[INFO] Router is in UrsusBoot recovery mode {st.get('version')}. System: {terms.layout_label(st.get('current_layout'))}.",
+    ))
     return st
 
 def install_or_update_openwrt(st: dict) -> dict:
@@ -321,15 +367,8 @@ def install_or_update_openwrt(st: dict) -> dict:
             "Проверю память и доступное место, затем запишу систему в безопасном порядке.",
             "The storage geometry and available space are checked first, then the system is written in the safe order.",
         )
-        result = uw.update_firmware(RECOVERY_HOST, ubi_image, confirm=False, preloader=preloader)
-        # ROOTFSMAX2 is valid only here: migration completed in this same RAM
-        # Recovery session and OpenWrt has not booted/mounted rootfs_data yet.
-        resize = uw.maximize_fresh_migration_rootfs_data(RECOVERY_HOST, result)
-        proven._write_session_only(
-            f"[ROOTFSMAX2] rootfs_data_lebs={resize['rootfs_data_lebs']} "
-            f"rootfs_data_bytes={resize['rootfs_data_bytes']} free_pebs={resize['free_pebs']} "
-            f"leb_size={resize['leb_size']}"
-        )
+        result = uw.update_firmware(RECOVERY_HOST, ubi_image, confirm=False, preloader=preloader, keep_settings=False)
+        proven._write_session_only('[ROOTFSENV1] rootfs_data MAX-16 sizing and rootfs_data_max persistence completed inside UrsusBoot alpha5')
         return result
 
     if layout == "OPENWRT_UBI":
@@ -345,16 +384,17 @@ def install_or_update_openwrt(st: dict) -> dict:
         return uw.update_firmware(RECOVERY_HOST, ubi_image, confirm=False)
 
     if layout == "OPENWRT_STOCK_LAYOUT":
-        image = ensure_stock_layout_image()
+        ubi_image = require_bundle_role("OPENWRT_UBI_SYSUPGRADE")
+        preloader = require_bundle_role("STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE")
         stage(
-            "Обновление OpenWrt",
-            "Updating OpenWrt stock-layout",
-            "Использую файл обновления, подходящий для текущей разметки.",
-            "ONE-KEY uses only OPENWRT_NONUBI_SYSUPGRADE and the stock-layout backend.",
-            "Сначала записываю и проверяю основную систему, загрузочную часть — последней. Разметку не меняю.",
-            "Rootfs is written and verified first, kernel last. The partition layout is unchanged; migration to UBI is forbidden by policy.",
+            "Переход OpenWrt с заводской разметки на UBI",
+            "Migrating stock-layout OpenWrt to UBI",
+            "Текущая OpenWrt использует исходную физическую разметку Nokia. В UrsusBoot Recovery проверяю UBI sysupgrade и служебный preloader до записи.",
+            "The running OpenWrt uses the original Nokia physical layout. UrsusBoot Recovery validates the UBI sysupgrade and service preloader before writing.",
+            "Сохраняю BOSA, RI и UrsusBoot FIP, создаю UBI, записываю и проверяю OpenWrt; полный BL2 128 КиБ записывается последним.",
+            "BOSA, RI and the UrsusBoot FIP are preserved; UBI and OpenWrt are written and read back; the complete 128 KiB BL2 is committed last.",
         )
-        return uw.update_firmware(RECOVERY_HOST, image, confirm=False)
+        return uw.update_firmware(RECOVERY_HOST, ubi_image, confirm=False, preloader=preloader, keep_settings=False)
 
     proven._write_session_only(f"[TECH] unsupported layout enum: {layout}")
     raise RuntimeError(tr("Не удалось определить поддерживаемую разметку. Ничего не записываю.",
@@ -385,48 +425,39 @@ def main() -> int:
 
     st = ursus_status(RECOVERY_HOST)
     if st:
-        say(tr(f"[ИНФО] Роутер в режиме восстановления UrsusBoot {st.get('version')}. Система: {terms.layout_label(st.get('current_layout'))}.",
-               f"[INFO] Router is in UrsusBoot recovery mode {st.get('version')}. System: {terms.layout_label(st.get('current_layout'))}."))
+        say(tr(
+            f"[ИНФО] Роутер в режиме восстановления UrsusBoot {st.get('version')}. Система: {terms.layout_label(st.get('current_layout'))}.",
+            f"[INFO] Router is in UrsusBoot recovery mode {st.get('version')}. System: {terms.layout_label(st.get('current_layout'))}.",
+        ))
     else:
         identity = probe_http_identity(RECOVERY_HOST)
+
         if identity == "openwrt":
             st = install_ursus_from_openwrt(RECOVERY_HOST)
+        elif identity == "nokia_stock":
+            st = install_ursus_from_stock(RECOVERY_HOST)
         else:
-            stock_host = choose_stock_ip()
-            identity = probe_http_identity(stock_host)
-            if identity == "none":
+            # A generic/unknown HTTP page is not STOCK proof. If SSH is open,
+            # try one positive root/OpenWrt identity check. Any failure remains
+            # ambiguous and must not be converted into a vendor Web/Telnet flow.
+            if ursusboot_install._tcp_open(RECOVERY_HOST, 22):
+                try:
+                    st = install_ursus_from_openwrt(RECOVERY_HOST)
+                except Exception as ssh_exc:
+                    raise RuntimeError(tr(
+                        "Устройство отвечает, но среда не определена однозначно: Nokia STOCK не подтверждена, а OpenWrt по root SSH проверить не удалось. Stock Web/Telnet не запускается. Причина SSH: ",
+                        "The device responds, but its environment is ambiguous: Nokia STOCK is not proven and OpenWrt could not be confirmed over root SSH. Stock Web/Telnet is not started. SSH cause: ",
+                    ) + str(ssh_exc)) from ssh_exc
+            elif identity == "none":
                 raise RuntimeError(tr(
-                    "Роутер не отвечает на 192.168.1.1. Записывать вслепую не буду. Проверьте питание, подключение через LAN2/LAN3 и IP-адрес компьютера. Если в UART видно LZMA: res 1 или PANIC — запустите EXPERT и выберите " + terms.action_ref("recover_bootloader") + ".",
-                    "The router does not respond at 192.168.1.1. Nothing will be written blindly. Check power, the LAN2/LAN3 connection and the PC IP address. If UART shows LZMA: res 1 or PANIC, run EXPERT and choose " + terms.action_ref("recover_bootloader") + ".",
+                    "Роутер не отвечает на 192.168.1.1. Записывать вслепую не буду. Проверьте питание, LAN2/LAN3 и IP компьютера. Если в UART видно LZMA: res 1 или PANIC — используйте EXPERT → 5.",
+                    "The router does not respond at 192.168.1.1. Nothing will be written blindly. Check power, LAN2/LAN3 and the PC IP. If UART shows LZMA: res 1 or PANIC, use EXPERT → 5.",
                 ))
-            if identity == "openwrt":
-                st = install_ursus_from_openwrt(stock_host)
             else:
-                stage(
-                    "Заводская прошивка Nokia: установка UrsusBoot",
-                    "Nokia factory firmware: installing UrsusBoot",
-                    f"Пробую штатный Nokia Web на {stock_host}. Универсальные Web-реквизиты используются автоматически; индивидуальный Telnet-пароль читается из самого роутера.",
-                    f"Trying the stock Nokia Web UI at {stock_host}. Universal Web credentials are used automatically; the device-specific Telnet password is read from the router itself.",
-                    "Сначала проверяю модель и доступ, затем сохраняю и валидирую полную резервную копию. После этого FUDAN1 напрямую записывается в mtd0 с сохранением заводского BootROM prefix и tcboot env, полностью считывается обратно и проверяется. Промежуточная alpha3 больше не используется.",
-                    "After model/root confirmation, a complete backup is captured and validated. FUDAN1 is then written directly to mtd0 while preserving the factory BootROM prefix and tcboot environment, followed by a full readback. No intermediate alpha3 bootstrap is used.",
-                )
-                rc = ursusboot_install.run_install(
-                    unattended=True,
-                    host=stock_host,
-                    recovery_after=True,
-                    recovery_host=RECOVERY_HOST,
-                )
-                if rc:
-                    say(tr("[ОШИБКА] Не удалось напрямую установить FUDAN1 со stock. Дальнейшая запись не начнётся.",
-                           "[STOP] Direct FUDAN1 stock installation did not complete. No dangerous stage will be continued automatically."))
-                    return rc
-                st = wait_ursus(RECOVERY_HOST, 10)
-                if not st:
-                    say(tr("[ИНФО] FUDAN1 напрямую записан в mtd0 и сверен. Recovery не пойман с первого раза; повторять запись mtd0 не нужно.",
-                           "[INFO] FUDAN1 was written directly to mtd0 and verified. Recovery was missed on the first attempt; do not rewrite mtd0."))
-                    st = wait_for_manual_recovery()
-                say(tr(f"[ИНФО] Роутер в режиме восстановления UrsusBoot {st.get('version')}. Система: {terms.layout_label(st.get('current_layout'))}.",
-                       f"[INFO] Router is in UrsusBoot recovery mode {st.get('version')}. System: {terms.layout_label(st.get('current_layout'))}."))
+                raise RuntimeError(tr(
+                    "Устройство отвечает по HTTP, но страница не подтверждена ни как OpenWrt, ни как штатная Nokia XG-040G-MD. Ничего не записываю; используйте EXPERT → 10/11 для диагностики.",
+                    "The device responds over HTTP, but the page is confirmed as neither OpenWrt nor the Nokia XG-040G-MD factory UI. Nothing will be written; use EXPERT → 10/11 for diagnostics.",
+                ))
 
     st = ensure_target_ursus(st)
     say(tr(

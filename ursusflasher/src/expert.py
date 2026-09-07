@@ -175,10 +175,25 @@ def custom_openwrt_running(host: str) -> None:
 
 
 def run_bootloader_install_or_update(host: str, state: ds.DeviceState) -> None:
+    """Route item 2 only from positively identified current state.
+
+    Telnet availability is not evidence of Nokia STOCK: third-party OpenWrt
+    builds may expose both SSH and Telnet.  EXPERT therefore passes an explicit
+    route to the installer after its interactive read-only preflight.
+    """
     if state.current_system == "RECOVERY":
         update_bootloader_network()
-    else:
-        ursusboot_install.run_install(host=host)
+        return
+    if state.current_system.startswith("OPENWRT"):
+        ursusboot_install.run_install(host=host, route="openwrt")
+        return
+    if state.current_system == "NOKIA_STOCK":
+        ursusboot_install.run_install(host=host, route="stock")
+        return
+    raise RuntimeError(tr(
+        "Не удалось однозначно определить текущую систему; установка UrsusBoot остановлена без попытки stock Web/Telnet.",
+        "The current system could not be identified unambiguously; UrsusBoot installation stopped without trying stock Web/Telnet.",
+    ))
 
 
 def run_custom_openwrt(host: str, state: ds.DeviceState, action: ds.ActionApplicability) -> None:
@@ -594,7 +609,10 @@ def main() -> int:
             run_action(one_key.main, write_may_happen=True)
         elif number == 2:
             network_guidance.show()
-            fresh_state = ds.probe_device_state(host)
+            # Item 2 is an explicit operator request, so raise the passive menu
+            # probe to an interactive read-only SSH preflight when needed.
+            # This may ask for the root password, but does not write the router.
+            fresh_state = _interactive_diagnostic_state(ds.probe_device_state(host))
             fresh_action = ds.action_applicability(fresh_state)[2]
             if not fresh_action.enabled:
                 ui.status(tr("СТОП", "STOP"), fresh_action.reason or tr("Действие сейчас неприменимо.", "This action is not currently applicable."))

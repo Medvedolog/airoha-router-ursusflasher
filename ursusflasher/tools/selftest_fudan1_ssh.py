@@ -10,13 +10,13 @@ import ursusboot_update as up
 import one_key as ok
 
 m=json.loads((D/'data/MANIFEST.json').read_text(encoding='utf-8'))
-c=m['ursusboot']['alpha4_fudan1_candidate']
-assert m['version']=='0.2.55-md-alpha4-fudan1-stateui8-diagauth1-backupraw1-menuops1-actionpreflight1-errorui1-sshbin1-payloadrefresh1-rootfsmax2'
-assert bi.TARGET_URSUS=='0.1.0-alpha4-FUDAN1'
+c=m['ursusboot']['alpha5_ubiux1_candidate']
+assert m['version']=='0.2.56-md-alpha5-ubiux1-stateui8-diagauth1-route1-backupraw1-menuops1-actionpreflight1-errorui1-sshbin1-rootfsenv1'
+assert bi.TARGET_URSUS=='0.1.0-alpha5-UBIUX1'
 assert up.PRODUCTION_PAYLOAD==bi.PAYLOAD
 raw=Path(D/c['raw_bl33']).read_bytes(); comp=Path(D/c['lzma']).read_bytes(); fip=Path(D/c['persistent_fip']).read_bytes()
-assert len(raw)==948608 and hashlib.sha256(raw).hexdigest()==c['raw_bl33_sha256']
-assert len(comp)==324547 and hashlib.sha256(comp).hexdigest()==c['lzma_sha256']
+assert len(raw)==954864 and hashlib.sha256(raw).hexdigest()==c['raw_bl33_sha256']
+assert len(comp)==326367 and hashlib.sha256(comp).hexdigest()==c['lzma_sha256']
 assert len(fip)==503808 and hashlib.sha256(fip).hexdigest()==c['fip_sha256']
 for marker in (b'FM25G01B',b'FM25G02B',b'FM25S01A',b'S35ML02G300',b'W25N02JW'):
     assert marker in raw, marker
@@ -56,6 +56,6 @@ assert helper.is_file() and helper.stat().st_size==67088
 assert hashlib.sha256(helper.read_bytes()).hexdigest()==c['raw_mtd_helper']['ursus_mtd_raw']['sha256']
 assert 'ursus-mtd-raw' in inspect.getsource(bi._ssh_raw_writer)
 assert 'bad-block-in-boot-range' in (bi.PAYLOAD_DIR/'ursus-mtd-raw.c').read_text(encoding='utf-8')
-print('FUDAN1_BUILD_QA=PASS')
-print('FUDAN1_SSH_LAYOUT_AGNOSTIC_QA=PASS')
-print('FUDAN1_LZMA_SLOT_MARGIN=%d' % (0x50000-len(comp)))
+print('ALPHA5_UBIUX1_BUILD_QA=PASS')
+print('ALPHA5_UBIUX1_SSH_LAYOUT_AGNOSTIC_QA=PASS')
+print('ALPHA5_UBIUX1_LZMA_SLOT_MARGIN=%d' % (0x50000-len(comp)))
