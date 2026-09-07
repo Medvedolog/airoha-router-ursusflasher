@@ -35,3 +35,7 @@ a6d1977eed9eb08bb9960b6621322fdd20babe07fb36fdb178b61dedc09a8ad4  data/payloads/
 257a0f224cc1678796fc75677646511cd603369536bb9ea955b288cba4ab8c85  data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-lzmafix1-u-boot.bin
 bd4ef61fec04dbb2427d9d8e107b83fc26cc2bb6d516efc3a95b3f6f48315c4c  data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-lzmafix1-u-boot.lzma
 222b02415456f60b75ad83cd75cfbe92da9beb1cfce835c198ab16e031ca3dc1  data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-lzmafix1-update.fip
+58ae93d3f2526493729f654b15457bce4b7187ac6e0de58f1b297d232331fe52  data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-BUILD_INFO.txt
+06397f68ba876e01ba6a07ebbdbbcfac1e5341b9d82926fd6b4a54ae1bf7e552  data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-u-boot.bin
+648fe1e12616068a99305645b34bee74d669ee9219f51c26ddd0b6b5003e0b1f  data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-u-boot.lzma
+548c446555231ee1b6ec4666000831226e0749c576d702c06dc5f501a6f510db  data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip
