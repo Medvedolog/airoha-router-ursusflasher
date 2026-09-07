@@ -1,0 +1,2 @@
+90000000  openwrt-sdk-r35906.tar.zst.part00
+37445503  openwrt-sdk-r35906.tar.zst.part01

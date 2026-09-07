@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "target": "Nokia XG-040G-MD / Airoha AN7581",
+  "openwrt_version": "SNAPSHOT",
+  "openwrt_revision": "r36009+75-6c315233aa",
+  "kernel": "6.18.44",
+  "policy": "release-local payloads only; no runtime snapshot download",
+  "files": [
+    {
+      "path": "fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin",
+      "role": "OPENWRT_NONUBI_SYSUPGRADE",
+      "target_layout": "OPENWRT_STOCK_LAYOUT",
+      "sha256": "23ad06174184f71c9a845734571752f62930ba1cfac45f4ad8deadd9d8965820",
+      "size": 8714513,
+      "required": true
+    },
+    {
+      "path": "fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb",
+      "role": "OPENWRT_UBI_SYSUPGRADE",
+      "target_layout": "OPENWRT_UBI",
+      "sha256": "47ea7c6f1e22a4aae9482e653a4fc6e87524f7e27847aaaed7fb75349cae7f3d",
+      "size": 10408217,
+      "required": true
+    },
+    {
+      "path": "data/payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin",
+      "role": "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE",
+      "target_layout": "OPENWRT_UBI",
+      "sha256": "6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808",
+      "size": 113447,
+      "required": true
+    }
+  ],
+  "not_bundled": [
+    {
+      "name": "openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-factory-kernel.bin",
+      "reason": "redundant for ONE-KEY; byte-identical to kernel member inside non-UBI sysupgrade.bin"
+    },
+    {
+      "name": "openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-factory-rootfs.bin",
+      "reason": "separate factory-image workflow is not used by ONE-KEY"
+    },
+    {
+      "name": "openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot.fip",
+      "reason": "OpenWrt upstream FIP is not a persistent UrsusBoot payload; persistent bootloader FIPs are pinned under data/payloads/md/ursusboot."
+    }
+  ],
+  "build_date": "2026-09-06",
+  "kernel_vermagic": "bed7e2dec73efb4c3050bc8a8373af30",
+  "provenance": "UnameOne OpenWrt build 2026-09-06; production sysupgrade images supplied verbatim; no UrsusBoot/service-recovery payload replacement",
+  "network_profile": "author build retained verbatim: LAN4 becomes WAN after OpenWrt boot; use LAN2/LAN3 for flashing and continuous management access"
+}
