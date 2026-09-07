@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🐻 UrsusFlasher
+<img src="docs/img/ursus-bear.svg" alt="" width="72" height="72">
+
+# UrsusFlasher
 
 ### OpenWrt на Nokia XG-040G-MD: установка, резервные копии и восстановление
 
