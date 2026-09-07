@@ -16,6 +16,8 @@
 
 **[📦 Скачать готовый комплект](../../releases/latest)** · [инструкция](docs/INSTRUCTIONS_RU.md) · [аварийное восстановление](docs/EMERGENCY_URSUSBOOT_RU.md)
 
+🇬🇧 [Read this in English](docs/README_EN.md)
+
 </div>
 
 ---
