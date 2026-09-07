@@ -1,0 +1,43 @@
+UrsusBoot 0.1.0-alpha5-UBIUX1-WEBREBOOT1
+Date: 2026-09-07
+Target: Nokia XG-040G-MD / Airoha AN7581 / 256 MiB SPI-NAND
+Baseline source: UrsusBoot 0.1.0-alpha5-UBIUX1
+Scope: WebFailsafe manual reboot lifecycle only
+
+Behavior change:
+- POST /api/reboot still requires a completed flash operation and X-Ursus-Confirm: REBOOT.
+- Automatic reboot after firmware write is NOT enabled.
+- The REBOOTING HTTP response is queued first.
+- Once the complete response has been queued, a 500 ms grace timer starts.
+- WebFailsafe exits and invokes the existing U-Boot reset command after the grace period even if the browser does not ACK/close the TCP connection.
+- Existing ACK-driven stop_after_response remains intact as the fast path.
+- boot-once, stock-layout install, UBI writers, FIP writer, NAND/Fudan code and OpenWrt payloads are unchanged.
+
+Reproducible build:
+RAW u-boot.bin
+  size    955192
+  sha256  05c17bfd8fd006dabb5af44870ebb30c2dd2e35f4b259ddb53cb93f3589ab005
+
+LZMA u-boot.lzma
+  size    326400
+  sha256  8877f3d7a2246ae3a51ee1740dec5674d8f977ce0133a5eee5d7f89d36abbd63
+
+Persistent update FIP
+  file    ursusboot-md-0.1.0-alpha5-UBIUX1-WEBREBOOT1-update.fip
+  size    503808
+  sha256  d47047d0edfd5360dbae7073255d19c353d53a8b93fa274653c9b01be7ca083d
+
+FIP packing:
+  nt_off      0x27800
+  nt_size     0x4fb00
+  nt_end      0x77300
+  cert_first  0x77800
+  margin      0x500 (1280 bytes)
+  fip_end     0x7b000
+  physical_end 0x7b800
+
+Status:
+  SOURCE_PATCH_QA=PASS
+  CLEAN_REPRO_BUILD=PASS
+  FIP_REPACK_QA=PASS
+  HARDWARE_TEST_REQUIRED

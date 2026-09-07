@@ -1,0 +1,90 @@
+--- a/cmd/ursusweb.c
++++ b/cmd/ursusweb.c
+@@ -58,6 +58,7 @@
+ #define URSUS_FIP_MAGIC        0xaa640001U
+ #define URSUS_FIP_SERIAL       0x12345678U
+ #define URSUS_FIP_MAX_ENTRIES  32
++#define URSUS_REBOOT_GRACE_MS   500U
+ 
+ #define URSUS_RC_OK                    "OK"
+ #define URSUS_RC_UPLOAD_INCOMPLETE     "UPLOAD_INCOMPLETE"
+@@ -80,6 +81,8 @@
+ static bool ursus_pending_ubi_migration;
+ static bool ursus_pending_bootloader_update;
+ static bool ursus_pending_reboot;
++static bool ursus_reboot_response_queued;
++static ulong ursus_reboot_response_queued_at;
+ static bool ursus_web_running;
+ static bool ursus_network_failed;
+ static int ursus_last_rx_error;
+@@ -227,6 +230,7 @@
+     bool all_queued;
+     bool remote_eof;
+     bool stop_after_response;
++    bool reboot_after_response;
+ };
+ 
+ static void ursus_log_reset(void)
+@@ -1777,8 +1781,15 @@
+         err = tcp_output(pcb);
+         if (err != ERR_OK) return err;
+     }
+-    if (!c->all_queued && c->hdr_off == c->hdr_len && c->body_off == c->body_len)
++    if (!c->all_queued && c->hdr_off == c->hdr_len && c->body_off == c->body_len) {
+         c->all_queued = true;
++        if (c->reboot_after_response && !ursus_reboot_response_queued) {
++            ursus_reboot_response_queued = true;
++            ursus_reboot_response_queued_at = get_timer(0);
++            printf("URSUS_WEBREBOOT_RESPONSE_QUEUED grace_ms=%u\n",
++                   URSUS_REBOOT_GRACE_MS);
++        }
++    }
+     return ERR_OK;
+ }
+ 
+@@ -2229,6 +2240,7 @@
+                 "{\"result\":\"REJECTED\",\"reason\":\"completed flash operation and explicit reboot confirmation required\"}\n");
+         ursus_pending_reboot = true;
+         c->stop_after_response = true;
++        c->reboot_after_response = true;
+         return ursus_http_start_response(pcb, c, 200, "application/json",
+             "{\"result\":\"REBOOTING\"}\n");
+     }
+@@ -2507,6 +2519,8 @@
+     ursus_pending_ubi_migration = false;
+     ursus_pending_bootloader_update = false;
+     ursus_pending_reboot = false;
++    ursus_reboot_response_queued = false;
++    ursus_reboot_response_queued_at = 0;
+     if (ursus_console_capture_selftest())
+         ursus_logf("CONSOLE: capture selftest FAILED\n");
+     else
+@@ -2546,6 +2560,12 @@
+         ursus_rx_report(ret);
+         sys_check_timeouts();
+         ursus_led_poll();
++        if (ursus_pending_reboot && ursus_reboot_response_queued &&
++            get_timer(ursus_reboot_response_queued_at) >= URSUS_REBOOT_GRACE_MS) {
++            printf("URSUS_WEBREBOOT_GRACE_EXPIRED action=reset\n");
++            ursus_stop = true;
++            continue;
++        }
+         if (ursus_pending_ubi_update && ursus_ubi_update_active()) {
+             static char last_ubi_update_stage[32];
+             const char *ustage = ursus_ubi_update_stage();
+--- a/include/ursus_version.h
++++ b/include/ursus_version.h
+@@ -3,7 +3,7 @@
+ #define __URSUS_VERSION_H
+ 
+ #define URSUS_PRODUCT_NAME "UrsusBoot"
+-#define URSUS_VERSION "0.1.0-alpha5-UBIUX1"
++#define URSUS_VERSION "0.1.0-alpha5-UBIUX1-WEBREBOOT1"
+ #define URSUS_PRODUCT_VERSION URSUS_PRODUCT_NAME " " URSUS_VERSION
+ 
+ #endif
+--- a/.scmversion
++++ b/.scmversion
+@@ -1 +1 @@
+--UrsusBoot-0.1.0-alpha5-UBIUX1
++-UrsusBoot-0.1.0-alpha5-UBIUX1-WEBREBOOT1
