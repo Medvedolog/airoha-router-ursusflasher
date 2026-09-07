@@ -23,7 +23,7 @@ def main() -> None:
     args = ap.parse_args()
     repo = Path(__file__).resolve().parents[1]
     version = (repo / 'VERSION').read_text(encoding='utf-8').strip()
-    name = f'UrsusFlasher-{version}-PUBLIC-TEST'
+    name = f'UrsusFlasher-{version.split("-", 1)[0]}-PUBLIC-TEST'
     dist = Path(args.dist)
     zpath = dist / f'{name}.zip'
     side = dist / f'{name}.zip.sha256.txt'
