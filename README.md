@@ -9,7 +9,7 @@
 **Airoha AN7581 · SPI-NAND 256 МиБ · UrsusBoot · OpenWrt**
 
 ![UrsusFlasher](https://img.shields.io/badge/UrsusFlasher-0.2.61-6f4b2f)
-![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--UBIUX1-b36b32)
+![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--UBIUX1--TEST61-b36b32)
 ![Target](https://img.shields.io/badge/Nokia-XG--040G--MD-555)
 ![OpenWrt](https://img.shields.io/badge/OpenWrt-r36009%2B75-00a4ef)
 ![alpha5](https://img.shields.io/badge/alpha5--UBIUX1-нужен_прогон_на_FUDAN!-c27b00)
@@ -44,7 +44,10 @@
 
 ## Текущий статус разработки
 
-Production-комплект пока использует UrsusBoot `0.1.0-alpha5-UBIUX1` со статусом `HW_REGRESSION_REQUIRED`. Для обнаруженной проблемы ручной перезагрузки из WebFailsafe собран кандидат `WEBREBOOT1`; он не считается production до аппаратного прогона.
+Текущий PUBLIC TEST — **UrsusFlasher 0.2.61** с **UrsusBoot `0.1.0-alpha5-UBIUX1-TEST61`**. TEST61 содержит исправления SAFETYREG1 и требует отдельного аппаратного прогона перед переводом в production.
+
+> [!IMPORTANT]
+> **Очень нужен тест на Nokia XG-040G-MD с NAND FUDAN, особенно FM25G02B, и отзыв по результату.** Полезен любой исход — успешная установка или ошибка. Пожалуйста, приложите модель NAND, описание пройденного сценария и сохранённый журнал/диагностику в [GitHub Issues](../../issues). Аппаратный PASS прежней сборки на SkyHigh нельзя автоматически переносить на FUDAN и TEST61.
 
 ---
 

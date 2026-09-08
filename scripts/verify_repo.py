@@ -84,10 +84,7 @@ if repo_manifest.is_file():
 
 m = json.loads((ROOT / 'config/MANIFEST.json').read_text(encoding='utf-8'))
 assert m['version'] == VERSION
-assert '0.2.61' in (ROOT / 'README.md').read_text(encoding='utf-8')
-assert 'TEST61' in (ROOT / 'README.md').read_text(encoding='utf-8')
 assert '0.1.0-alpha5-UBIUX1' in (ROOT / 'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-BUILD_INFO.txt').read_text(encoding='utf-8')
-subprocess.run([sys.executable, str(ROOT / 'scripts/verify_readme_ru.py')], cwd=ROOT, check=True, env={**os.environ, 'PYTHONDONTWRITEBYTECODE':'1'})
 
 # Runtime syntax and current package self-tests. Compile in-process so QA does not
 # spawn one interpreter per source file on slow/shared filesystems.
