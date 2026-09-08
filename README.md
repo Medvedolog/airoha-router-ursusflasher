@@ -14,7 +14,7 @@
 ![OpenWrt](https://img.shields.io/badge/OpenWrt-r36009%2B75-00a4ef)
 ![FUDAN test](https://img.shields.io/badge/FUDAN_NAND-нужен_полный_тест_и_отзыв-c27b00)
 
-**[📦 Скачать готовый комплект](../../releases/latest)** · [Инструкция](docs/INSTRUCTIONS_RU.md) · [Аварийное восстановление](docs/EMERGENCY_URSUSBOOT_RU.md)
+**[📦 Скачать готовый комплект](../../releases/latest)** · [Инструкция](docs/INSTRUCTIONS_RU.md) · [Changelog](docs/CHANGELOG_RU.md) · [Аварийное восстановление](docs/EMERGENCY_URSUSBOOT_RU.md)
 
 🇬🇧 [Read this in English](docs/README_EN.md)
 
