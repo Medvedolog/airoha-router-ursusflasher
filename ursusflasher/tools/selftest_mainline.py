@@ -9,16 +9,17 @@ import ursusboot_update as u
 import ursusboot_install as bi
 import one_key as ok
 m=json.loads((D/'data/MANIFEST.json').read_text(encoding='utf-8')); meta=m['ursusboot']
-assert m['version']=='0.2.56-md-alpha5-ubiux1-stateui8-diagauth1-route1-backupraw1-menuops1-actionpreflight1-errorui1-sshbin1-rootfsenv1'
-assert meta['version']=='0.1.0-alpha3'  # emergency lineage remains alpha3
-assert bi.TARGET_URSUS=='0.1.0-alpha5-UBIUX1'
-assert bi.PAYLOAD.name=='ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip'
+assert m['version']=='0.2.61-md-alpha5-test61-safetyreg1-identity1-noautofip1-ubiattach2-uploadretry1-sessionrecovery1-postsysreset1-diagstate1'
+assert meta['version']=='0.1.0-alpha5-UBIUX1-TEST61'
+assert bi.TARGET_URSUS=='0.1.0-alpha5-UBIUX1-TEST61'
+assert bi.PAYLOAD.name=='ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip'
 assert bi.ALPHA3_REFERENCE_PAYLOAD.name=='ursusboot-md-0.1.0-alpha3-update.fip'
-assert meta['fip_sha256']=='597071e178470bfda23aab9738ad7ddb0b25e9b21ef336fd3eceb39c39f983ce'
+assert meta['fip_sha256']=='3c922e4256b6047376a7d445006e6cb2a4485bb412747033a77defd15e42fcea'
+assert meta['alpha3_lineage_fip_sha256']=='597071e178470bfda23aab9738ad7ddb0b25e9b21ef336fd3eceb39c39f983ce'
 assert meta['preloader_sha256']=='6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808'
 assert meta['ram_installer_fip_sha256']=='dc08ed0be1b1d68f6bc247ae45293e6ab0ca9df7695541b664e4060a145228c8'
 assert meta['bl2_image_sha256']=='6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d'
-v=u.validate_emergency_fip_host(); assert v['fip_sha256']==meta['fip_sha256']
+v=u.validate_emergency_fip_host(); assert v['fip_sha256']==meta['alpha3_lineage_fip_sha256']
 assert u.RAM_INSTALLER.name=='ursusboot-md-0.1.0-alpha3-ram-installer.fip'
 assert u.PRELOADER.name=='openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin'
 assert u.BL2_IMAGE.name=='ursusboot-md-0.1.0-alpha3-bl2.bin'
@@ -117,15 +118,17 @@ main_src=inspect.getsource(ok.main)
 for forbidden in ('verify_firmware_bundle()', 'require_payloads()', 'ursusboot_install.require_payload()'):
     assert forbidden not in main_src, forbidden
 assert 'require_bundle_role' in inspect.getsource(ok.install_or_update_openwrt)
-assert 'require_fip_payload' in inspect.getsource(ok.ensure_target_ursus)
+assert not hasattr(ok, 'ensure_target_ursus')
+assert 'update_bootloader(' not in main_src
 
 expert=(D/'data/expert.py').read_text(encoding='utf-8')
 assert 'device_state as ds' in expert
 assert 'full_backup_readonly' in expert
 assert 'capability_report' in expert
 assert 'restore_mtd0' not in expert
-one=(D/'data/one_key.py').read_text(encoding='utf-8'); assert 'TARGET_URSUS = "0.1.0-alpha5-UBIUX1"' in one
-assert 'PRODUCTION_PAYLOAD' in inspect.getsource(ok.ensure_target_ursus)
+one=(D/'data/one_key.py').read_text(encoding='utf-8'); assert 'TARGET_URSUS = "0.1.0-alpha5-UBIUX1-TEST61"' in one
+assert 'ensure_target_ursus' not in one
+assert 'update_bootloader(' not in one
 assert 'physical_reboot_to_recovery' not in one
 assert 'примерно через 1 секунду' in one and '5-10 секунд' in one
 assert 'debounce около 0,75 с' not in one
@@ -218,12 +221,12 @@ bb=u._require_bl2_experiment_baseline(post_fipold_view)
 assert bb['fip_old_id']==6 and bb['fip_id']==7 and bb['bl2_crc32_before']=='09fb6b36'
 assert u.BL2_CRC32=='9f7bf316'
 
-assert u.PRODUCTION_PAYLOAD.name=='ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip'
-assert hashlib.sha256(u.PRODUCTION_PAYLOAD.read_bytes()).hexdigest()==meta['alpha5_ubiux1_candidate']['fip_sha256']
+assert u.PRODUCTION_PAYLOAD.name=='ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip'
+assert hashlib.sha256(u.PRODUCTION_PAYLOAD.read_bytes()).hexdigest()==meta['alpha5_test61_candidate']['fip_sha256']
 assert u.EMERGENCY_PAYLOAD.name=='ursusboot-md-0.1.0-alpha3-update.fip'
 expert_src=(D/'data/expert.py').read_text(encoding='utf-8')
 assert 'Нажмите Enter, чтобы вернуться в меню EXPERT' in expert_src
 assert not (D/'START.cmd').exists() and not (D/'START.sh').exists()
 assert (D/'START_ONECLICK.cmd').exists() and (D/'START_EXPERT.cmd').exists()
-print('URSUSFLASHER_0.2.56_ALPHA5_UBIUX1_ROUTE1_ROOTFSENV1_MAINLINE_QA=PASS')
+print('URSUSFLASHER_0.2.61_ALPHA5_TEST61_QA=PASS')
 print('USER_FLOW_GATE_POLICY_QA=PASS')

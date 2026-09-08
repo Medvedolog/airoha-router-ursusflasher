@@ -70,6 +70,7 @@ def prepare(*, write_class: str, candidate_sha256: str | None = None,
         "transaction_state": "NOT_STARTED",
         "postcondition_state": "NOT_CHECKED",
         "facts": facts or {},
+        "failure": None,
     }
     _atomic_json(_path(operation_id, directory), rec)
     return rec
@@ -92,7 +93,7 @@ def update(operation_id: str, *, directory: Path | None = None, **facts: Any) ->
         "observed_device_binding", "transaction_state", "postcondition_state",
         "candidate_sha256", "expected_artifact_identity", "target_device_binding",
         "actual_artifact_identity", "completion_proof_time", "readback_result",
-        "record_state", "superseded_by",
+        "record_state", "superseded_by", "failure",
     }
     unknown = set(facts) - allowed
     if unknown:
@@ -165,3 +166,21 @@ def supersede(operation_id: str, new_operation_id: str, *, directory: Path | Non
     rec["updated_at"] = _utc()
     _atomic_json(_path(operation_id, directory), rec)
     return rec
+
+
+def record_failure(operation_id: str, *, stage: str, error_code: str | None = None,
+                   error_rc: int | None = None, detail: str | None = None,
+                   transaction_state: str | None = None,
+                   status_snapshot: str | None = None, diagnostic_bundle: str | None = None,
+                   directory: Path | None = None) -> dict[str, Any]:
+    failure = {
+        "observed_at": _utc(),
+        "stage": stage,
+        "error_code": error_code,
+        "error_rc": error_rc,
+        "detail": detail,
+        "transaction_state": transaction_state,
+        "status_snapshot": status_snapshot,
+        "diagnostic_bundle": diagnostic_bundle,
+    }
+    return update(operation_id, directory=directory, failure=failure)

@@ -1,4 +1,4 @@
-# UrsusFlasher 0.2.56 — Nokia XG-040G-MD
+# UrsusFlasher 0.2.61 PUBLIC TEST — TEST61 SAFETYREG1 — Nokia XG-040G-MD
 
 Готовый комплект для установки OpenWrt, резервного копирования и восстановления Nokia XG-040G-MD на Airoha AN7581.
 
@@ -10,13 +10,50 @@
 
 Без сброса состояние стоковой системы неизвестно: остаются изменённые настройки, включённые или отключённые службы и следы прошлых попыток, из-за которых определение устройства и штатный доступ могут повести себя иначе.
 
-## Что нового в 0.2.56
+## Что нового в 0.2.61 PUBLIC TEST
 
-- пункт 2 различает OpenWrt и Nokia STOCK только по положительному доказательству среды; открытый Telnet больше не переводит OpenWrt в stock-сценарий;
-- UrsusBoot Recovery разрешает `OPENWRT_STOCK_LAYOUT → OPENWRT_UBI` с тем же Recovery-only migration backend, что Nokia STOCK → UBI;
-- UBI update имеет выбор сохранения настроек; отдельная кнопка Recovery и UART-команда `ursussettings reset` очищают только OpenWrt `rootfs_data`;
-- чистая UBI-установка/сброс создаёт `rootfs_data` по политике MAX−16 PEB и сохраняет `rootfs_data_max`, чтобы последующий штатный OpenWrt `sysupgrade` сохранял тот же размер overlay.
+- TEST59/60 **отозваны для аппаратного использования**. Их split identity позволял ONE-CLICK принять реально установленный TEST59/60 за TEST57 и запустить лишнюю повторную запись FIP.
+- **IDENTITY1:** native `version` и Web/API имеют одну identity TEST61.
+- **NOAUTOFIP1:** ONE-CLICK не обновляет уже установленный UrsusBoot автоматически. Обновление загрузчика после первичной stock-установки — только отдельное ручное действие WebFailsafe/EXPERT.
+- **UBIATTACH2:** explicit FIP self-update не делает `ubi detach` для уже активного ожидаемого UBI.
+- **UPLOADRETRY1/UPLOADABORT2:** после обрыва Ethernet действует увеличенный reconnect grace; новый полный upload запускается только после `[y/N]`; до operation endpoint persistent transaction остаётся `NOT_STARTED`.
+- После failed upload/validation/precheck интерфейс снова готов к следующей попытке, если persistent writer не запускался.
+- ONE-CLICK всегда спрашивает один `[y/N]` непосредственно перед direct `mtd0` write. EXPERT пункт 1 может пропустить полный backup только для текущего запуска.
+- После успешного UBI sysupgrade с сохранением настроек предлагается необязательный reset OpenWrt settings.
+- CONFIGTRIM1 сохранён. TEST61: BL33 860808 байт, LZMA 291160 байт, FIP 503808 байт, NT_FW margin 36520 байт.
 
+Статус: **SOURCE/BUILD QA PASS; HARDWARE SAFETY REGRESSION REQUIRED**. Исторический полный stock→OpenWrt HW PASS относится к TEST57/SkyHigh.
+
+## Что нового в 0.2.60 PUBLIC TEST
+
+- **CONFIGTRIM1:** отключены `CONFIG_CMD_UBIFS`, `CONFIG_CMD_PXE`, `CONFIG_BOOTMETH_EXTLINUX`, `CONFIG_BOOTMETH_EXTLINUX_PXE`, `CONFIG_PXE_UTILS`.
+- `CONFIG_CMD_UBI`, `CONFIG_MTD_UBI`, `CONFIG_CMD_TFTPBOOT` и `CONFIG_CMD_WGET` сохранены.
+- Сброс настроек OpenWrt по-прежнему удаляет/создаёт UBI volume `rootfs_data`; UBIFS создаётся уже Linux/OpenWrt при следующей загрузке.
+- Размер BL33: 860176 байт raw / 291237 байт LZMA; запас до первого сертификата FIP: 36443 байт.
+- Наследуются UBIOPT1, WEBREBOOT2, UARTASCII1, UBIHEADROOM2 и все предыдущие исправления.
+
+`0.2.60` — историческая/forensic линия, **отозвана для новых HW-прогонов**. CONFIGTRIM1 перенесён в TEST61.
+
+## Что нового в 0.2.59 PUBLIC TEST
+
+- **UBIOPT1:** при обычном обновлении OpenWrt UBI снова виден выбор «Сохранить настройки OpenWrt»; история предыдущей операции больше не скрывает controls следующей.
+- **WEBREBOOT2:** кнопка перезагрузки работает после обычного UBI-update, а HTTP reject больше не игнорируется Web UI.
+- **UARTASCII1:** проектные machine/UART сообщения снова только English/printable ASCII; русский остаётся в Web/host UI.
+- **UBIHEADROOM2:** direct Recovery-safe update оценивает прогноз свободных LEB; меньший FIT разрешён, если он сохраняет или улучшает существующий headroom.
+- Наследуются DIAGCAP2, REBOOTWAIT1, WAITUI1, BUILDDATE1 и исправления TEST57.
+
+`0.2.59` — историческая/forensic линия, **отозвана для новых HW-прогонов**.
+
+## Что нового в 0.2.58 PUBLIC TEST
+
+- `DIAGCAP2`: полный diagnostic bundle создаётся для каждой операции записи, и при успехе, и при ошибке: `status-before.json`, `status-after.json`, `operation-log.txt`, `web-log.txt`, `console.txt`, `operation.json`. Raw JSON и device logs также пишутся в `session-*.log`.
+- `REBOOTWAIT1`: после записи UrsusBoot ONE-CLICK ждёт именно Recovery до 90 секунд; старый ответ stock Web больше не принимается за новую загрузку.
+- `WAITUI1`: таймер ожидания больше не показывает отрицательные секунды.
+- `BUILDDATE1`: TEST58 собран с фиксированным release epoch `2026-09-08 09:38:00 UTC`, поэтому UART/Web/API показывают актуальную дату сборки без потери воспроизводимости.
+- Наследуются `RESETSET1`, `UPLOADRETRY1` и `WEBTX1` из 0.2.57.
+- Известная особенность: ранний BL2 сканирует почти весь UBI до запуска U-Boot и может занимать до ~12 секунд. В TEST58 это пока не оптимизируется.
+
+Статус: **PUBLIC TEST**. Основной ONE-CLICK `stock → UrsusBoot → OpenWrt UBI` успешно пройден на реальном SkyHigh S35ML02G300 в 0.2.57/TEST57; для TEST58 нужен короткий регрессионный прогон новых изменений.
 
 ## Запуск
 
@@ -53,7 +90,7 @@ Linux/macOS:
 | Nokia STOCK | HTTP/Web + Telnet | TFTP |
 | установленная OpenWrt | SSH | SSH-stream/SCP; штатный sysupgrade |
 | OpenWrt/initramfs в RAM | SSH | SCP |
-| UrsusBoot Recovery | HTTP API | HTTP по частям; TFTP для резервной передачи FIP |
+| UrsusBoot Recovery | HTTP API | HTTP по частям с retry/reconcile; TFTP только отдельным ручным recovery-путём |
 | Airoha BootROM | USB-UART 3,3 В | XMODEM |
 
 ## ONE-CLICK с Nokia STOCK
@@ -75,11 +112,10 @@ Linux/macOS:
 ```text
 root SSH
   -> определение PERSISTENT_ROOT или RAM_ROOT
-  -> передача UrsusBoot по SCP
-  -> обновление UBI fip или подтверждённого boot block
-  -> полное обратное чтение и SHA256
-  -> UrsusBoot Recovery
+  -> переход в UrsusBoot Recovery при необходимости обновить OpenWrt
   -> проверка и обновление OpenWrt
+
+Обновление уже установленного UrsusBoot не является частью ONE-CLICK и запускается только отдельным ручным действием.
 ```
 
 ## Проверки
@@ -103,14 +139,14 @@ Kernel   6.18.44
 
 ## UrsusBoot
 
-Текущий комплект содержит UrsusBoot `0.1.0-alpha5-UBIUX1`.
+Текущий public-test комплект содержит UrsusBoot `0.1.0-alpha5-UBIUX1-TEST61`.
 
 ```text
-BL33 SHA256  06397f68ba876e01ba6a07ebbdbbcfac1e5341b9d82926fd6b4a54ae1bf7e552
-FIP  SHA256  ce43b56d86321ccb7657d2e9b7ddf58e811efc73927855bbb75e896c83b18600
+BL33 SHA256  43296d98686ada9e4e13c5a5a49430372abf45e9bd0fc8eae837920e8ba5224d
+FIP  SHA256  3c922e4256b6047376a7d445006e6cb2a4485bb412747033a77defd15e42fcea
 ```
 
-Статус alpha5-UBIUX1: **SOURCE/BUILD/PACKAGE_QA_PROVEN; HW_REGRESSION_REQUIRED**.
+Статус TEST61: **SOURCE/BUILD QA PASS; HARDWARE SAFETY REGRESSION REQUIRED**.
 
 ## Документация
 

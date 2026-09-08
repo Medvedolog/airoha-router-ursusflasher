@@ -1,4 +1,4 @@
-# Состав репозитория UrsusFlasher 0.2.56
+# Состав репозитория UrsusFlasher 0.2.61
 
 Этот файл описывает назначение основных каталогов и файлов текущего GitHub-снимка.
 
@@ -70,6 +70,8 @@ toolchains/                 SDK/GCC, разбитые на GitHub-safe част�
 
 Эти каталоги нужны репозиторию и воспроизводимой проверке UrsusBoot, но не включаются в PUBLIC-TEST ZIP.
 
+Текущий UrsusBoot TEST61 собирается через `ursusboot/scripts/build_alpha5_test61.sh` с конфигурацией `ursusboot/configs/u-boot.TEST61.full.config`. SAFETYREG1 сохраняет CONFIGTRIM1, исправляет split identity, исключает автоматический self-update UrsusBoot из ONE-CLICK и не detach'ит уже корректно подключённый UBI перед явным FIP self-update.
+
 ## GitHub Actions и проверка
 
 ```text
@@ -91,6 +93,8 @@ docs/INSTRUCTIONS_EN.md             operating instructions
 docs/EMERGENCY_URSUSBOOT_RU.md      аварийная UART/BootROM инструкция
 docs/CHANGELOG_RU.md                история опубликованных изменений
 docs/CHANGELOG_EN.md                released change log
+docs/TEST60_TEST_RU.md             исторический focused HW regression CONFIGTRIM1 (TEST60 отозван)
+docs/TEST61_TEST_RU.md             текущий hardware safety regression для SAFETYREG1
 ```
 
 ## Контроль целостности репозитория

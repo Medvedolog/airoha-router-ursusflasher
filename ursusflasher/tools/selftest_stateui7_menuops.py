@@ -27,7 +27,7 @@ for needle in (
     'VISIBLE_ACTIONS = (1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12)',
     'Пункт 4 объединён с пунктом 2',
     'Установленная OpenWrt: SSH → передача образа → sysupgrade -T → sysupgrade',
-    'UrsusBoot Recovery: HTTP → обновление FIP; при сбое — TFTP',
+    'UrsusBoot Recovery: HTTP → обновление FIP с сетевыми ретраями; TFTP только отдельным ручным recovery-путём',
     'USB-UART → Airoha BootROM → UrsusBoot из RAM → запись и проверка загрузчика',
     'Проверка на ПК: структура, размеры и SHA256; роутер не изменяется',
     'sysupgrade -v -n',

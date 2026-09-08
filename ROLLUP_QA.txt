@@ -1,38 +1,70 @@
-UrsusFlasher 0.2.55 STATEUI8 / DIAGAUTH1 / BACKUPRAW1 roll-up QA
+UrsusFlasher 0.2.61 PUBLIC TEST — TEST61 / SAFETYREG1
 
-STATUS=PASS
+STATUS=SOURCE_BUILD_PACKAGE_QA_PROVEN_HW_SAFETY_REGRESSION_REQUIRED
+DATE=2026-09-08
 
-Changes:
-- EXPERT items 7, 10 and 11 may perform an explicit interactive read-only root SSH probe when passive DeviceState is incomplete.
-- The password prompt belongs to system OpenSSH; UrsusFlasher does not store the password and does not install a temporary SSH key for diagnostics.
-- EXPERT item 7 no longer calls inherited verify_kit() and no longer depends on transition-bundle.bin or the legacy MedveFlasher transition tree.
-- Item 7 uses exact pinned MD RAM stages: shared AN7581 preloader + RC18 RECOVERY_SAFE FIP + recovery initramfs.
-- OpenWrt UBI backup captures the full physical 256 MiB /dev/mtd0 and records an authoritative mtd0_all_flash.bin.gz with full SHA256.
-- OpenWrt UBI backup also emits derived mtd1_bl2.bin.gz and mtd2_ubi.bin.gz plus RAW_BACKUP.json and SHA256SUMS.txt.
-- EXPERT item 8 validates the new exact raw backup format; Nokia STOCK retains the existing mtd0..mtd16 format.
-- Item 2/3 MENUOPS1 behavior and action-local destructive preflights are retained.
+Primary safety fixes in TEST61:
+- IDENTITY1: one TEST61 identity across .scmversion, URSUS_VERSION, native version, Web/API and build metadata.
+- NOAUTOFIP1: ONE-CLICK never self-updates an already installed UrsusBoot automatically. Existing UrsusBoot updates are explicit operator actions only.
+- UBIATTACH2: explicit FIP self-update reuses an already attached expected ursus-ubi-full; no unconditional ubi detach -> ubi part cycle. Attachment mismatch stops before writer.
+- UPLOADRETRY1 / UPLOADABORT2: 75 s reconnect grace; a new full transfer cycle starts only after operator y/N; failure before operation POST records transaction_state=NOT_STARTED.
+- SESSIONRECOVERY1: upload/validation/precheck failures before writer do not lock WebFailsafe into a dead session; another attempt remains possible.
+- Direct stock mtd0 write always has one y/N after backup/preflight. EXPERT item 1 may explicitly skip the full stock backup for the current test run; the required live mtd0 capture remains.
+- POSTSYSRESET1: after successful UBI update with keep_settings=1, UrsusFlasher offers an optional OpenWrt settings reset.
+- DIAGSTATE1: stock self-update no longer reports a false UBI_VERIFY success stage.
+- EMERGENCYMETA1: production TEST61 FIP hash metadata and emergency BootROM alpha3 hash metadata are separate; changing the production target cannot invalidate the emergency payload validator.
+- REPROZIP1: PUBLIC TEST ZIP uses fixed SOURCE_DATE_EPOCH ZIP metadata and must rebuild byte-for-byte.
+- ROUTE1 integration: a positive nokia_stock fingerprint reaches the authenticated read-only stock probe; generic HTTP remains ambiguous.
+- Checkout/package integration: root launchers resolve both source and exported layouts; UI terms resolve config/UI_TERMS.json; manifests include TEST61 and use OS-independent path ordering.
+- CONFIGTRIM1 remains inherited from TEST60: UBIFS/PXE/extlinux command families stay removed while UBI/TFTP/WGET and bootcmd=ursusdispatch remain.
 
-QA:
-GITHUB_ROLLUP_REPO_QA=PASS
-STATEUI8_DIAGAUTH1_BACKUPRAW1_QA=PASS
-RAW_BACKUP_SYNTH_QA=PASS size=268435456
-RELEASE_ZIP_QA=PASS files=94
-PUBLIC_RELEASE_QA=PASS files=68
-MANIFEST_CLOSURE_QA=PASS files=94
-URSUSBOOT_PAYLOAD_TREE_BYTE_IDENTITY_0.2.54=PASS files=33
-FW_TREE_BYTE_IDENTITY_0.2.54=PASS files=3
-URSUSBOOT_ARTIFACTS_BYTE_IDENTITY_0.2.54=PASS files=12
+Revoked lines:
+- TEST59 and TEST60 are REVOKED_FOR_HW_USE because split identity could trigger a redundant destructive FIP write and their UBI self-update attachment path is not accepted for new hardware tests.
+- Historical full stock Nokia -> backup -> direct mtd0 -> UrsusBoot Recovery -> STOCK_TO_UBI -> OpenWrt ONE-CLICK HW PASS remains TEST57 on SkyHigh S35ML02G300 only.
 
-Read-only backup pinned RAM payloads:
-- preloader size=113447 sha256=6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808
-- RECOVERY_SAFE FIP size=308154 sha256=2ebcbf3981e3e56b6389521fc2caa3320cf259c08f173b660b29366b9290bcc1
-- recovery initramfs size=11285480 sha256=c40c87354566eb44fc933c1ce6c0cd9c81227b525243c67c9932b80a656d01c6
+UrsusBoot TEST61:
+- version: 0.1.0-alpha5-UBIUX1-TEST61
+- SOURCE_DATE_EPOCH: 1788888600
+- build UTC: 2026-09-08 17:30:00 UTC
+- raw BL33: 860808 bytes, SHA256 43296d98686ada9e4e13c5a5a49430372abf45e9bd0fc8eae837920e8ba5224d
+- LZMA NT_FW: 291160 bytes, SHA256 bec245ab0b10e3fffcc2f0a482c2c3b97b03577b4a03c436857243cd68ff9d29
+- FIP: 503808 bytes, SHA256 3c922e4256b6047376a7d445006e6cb2a4485bb412747033a77defd15e42fcea
+- source archive: 41529161 bytes, SHA256 69b699b27700e06442fde86ff8d70c806118f3cc8f6ae37eac777225784cea29
+- SAFETYREG1 patch SHA256 dee13f9ecd66bc5fb544791f6d2de8d094299e53932bb76c1031f4ff31b98fe1
+- TEST61 full config SHA256 7e2219108da6f1101ef9227dccff688b0818624c8aaffbb4824193945ec8e495
+- build script SHA256 ed5c866afd34ba97a27e197ef33dcc35b53d7458c83a93c64af186ac1e0b77ba
+- NT_FW margin before certificate block: 36520 bytes
+- physical FIP end: 0x7b800
+- protected stock env begins: 0x7c000
 
-Firmware status:
-- FUDAN1 unchanged
-- OpenWrt factory sysupgrade unchanged
-- OpenWrt UBI sysupgrade unchanged
+Clean/reproducible QA:
+- TEST61 clean rebuild raw BL33 exact hash MATCH=PASS
+- TEST61 clean rebuild LZMA exact hash MATCH=PASS
+- TEST61 clean rebuild FIP exact hash MATCH=PASS
+- TEST61 source archive zstd integrity=PASS
+- TEST61 source archive tar listing=PASS
+- exported runtime Python syntax=PASS
+- TEST61_ACCEPT1_HOSTFLOW_QA=PASS
+- TEST61_SAFETYREG_HOST_SELFTEST=PASS
+- URSUSBOOT_TEST61_FULL_BOOTCHAIN_QA=PASS
+- EMERGENCY_ALPHA3_LINEAGE_QA=PASS
+- STATEUI8_DIAGAUTH1_BACKUPRAW1_QA=PASS
+- TEST57/58/59/60 historical selftests=PASS
+- WEB_POLL_TRANSIENT_TIMEOUT_QA=PASS
+- MANIFEST_CLOSURE_QA=PASS files=133; release expected closure contains 134 files including SHA256SUMS
+- PUBLIC_RELEASE_QA=PASS files=96
+- PUBLIC ZIP double-build byte identity=PASS
+- PUBLIC ZIP unzip -t=PASS
+- PUBLIC ZIP SHA256=41850d6a49c3c8f4b3e8d536a4671ed9de38eb5275da4cb2c862bd050ff11688
 
-ROLLUP_SHA256_CLOSURE=PASS files=145
-GIT_WINDOWS_EOL_POLICY=PRESERVED (.cmd=CRLF; text=LF)
-GITHUB_MAX_SINGLE_FILE=90000000
+Hardware acceptance still required for TEST61:
+- direct stock mtd0 y/N and full readback path
+- no redundant automatic FIP writer after reboot
+- identity agreement native version vs Web/API
+- active-UBI FIP explicit self-update without detach
+- interrupted FIP and FIT upload at 20/50/90 percent with persistent FIP SHA unchanged before/after incomplete transfer
+- retry after upload/validation/precheck failure without rebooting the recovery UI
+- ordinary UBI update keep/reset settings and post-update reboot/reset UX
+- Fudan FM25G02B hardware acceptance remains pending
+
+Do not promote TEST61 to production or transfer TEST57/SkyHigh HW evidence to TEST61/Fudan without the dedicated safety regression run.

@@ -11,8 +11,8 @@ import one_key as ok
 
 m=json.loads((D/'data/MANIFEST.json').read_text(encoding='utf-8'))
 c=m['ursusboot']['alpha5_ubiux1_candidate']
-assert m['version']=='0.2.56-md-alpha5-ubiux1-stateui8-diagauth1-route1-backupraw1-menuops1-actionpreflight1-errorui1-sshbin1-rootfsenv1'
-assert bi.TARGET_URSUS=='0.1.0-alpha5-UBIUX1'
+assert m['version']=='0.2.61-md-alpha5-test61-safetyreg1-identity1-noautofip1-ubiattach2-uploadretry1-sessionrecovery1-postsysreset1-diagstate1'
+assert bi.TARGET_URSUS=='0.1.0-alpha5-UBIUX1-TEST61'
 assert up.PRODUCTION_PAYLOAD==bi.PAYLOAD
 raw=Path(D/c['raw_bl33']).read_bytes(); comp=Path(D/c['lzma']).read_bytes(); fip=Path(D/c['persistent_fip']).read_bytes()
 assert len(raw)==954864 and hashlib.sha256(raw).hexdigest()==c['raw_bl33_sha256']

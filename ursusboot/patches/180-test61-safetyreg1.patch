@@ -1,0 +1,120 @@
+--- test60src/.scmversion	2026-09-08 15:00:00.000000000 +0000
++++ test61src/.scmversion	2026-09-08 16:26:10.770157650 +0000
+@@ -1 +1 @@
+--UrsusBoot-0.1.0-alpha5-UBIUX1-TEST60
++-UrsusBoot-0.1.0-alpha5-UBIUX1-TEST61
+--- test60src/cmd/ursusupdate.c	2026-09-08 15:00:00.000000000 +0000
++++ test61src/cmd/ursusupdate.c	2026-09-08 16:26:10.770574123 +0000
+@@ -204,6 +204,60 @@
+     return 0;
+ }
+ 
++static int ursus_update_ensure_ubi_attachment(void)
++{
++    struct ubi_device *ubi;
++    int ret;
++
++    ret = ursus_update_register_ubi_part();
++    if (ret)
++        return ret;
++
++    /* Reuse the live UBI device when Recovery already attached the canonical
++     * UrsusBoot UBI partition. Never detach a healthy live UBI merely to
++     * attach the same bytes again: that can fail while MTD users are active. */
++    ubi = ubi_get_device(0);
++    if (ubi) {
++        if (ubi->mtd != ursus_update_ubi_part ||
++            ubi->mtd->size != URSUS_UBI_SIZE ||
++            ubi->mtd->erasesize != 0x20000 ||
++            ubi->mtd->writesize != 0x800) {
++            printf("URSUS_UPDATE_UBI_ATTACHMENT_MISMATCH attached=%s expected=%s size=0x%llx\n",
++                   ubi->mtd && ubi->mtd->name ? ubi->mtd->name : "unknown",
++                   ursus_update_ubi_part_name ? ursus_update_ubi_part_name : "unknown",
++                   ubi->mtd ? (unsigned long long)ubi->mtd->size : 0ULL);
++            ubi_put_device(ubi);
++            return -EXDEV;
++        }
++        printf("URSUS_UPDATE_UBI_REUSE attached=%s action=NO_DETACH\n",
++               ubi->mtd->name ? ubi->mtd->name : ursus_update_ubi_part_name);
++        ubi_put_device(ubi);
++    } else {
++        /* No UBI device is currently attached. A single attach is allowed;
++         * this path still never detaches another UBI device. */
++        ret = run_commandf("ubi part %s", ursus_update_ubi_part_name);
++        if (ret)
++            return ret;
++        ubi = ubi_get_device(0);
++        if (!ubi)
++            return -ENODEV;
++        if (ubi->mtd != ursus_update_ubi_part) {
++            printf("URSUS_UPDATE_UBI_ATTACHMENT_MISMATCH attached=%s expected=%s\n",
++                   ubi->mtd && ubi->mtd->name ? ubi->mtd->name : "unknown",
++                   ursus_update_ubi_part_name ? ursus_update_ubi_part_name : "unknown");
++            ubi_put_device(ubi);
++            return -EXDEV;
++        }
++        printf("URSUS_UPDATE_UBI_ATTACH_OK attached=%s action=ATTACH_ONCE\n",
++               ubi->mtd->name ? ubi->mtd->name : ursus_update_ubi_part_name);
++        ubi_put_device(ubi);
++    }
++
++    if (run_command("ubi check fip", 0))
++        return -ENOENT;
++    return 0;
++}
++
+ static int ursus_fip_parse(const u8 *buf, size_t len, size_t *nt_off,
+                            size_t *nt_size, size_t *declared_end)
+ {
+@@ -684,7 +738,6 @@
+         printf("URSUS_UPDATE_READBACK_OK layout=STOCK bytes=0x%lx prefix=preserved env=preserved\n",
+                (ulong)URSUS_STOCK_BOOT_SIZE);
+         ursus_up.last_success_stage = URSUS_UP_STOCK_VERIFY;
+-        ursus_up.last_success_stage = URSUS_UP_UBI_VERIFY;
+         ursus_up.stage = URSUS_UP_COMPLETE;
+         ursus_up.active = false;
+         free(ursus_up.stock_candidate); ursus_up.stock_candidate = NULL;
+@@ -693,13 +746,9 @@
+         return 1;
+ 
+     case URSUS_UP_UBI_ATTACH:
+-        ret = ursus_update_register_ubi_part();
+-        if (ret) return ursus_update_fail(ret);
+-        run_command("ubi detach", 0);
+-        ret = run_commandf("ubi part %s", ursus_update_ubi_part_name);
+-        if (ret) return ursus_update_fail(ret);
+-        if (run_command("ubi check fip", 0))
+-            return ursus_update_fail(-ENOENT);
++        ret = ursus_update_ensure_ubi_attachment();
++        if (ret) return ursus_update_fail_reason(ret,
++            ret == -EXDEV ? "UBI_ATTACHMENT_MISMATCH" : "UBI_ATTACH_FAILED");
+         ursus_up.last_success_stage = URSUS_UP_UBI_ATTACH;
+         ursus_up.stage = URSUS_UP_UBI_STAGE_PREP;
+         break;
+--- test60src/include/ursus_version.h	2026-09-08 15:00:00.000000000 +0000
++++ test61src/include/ursus_version.h	2026-09-08 16:26:10.770370315 +0000
+@@ -3,7 +3,7 @@
+ #define __URSUS_VERSION_H
+ 
+ #define URSUS_PRODUCT_NAME "UrsusBoot"
+-#define URSUS_VERSION "0.1.0-alpha5-UBIUX1-TEST57"
++#define URSUS_VERSION "0.1.0-alpha5-UBIUX1-TEST61"
+ #define URSUS_PRODUCT_VERSION URSUS_PRODUCT_NAME " " URSUS_VERSION
+ 
+ #endif
+--- test60src/include/ursusweb_ui.inc	2026-09-08 15:00:00.000000000 +0000
++++ test61src/include/ursusweb_ui.inc	2026-09-08 16:37:29.083489180 +0000
+@@ -696,10 +696,10 @@
+ "\224';$('flash').textContent='';$('flash').append(...flashParts());$('net').textContent=S.networ"
+ "k_up?(L==='ru'?'\320\237\320\276\320\264\320\272\320\273\321\216\321\207\320\265\320\275\320\260"
+ "':'Connected'):(L==='ru'?'\320\235\320\265 \320\277\320\276\320\264\320\272\320\273\321\216\321"
+-"\207\320\265\320\275\320\260':'Disconnected');let op=!!(S.operation_active||S.operation_complete"
+-"||S.operation_failed),opActive=!!S.operation_active,fwContext=!op&&(!!FW||!!S.firmware_filename|"
++"\207\320\265\320\275\320\260':'Disconnected');let opView=!!(S.operation_active||S.operation_complete"
++"||S.operation_failed),opActive=!!S.operation_active,op=opActive,fwContext=!opActive&&(!!FW||!!S.firmware_filename|"
+ "|(S.stage_state&&S.stage_state!=='IDLE'));$('firmwareRows').classList.toggle('hidden',!fwContext"
+-");$('stateRows').classList.toggle('hidden',op);if(op)$('sideTitle').textContent=S.operation==='U"
++");$('stateRows').classList.toggle('hidden',op);if(opView)$('sideTitle').textContent=S.operation==='U"
+ "RSUSBOOT_UPDATE'?(L==='ru'?'\320\236\320\261\320\275\320\276\320\262\320\273\320\265\320\275\320"
+ "\270\320\265 UrsusBoot':'UrsusBoot update'):(L==='ru'?'\320\237\320\265\321\200\320\265\321\205"
+ "\320\276\320\264 \320\275\320\260 OpenWrt UBI':'Migration to OpenWrt UBI');else if(fwContext)$('"

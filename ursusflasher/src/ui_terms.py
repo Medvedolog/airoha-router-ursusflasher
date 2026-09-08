@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import Any
 
 HERE = Path(__file__).resolve().parent
-_DATA = json.loads((HERE / "UI_TERMS.json").read_text(encoding="utf-8"))
+_REPO_CONFIG = HERE.parent.parent / "config" / "UI_TERMS.json"
+_DATA_PATH = _REPO_CONFIG if _REPO_CONFIG.is_file() else HERE / "UI_TERMS.json"
+_DATA = json.loads(_DATA_PATH.read_text(encoding="utf-8"))
 
 
 def is_en() -> bool:

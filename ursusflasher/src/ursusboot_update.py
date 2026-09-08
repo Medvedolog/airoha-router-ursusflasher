@@ -20,7 +20,7 @@ REPO_MODE = (_REPO_ROOT / 'fw').is_dir() and (_REPO_ROOT / 'payloads').is_dir() 
 ROOT = _REPO_ROOT if REPO_MODE else HERE.parent
 PAYLOAD_DIR = (ROOT / 'payloads' / 'md' / 'ursusboot') if REPO_MODE else (HERE / 'payloads' / 'md' / 'ursusboot')
 EMERGENCY_PAYLOAD = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-update.fip'
-PRODUCTION_PAYLOAD = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip'
+PRODUCTION_PAYLOAD = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip'
 PAYLOAD = EMERGENCY_PAYLOAD  # compatibility alias for BootROM/emergency alpha3 paths
 RAM_INSTALLER = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-ram-installer.fip'
 BL2_IMAGE = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-bl2.bin'
@@ -84,13 +84,13 @@ def _ursus_meta() -> dict:
 
 def _production_meta() -> dict:
     meta = _ursus_meta()
-    candidate = meta.get('alpha5_ubiux1_candidate') or {}
-    if candidate.get('version') != '0.1.0-alpha5-UBIUX1':
-        raise Error('alpha5-UBIUX1 production metadata missing from MANIFEST')
+    candidate = meta.get('alpha5_test61_candidate') or {}
+    if candidate.get('version') != '0.1.0-alpha5-UBIUX1-TEST61':
+        raise Error('alpha5-UBIUX1-TEST61 safety-regression metadata missing from MANIFEST')
     return candidate
 
 def validate_emergency_fip_host() -> dict:
-    """Validate the physical production FIP without asking the router about layout.
+    """Validate the exact alpha3 emergency FIP without asking the router about layout.
 
     This is the host-side integrity check for BootROM emergency UrsusBoot recovery.
     It deliberately does not probe the router layout or call a duplicate
@@ -99,12 +99,12 @@ def validate_emergency_fip_host() -> dict:
     """
     meta = _ursus_meta()
     if not PAYLOAD.is_file():
-        raise Error(f'Production FIP отсутствует: {PAYLOAD}')
+        raise Error(f'Emergency alpha3 FIP отсутствует: {PAYLOAD}')
     data = PAYLOAD.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
-    expected_digest = str(meta.get('fip_sha256') or '').lower()
+    expected_digest = str(meta.get('emergency_fip_sha256') or meta.get('alpha3_lineage_fip_sha256') or '').lower()
     if digest != expected_digest:
-        raise Error(f'Production FIP SHA256 не совпадает с manifest: {digest} != {expected_digest}')
+        raise Error(f'Emergency alpha3 FIP SHA256 не совпадает с manifest: {digest} != {expected_digest}')
     rejected = {str(x).lower() for x in meta.get('rejected_alpha4_hashes', [])}
     if digest in rejected:
         raise Error(f'Production FIP находится в blacklist: {digest}')
@@ -148,7 +148,7 @@ def validate_emergency_fip_host() -> dict:
     usize = struct.unpack_from('<Q', nt, 5)[0]
     if dictionary != 0x00100000:
         raise Error(f'NT_FW LZMA dictionary 0x{dictionary:x}, нужен 0x100000')
-    expected_usize = int(meta.get('u_boot_size') or 0)
+    expected_usize = int(meta.get('emergency_u_boot_size') or 0)
     if usize != expected_usize:
         raise Error(f'NT_FW usize {usize}, ожидался {expected_usize}')
 
@@ -161,7 +161,7 @@ def validate_emergency_fip_host() -> dict:
     if len(raw) != usize:
         raise Error(f'NT_FW decoded size {len(raw)}, ожидался {usize}')
     raw_digest = hashlib.sha256(raw).hexdigest()
-    expected_raw = str(meta.get('u_boot_sha256') or '').lower()
+    expected_raw = str(meta.get('emergency_u_boot_sha256') or '').lower()
     if raw_digest != expected_raw:
         raise Error(f'Decoded BL33 SHA256 mismatch: {raw_digest} != {expected_raw}')
     reviewed_raw = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-u-boot.bin'
@@ -641,7 +641,7 @@ def _require_fipold_experiment_baseline(view: dict) -> dict:
 def require_fipold_experiment_payloads() -> None:
     """Gate only exact alpha3 files used by the historical fip.old experiment."""
     require_ram_bootstrap_payloads()
-    _require_exact_file(EMERGENCY_PAYLOAD, _ursus_meta()['fip_sha256'], 'exact alpha3 FIP')
+    _require_exact_file(EMERGENCY_PAYLOAD, _ursus_meta()['emergency_fip_sha256'], 'exact alpha3 FIP')
 
 
 def fipold_alpha3_experiment_transaction(sp: RecoverySerial, log, meta: dict, view: dict, baseline: dict, report_path: Path) -> str:
@@ -1141,7 +1141,7 @@ def require_emergency_payloads() -> None:
     """Gate exact persistent recovery payloads only for destructive BootROM recovery."""
     meta = _ursus_meta()
     require_ram_bootstrap_payloads()
-    _require_exact_file(EMERGENCY_PAYLOAD, meta['fip_sha256'], 'exact alpha3 emergency FIP')
+    _require_exact_file(EMERGENCY_PAYLOAD, meta['emergency_fip_sha256'], 'exact alpha3 emergency FIP')
     _require_exact_file(BL2_IMAGE, meta['bl2_image_sha256'], 'alpha3 BL2')
 
 
@@ -1287,7 +1287,7 @@ def load_fip_xmodem(sp: RecoverySerial, log, *, require_native: bool = True) -> 
     print(f'Передаю production UrsusBoot FIP через XMODEM в RAM 0x{LOADADDR:08x}; FIP={size} bytes / 0x{size:x}.')
     _uboot_wait_quiet(sp, log, quiet=0.15, timeout=1.0); sp.reset_input()
     _uboot_send_line(sp, f'loadx 0x{LOADADDR:x}'); time.sleep(0.35)
-    xmodem_send(sp, PRODUCTION_PAYLOAD, 'production UrsusBoot alpha5-UBIUX1 FIP', log)
+    xmodem_send(sp, PRODUCTION_PAYLOAD, 'safety-regression UrsusBoot alpha5-UBIUX1-TEST61 FIP', log)
     _uboot_read_until_prompt(sp, log, 45, 'loadx production UrsusBoot FIP')
     print('[OK] Production FIP передан в RAM. Валидация выполняется самим ursusupdate write перед записью.')
 
@@ -1448,7 +1448,15 @@ def uart_bootrom_install() -> None:
 def web_fip_update() -> None:
     require_fip_payload(); host = input('IP-адрес роутера в режиме восстановления UrsusBoot [192.168.1.1]: ').strip() or '192.168.1.1'
     st = uw.update_bootloader(host, PRODUCTION_PAYLOAD, confirm=True)
-    print(f"[ГОТОВО] UrsusBoot обновлён и сверен. Система: {terms.layout_label(st.get('bootloader_update_layout') or st.get('current_layout'))}")
+    # bootloader_update_layout is the storage class (UBI/STOCK), not the
+    # DeviceState current_layout enum.  Never let a presentation error turn a
+    # proven successful flash transaction into a fallback write.
+    current_layout = st.get('current_layout') or 'UNKNOWN'
+    try:
+        shown_layout = terms.layout_label(current_layout)
+    except Exception:
+        shown_layout = str(current_layout)
+    print(f"[ГОТОВО] UrsusBoot обновлён и сверен. Система: {shown_layout}")
 
 
 def web_fit_update(image: Path | None = None) -> None:
@@ -1531,7 +1539,7 @@ def show_info() -> None:
 
     rows: list[tuple[str, Path, str | None]] = [
         ('Production UrsusBoot alpha5-UBIUX1 FIP', PRODUCTION_PAYLOAD, (_production_meta()).get('fip_sha256')),
-        ('Emergency UrsusBoot alpha3 FIP', EMERGENCY_PAYLOAD, meta.get('fip_sha256')),
+        ('Emergency UrsusBoot alpha3 FIP', EMERGENCY_PAYLOAD, meta.get('emergency_fip_sha256')),
         ('BootROM preloader', PRELOADER, meta.get('preloader_sha256')),
         ('RAM installer FIP', RAM_INSTALLER, meta.get('ram_installer_fip_sha256')),
         ('alpha3 BL2', BL2_IMAGE, meta.get('bl2_image_sha256')),

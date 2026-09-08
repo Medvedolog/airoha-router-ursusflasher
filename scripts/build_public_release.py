@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import hashlib
+import os
 import shutil
 import tempfile
 import zipfile
@@ -13,6 +14,10 @@ KEEP_DOCS = {
     'INSTRUCTIONS_EN.md',
     'EMERGENCY_URSUSBOOT_RU.md',
     'CHANGELOG_RU.md',
+    'TEST58_TEST_RU.md',
+    'TEST59_TEST_RU.md',
+    'TEST60_TEST_RU.md',
+    'TEST61_TEST_RU.md',
 }
 
 
@@ -51,17 +56,20 @@ def prune_public_tree(root: Path) -> None:
     # Rebuild payload and complete package checksums after deliberate pruning.
     payload_rows = []
     payload_root = root / 'data' / 'payloads'
-    for p in sorted(payload_root.rglob('*')):
+    for p in sorted(payload_root.rglob('*'), key=lambda item: item.relative_to(payload_root).as_posix()):
         if p.is_file():
             payload_rows.append(f'{sha256(p)}  {p.relative_to(root).as_posix()}')
-    (root / 'PAYLOAD_SHA256SUMS.txt').write_text('\n'.join(payload_rows) + '\n', encoding='utf-8')
+    (root / 'PAYLOAD_SHA256SUMS.txt').write_text(
+        '\n'.join(payload_rows) + '\n', encoding='utf-8', newline='\n'
+    )
 
     (root / 'PUBLIC_TEST_RELEASE.txt').write_text(
         'UrsusFlasher public test release for Nokia XG-040G-MD\n'
         'Contains the runnable flasher, required boot/recovery payloads, OpenWrt sysupgrade images, and user documentation.\n'
         'Excluded: repository sources, SDK/toolchains/GCC, build trees, QA archives, self-test tools, internal engineering documents, and helper C source.\n'
-        'UrsusBoot alpha5-UBIUX1 is SOURCE/BUILD/PACKAGE_QA_PROVEN; hardware regression for the new Recovery/UBI behavior is still required.\n',
-        encoding='utf-8',
+        'UrsusBoot alpha5-UBIUX1-TEST61 is a SAFETY REGRESSION public-test candidate. TEST59/60 are revoked for hardware use; historical main stock ONE-CLICK PASS remains TEST57/SkyHigh.\n'
+        'TEST61 retains CONFIGTRIM1 and fixes split identity, redundant automatic FIP update, active-UBI detach, interrupted-upload recovery and stale failure-session behavior. Installed UrsusBoot updates are explicit operator actions only.\n',
+        encoding='utf-8', newline='\n',
     )
     write_manifest(root)
 
@@ -84,12 +92,29 @@ def main() -> None:
         tree = export_tree(Path(td) / name)
         prune_public_tree(tree)
         zpath = out / f'{name}.zip'
+        # Deterministic ZIP metadata. Files generated in the temporary export tree
+        # (SHA256SUMS, PUBLIC_TEST_RELEASE.txt, etc.) would otherwise inherit the
+        # wall-clock mtime of this packaging run and make byte-identical rebuilds
+        # impossible even when payload content is unchanged.
+        epoch = int(os.environ.get('SOURCE_DATE_EPOCH', '1788888600'))
+        from datetime import datetime, timezone
+        dt = datetime.fromtimestamp(epoch, tz=timezone.utc)
+        # ZIP timestamps have 2-second granularity and no timezone field.
+        zip_dt = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second - (dt.second % 2))
         with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-            for p in sorted(tree.rglob('*')):
-                if p.is_file():
-                    z.write(p, p.relative_to(tree.parent))
+            for p in sorted(tree.rglob('*'), key=lambda item: item.relative_to(tree).as_posix()):
+                if not p.is_file():
+                    continue
+                arcname = p.relative_to(tree.parent).as_posix()
+                info = zipfile.ZipInfo(arcname, date_time=zip_dt)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.create_system = 3
+                info.external_attr = (0o100644 << 16)
+                z.writestr(info, p.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
         digest = hashlib.sha256(zpath.read_bytes()).hexdigest()
-        (out / f'{name}.zip.sha256.txt').write_text(f'{digest}  {zpath.name}\n', encoding='utf-8')
+        (out / f'{name}.zip.sha256.txt').write_text(
+            f'{digest}  {zpath.name}\n', encoding='utf-8', newline='\n'
+        )
         print(zpath)
 
 

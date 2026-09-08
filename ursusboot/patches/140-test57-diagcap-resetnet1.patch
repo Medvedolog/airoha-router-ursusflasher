@@ -1,0 +1,800 @@
+diff -urN a/.scmversion b/.scmversion
+--- a/.scmversion	2026-09-08 09:15:14.562077520 +0000
++++ b/.scmversion	2026-09-08 09:07:26.992507080 +0000
+@@ -1 +1 @@
+--UrsusBoot-0.1.0-alpha5-UBIUX1-WEBREBOOT1
++-UrsusBoot-0.1.0-alpha5-UBIUX1-TEST57
+diff -urN a/cmd/ursusubi.c b/cmd/ursusubi.c
+--- a/cmd/ursusubi.c	2026-09-03 14:41:08.000000000 +0000
++++ b/cmd/ursusubi.c	2026-09-08 09:14:30.038245263 +0000
+@@ -86,6 +86,8 @@
+ 
+ struct ursus_migration_ctx {
+     enum ursus_migration_stage stage;
++    enum ursus_migration_stage failed_stage;
++    enum ursus_migration_stage last_success_stage;
+     ulong fit_addr;
+     size_t fit_len;
+     ulong preloader_addr;
+@@ -95,6 +97,8 @@
+     bool active;
+     bool announced;
+     bool commit_started;
++    bool write_started;
++    char error_code[48];
+     ulong announced_at;
+ };
+ 
+@@ -114,6 +118,8 @@
+ 
+ struct ursus_update_ctx {
+     enum ursus_update_stage stage;
++    enum ursus_update_stage failed_stage;
++    enum ursus_update_stage last_success_stage;
+     ulong fit_addr;
+     size_t fit_len;
+     int error;
+@@ -123,6 +129,8 @@
+     bool fit_old_present;
+     bool direct_mode;
+     bool keep_settings;
++    bool write_started;
++    char error_code[48];
+     unsigned int fit_pebs;
+     ulong announced_at;
+ };
+@@ -774,18 +782,32 @@
+     }
+ }
+ 
+-static int ursus_upd_fail(int ret)
++static int ursus_upd_fail_reason(int ret, const char *code)
+ {
++    enum ursus_update_stage failed = ursus_upd.stage;
++
+     ursus_upd.error = ret ? ret : -EIO;
++    ursus_upd.failed_stage = failed;
++    if (!ursus_upd.error_code[0])
++        snprintf(ursus_upd.error_code, sizeof(ursus_upd.error_code), "%s", code ? code : "UPDATE_FAILED");
+     ursus_upd.stage = URSUS_UPD_FAILED;
+     ursus_upd.active = false;
+     ursus_upd.announced = false;
+-    printf("URSUS_UBI_UPDATE_FAILED ret=%d mode=%s recovery=available staged_fallback=%u\n",
+-           ursus_upd.error, ursus_upd.direct_mode ? "DIRECT_RECOVERY_SAFE" : "STAGED",
++    printf("URSUS_UBI_UPDATE_FAILED failed_stage=%s ret=%d code=%s transaction=%s mode=%s recovery=available staged_fallback=%u\n",
++           ursus_upd_stage_name(failed), ursus_upd.error, ursus_upd.error_code,
++           ursus_upd.write_started ? "WRITE_STATE_UNKNOWN" : "NOT_STARTED",
++           ursus_upd.direct_mode ? "DIRECT_RECOVERY_SAFE" : "STAGED",
+            ursus_upd.direct_mode ? 0 : 1);
+     return ursus_upd.error;
+ }
+ 
++static int ursus_upd_fail(int ret)
++{
++    char code[48];
++    snprintf(code, sizeof(code), "%s_ERR_%d", ursus_upd_stage_name(ursus_upd.stage), ret ? -ret : EIO);
++    return ursus_upd_fail_reason(ret, code);
++}
++
+ int ursus_ubi_update_start(ulong fit_addr, size_t fit_len, bool keep_settings)
+ {
+     if (ursus_upd.active || ursus_mig.active)
+@@ -812,6 +834,16 @@
+ const char *ursus_ubi_update_detail(void) { return ursus_upd_detail(ursus_upd.stage); }
+ unsigned int ursus_ubi_update_percent(void) { return ursus_upd_percent(ursus_upd.stage); }
+ int ursus_ubi_update_error(void) { return ursus_upd.error; }
++const char *ursus_ubi_update_failed_stage(void) { return ursus_upd.failed_stage ? ursus_upd_stage_name(ursus_upd.failed_stage) : "NONE"; }
++const char *ursus_ubi_update_last_success_stage(void) { return ursus_upd.last_success_stage ? ursus_upd_stage_name(ursus_upd.last_success_stage) : "IDLE"; }
++const char *ursus_ubi_update_error_code(void) { return ursus_upd.error_code[0] ? ursus_upd.error_code : "NONE"; }
++const char *ursus_ubi_update_transaction_state(void)
++{
++    if (ursus_upd.stage == URSUS_UPD_COMPLETE) return "COMPLETION_PROVEN";
++    if (ursus_upd.stage == URSUS_UPD_FAILED) return ursus_upd.write_started ? "WRITE_STATE_UNKNOWN" : "NOT_STARTED";
++    if (ursus_upd.active && ursus_upd.write_started) return "IN_PROGRESS";
++    return "NOT_STARTED";
++}
+ 
+ int ursus_ubi_update_step(void)
+ {
+@@ -839,19 +871,19 @@
+     switch (ursus_upd.stage) {
+     case URSUS_UPD_PRECHECK:
+         ret = ursus_ubi_register_mtd();
+-        if (ret) return ursus_upd_fail(ret);
++        if (ret) return ursus_upd_fail_reason(ret, "PRECHECK_MTD_REGISTER_FAILED");
+         run_command("ubi detach", 0);
+         ret = run_command("ubi part ursus-ubi-full", 0);
+-        if (ret) return ursus_upd_fail(ret);
++        if (ret) return ursus_upd_fail_reason(ret, "PRECHECK_UBI_ATTACH_FAILED");
+         if (run_command("ubi check fip", 0) || !ursus_ubi_volume_fip_valid("fip")) {
+             printf("URSUS_UBI_UPDATE_REJECT reason=fip-invalid\n");
+-            return ursus_upd_fail(-EBADMSG);
++            return ursus_upd_fail_reason(-EBADMSG, "PRECHECK_FIP_INVALID");
+         }
+         ret = ursus_ubi_verify_volume_manifest(false);
+-        if (ret) return ursus_upd_fail(ret);
++        if (ret) return ursus_upd_fail_reason(ret, "PRECHECK_VOLUME_MANIFEST_INVALID");
+         ubi = ubi_devices[0];
+         if (!ubi || !ubi->leb_size)
+-            return ursus_upd_fail(-ENODEV);
++            return ursus_upd_fail_reason(-ENODEV, "PRECHECK_UBI_DEVICE_UNAVAILABLE");
+         required_pebs = DIV_ROUND_UP(ursus_upd.fit_len, ubi->leb_size);
+         desc = ubi_open_volume_nm(0, "fit.old", UBI_READONLY);
+         if (!IS_ERR(desc)) {
+@@ -880,15 +912,17 @@
+             printf("URSUS_UBI_UPDATE_REJECT reason=headroom free=%d reclaim=%u current_fit=%u need=%u reserve=%u\n",
+                    ubi->avail_pebs, reclaim, ursus_upd.fit_pebs, required_pebs,
+                    URSUS_UBI_ROOTFS_FREE_RESERVE_LEBS);
+-            return ursus_upd_fail(-ENOSPC);
++            return ursus_upd_fail_reason(-ENOSPC, "PRECHECK_INSUFFICIENT_UBI_HEADROOM");
+         }
+         printf("URSUS_UBI_UPDATE_PRECHECK_OK mode=%s fit_present=%u fit_old_present=%u free_lebs=%d reclaim_lebs=%u candidate_lebs=%u\n",
+                ursus_upd.direct_mode ? "DIRECT_RECOVERY_SAFE" : "STAGED",
+                ursus_upd.fit_present, ursus_upd.fit_old_present,
+                ubi->avail_pebs, reclaim, required_pebs);
++        ursus_upd.last_success_stage = URSUS_UPD_PRECHECK;
+         ursus_upd.stage = URSUS_UPD_STAGE_PREP;
+         break;
+     case URSUS_UPD_STAGE_PREP:
++        ursus_upd.write_started = true;
+         if (!run_command("ubi check fit.new", 0) && run_command("ubi remove fit.new", 0))
+             return ursus_upd_fail(-EIO);
+         if (!run_command("ubi check fit.old", 0) && run_command("ubi remove fit.old", 0))
+@@ -901,6 +935,7 @@
+         if (ret) return ursus_upd_fail(ret);
+         printf("URSUS_UBI_UPDATE_STAGE_READY volume=%s bytes=%u\n",
+                ursus_upd.direct_mode ? "fit" : "fit.new", (unsigned int)ursus_upd.fit_len);
++        ursus_upd.last_success_stage = URSUS_UPD_STAGE_PREP;
+         ursus_upd.stage = URSUS_UPD_STAGE_WRITE;
+         break;
+     case URSUS_UPD_STAGE_WRITE:
+@@ -908,6 +943,7 @@
+                            "ubi write 0x%08lx fit 0x%lx" : "ubi write 0x%08lx fit.new 0x%lx",
+                            ursus_upd.fit_addr, (ulong)ursus_upd.fit_len);
+         if (ret) return ursus_upd_fail(ret);
++        ursus_upd.last_success_stage = URSUS_UPD_STAGE_WRITE;
+         ursus_upd.stage = URSUS_UPD_STAGE_VERIFY;
+         break;
+     case URSUS_UPD_STAGE_VERIFY:
+@@ -921,6 +957,7 @@
+             return ursus_upd_fail(-ENOEXEC);
+         printf("URSUS_UBI_UPDATE_STAGE_VERIFIED volume=%s bytes=%u\n",
+                ursus_upd.direct_mode ? "fit" : "fit.new", (unsigned int)ursus_upd.fit_len);
++        ursus_upd.last_success_stage = URSUS_UPD_STAGE_VERIFY;
+         ursus_upd.stage = ursus_upd.direct_mode ? URSUS_UPD_FINAL_VERIFY : URSUS_UPD_PROMOTE;
+         break;
+     case URSUS_UPD_PROMOTE:
+@@ -932,6 +969,7 @@
+         ret = run_command("ubi rename fit.new fit", 0);
+         if (ret) return ursus_upd_fail(ret);
+         printf("URSUS_UBI_UPDATE_PROMOTED volume=fit\n");
++        ursus_upd.last_success_stage = URSUS_UPD_PROMOTE;
+         ursus_upd.stage = URSUS_UPD_FINAL_VERIFY;
+         break;
+     case URSUS_UPD_FINAL_VERIFY:
+@@ -954,6 +992,7 @@
+         }
+         ret = ursus_ubi_verify_volume_manifest(true);
+         if (ret) return ursus_upd_fail(ret);
++        ursus_upd.last_success_stage = URSUS_UPD_FINAL_VERIFY;
+         ursus_upd.stage = URSUS_UPD_COMPLETE;
+         ursus_upd.active = false;
+         ursus_upd.error = 0;
+@@ -1163,12 +1202,18 @@
+ 
+ static int ursus_mig_fail(int ret)
+ {
++    enum ursus_migration_stage failed = ursus_mig.stage;
+     ursus_mig.error = ret ? ret : -EIO;
++    ursus_mig.failed_stage = failed;
++    snprintf(ursus_mig.error_code, sizeof(ursus_mig.error_code), "%s_ERR_%d",
++             ursus_mig_stage_name(failed), ursus_mig.error ? -ursus_mig.error : EIO);
+     ursus_mig.stage = URSUS_MIG_FAILED;
+     ursus_mig.active = false;
+     ursus_mig.announced = false;
+-    printf("URSUS_UBI_MIGRATION_FAILED ret=%d commit_may_be_incomplete=%u\n",
+-           ursus_mig.error, ursus_mig.commit_started ? 1 : 0);
++    printf("URSUS_UBI_MIGRATION_FAILED failed_stage=%s ret=%d code=%s transaction=%s commit_may_be_incomplete=%u\n",
++           ursus_mig_stage_name(failed), ursus_mig.error, ursus_mig.error_code,
++           ursus_mig.write_started ? "WRITE_STATE_UNKNOWN" : "NOT_STARTED",
++           ursus_mig.commit_started ? 1 : 0);
+     return ursus_mig.error;
+ }
+ 
+@@ -1198,6 +1243,16 @@
+ const char *ursus_ubi_migration_detail(void) { return ursus_mig_detail(ursus_mig.stage); }
+ unsigned int ursus_ubi_migration_percent(void) { return ursus_mig_percent(ursus_mig.stage); }
+ int ursus_ubi_migration_error(void) { return ursus_mig.error; }
++const char *ursus_ubi_migration_failed_stage(void) { return ursus_mig.failed_stage ? ursus_mig_stage_name(ursus_mig.failed_stage) : "NONE"; }
++const char *ursus_ubi_migration_last_success_stage(void) { return ursus_mig.last_success_stage ? ursus_mig_stage_name(ursus_mig.last_success_stage) : "IDLE"; }
++const char *ursus_ubi_migration_error_code(void) { return ursus_mig.error_code[0] ? ursus_mig.error_code : "NONE"; }
++const char *ursus_ubi_migration_transaction_state(void)
++{
++    if (ursus_mig.stage == URSUS_MIG_COMPLETE) return "COMPLETION_PROVEN";
++    if (ursus_mig.stage == URSUS_MIG_FAILED) return ursus_mig.write_started ? "WRITE_STATE_UNKNOWN" : "NOT_STARTED";
++    if (ursus_mig.active && ursus_mig.write_started) return "IN_PROGRESS";
++    return "NOT_STARTED";
++}
+ 
+ int ursus_ubi_migration_step(void)
+ {
+@@ -1240,6 +1295,7 @@
+         ret = ursus_verify_bl2_candidate();
+         if (ret) return ursus_mig_fail(ret);
+         printf("URSUS_UBI_MIGRATION_CHECK_OK name=NAND_GEOMETRY_BADBLOCKS_BL2_CANDIDATE\n");
++        ursus_mig.last_success_stage = URSUS_MIG_PRECHECK;
+         ursus_mig.stage = URSUS_MIG_BACKUP_BOSA;
+         break;
+     case URSUS_MIG_BACKUP_BOSA:
+@@ -1247,6 +1303,7 @@
+                                (u8 *)(uintptr_t)URSUS_MIG_BOSA_ADDR);
+         if (ret) return ursus_mig_fail(ret);
+         printf("URSUS_UBI_MIGRATION_CHECK_OK name=BOSA_BACKUP bytes=0x%lx\n", URSUS_BOARD_DATA_SIZE);
++        ursus_mig.last_success_stage = URSUS_MIG_BACKUP_BOSA;
+         ursus_mig.stage = URSUS_MIG_BACKUP_RI;
+         break;
+     case URSUS_MIG_BACKUP_RI:
+@@ -1254,6 +1311,7 @@
+                                (u8 *)(uintptr_t)URSUS_MIG_RI_ADDR);
+         if (ret) return ursus_mig_fail(ret);
+         printf("URSUS_UBI_MIGRATION_CHECK_OK name=RI_BACKUP bytes=0x%lx\n", URSUS_BOARD_DATA_SIZE);
++        ursus_mig.last_success_stage = URSUS_MIG_BACKUP_RI;
+         ursus_mig.stage = URSUS_MIG_BACKUP_FIP;
+         break;
+     case URSUS_MIG_BACKUP_FIP:
+@@ -1266,20 +1324,24 @@
+         if (ret) return ursus_mig_fail(ret);
+         printf("URSUS_UBI_MIGRATION_CHECK_OK name=FIP_BACKUP bytes=%u\n",
+                (unsigned int)ursus_mig.fip_len);
++        ursus_mig.last_success_stage = URSUS_MIG_BACKUP_FIP;
+         ursus_mig.stage = URSUS_MIG_FORMAT_UBI;
+         break;
+     case URSUS_MIG_FORMAT_UBI:
++        ursus_mig.write_started = true;
+         run_command("ubi detach", 0);
+         printf("URSUS_UBI_MIGRATION_WRITE_CRITICAL=1\n");
+         ret = run_command("mtd erase ursus-ubi-full 0 0xffe0000", 0);
+         if (ret) return ursus_mig_fail(ret);
+         printf("URSUS_UBI_MIGRATION_CHECK_OK name=UBI_REGION_ERASED\n");
++        ursus_mig.last_success_stage = URSUS_MIG_FORMAT_UBI;
+         ursus_mig.stage = URSUS_MIG_ATTACH_UBI;
+         break;
+     case URSUS_MIG_ATTACH_UBI:
+         ret = run_command("ubi part ursus-ubi-full", 0);
+         if (ret) return ursus_mig_fail(ret);
+         printf("URSUS_UBI_MIGRATION_CHECK_OK name=UBI_ATTACHED\n");
++        ursus_mig.last_success_stage = URSUS_MIG_ATTACH_UBI;
+         ursus_mig.stage = URSUS_MIG_CREATE_VOLUMES;
+         break;
+     case URSUS_MIG_CREATE_VOLUMES:
+@@ -1305,26 +1367,31 @@
+         if (ret)
+             return ursus_mig_fail(ret);
+         printf("URSUS_UBI_MIGRATION_CHECK_OK name=VOLUMES_CREATED count=7 rootfs_data_policy=MAX_MINUS_16_PEBS\n");
++        ursus_mig.last_success_stage = URSUS_MIG_CREATE_VOLUMES;
+         ursus_mig.stage = URSUS_MIG_WRITE_BOSA;
+         break;
+     case URSUS_MIG_WRITE_BOSA:
+         ret = run_commandf("ubi write 0x%08lx bosa 0x%lx", URSUS_MIG_BOSA_ADDR, URSUS_BOARD_DATA_SIZE);
+         if (ret) return ursus_mig_fail(ret);
++        ursus_mig.last_success_stage = URSUS_MIG_WRITE_BOSA;
+         ursus_mig.stage = URSUS_MIG_WRITE_RI;
+         break;
+     case URSUS_MIG_WRITE_RI:
+         ret = run_commandf("ubi write 0x%08lx ri 0x%lx", URSUS_MIG_RI_ADDR, URSUS_BOARD_DATA_SIZE);
+         if (ret) return ursus_mig_fail(ret);
++        ursus_mig.last_success_stage = URSUS_MIG_WRITE_RI;
+         ursus_mig.stage = URSUS_MIG_WRITE_FIP;
+         break;
+     case URSUS_MIG_WRITE_FIP:
+         ret = run_commandf("ubi write 0x%08lx fip 0x%lx", URSUS_MIG_FIP_ADDR, (ulong)ursus_mig.fip_len);
+         if (ret) return ursus_mig_fail(ret);
++        ursus_mig.last_success_stage = URSUS_MIG_WRITE_FIP;
+         ursus_mig.stage = URSUS_MIG_WRITE_FIT;
+         break;
+     case URSUS_MIG_WRITE_FIT:
+         ret = run_commandf("ubi write 0x%08lx fit 0x%lx", ursus_mig.fit_addr, (ulong)ursus_mig.fit_len);
+         if (ret) return ursus_mig_fail(ret);
++        ursus_mig.last_success_stage = URSUS_MIG_WRITE_FIT;
+         ursus_mig.stage = URSUS_MIG_VERIFY_BOSA;
+         break;
+     case URSUS_MIG_VERIFY_BOSA:
+@@ -1332,6 +1399,7 @@
+         if (ret || ursus_mem_equal(URSUS_MIG_BOSA_ADDR, URSUS_UBI_READBACK_ADDR, URSUS_BOARD_DATA_SIZE))
+             return ursus_mig_fail(ret ? ret : -EBADMSG);
+         printf("URSUS_UBI_MIGRATION_CHECK_OK name=BOSA_READBACK\n");
++        ursus_mig.last_success_stage = URSUS_MIG_VERIFY_BOSA;
+         ursus_mig.stage = URSUS_MIG_VERIFY_RI;
+         break;
+     case URSUS_MIG_VERIFY_RI:
+@@ -1339,6 +1407,7 @@
+         if (ret || ursus_mem_equal(URSUS_MIG_RI_ADDR, URSUS_UBI_READBACK_ADDR, URSUS_BOARD_DATA_SIZE))
+             return ursus_mig_fail(ret ? ret : -EBADMSG);
+         printf("URSUS_UBI_MIGRATION_CHECK_OK name=RI_READBACK\n");
++        ursus_mig.last_success_stage = URSUS_MIG_VERIFY_RI;
+         ursus_mig.stage = URSUS_MIG_VERIFY_FIP;
+         break;
+     case URSUS_MIG_VERIFY_FIP:
+@@ -1346,6 +1415,7 @@
+         if (ret || ursus_mem_equal(URSUS_MIG_FIP_ADDR, URSUS_UBI_READBACK_ADDR, ursus_mig.fip_len))
+             return ursus_mig_fail(ret ? ret : -EBADMSG);
+         printf("URSUS_UBI_MIGRATION_CHECK_OK name=FIP_READBACK\n");
++        ursus_mig.last_success_stage = URSUS_MIG_VERIFY_FIP;
+         ursus_mig.stage = URSUS_MIG_VERIFY_FIT;
+         break;
+     case URSUS_MIG_VERIFY_FIT:
+@@ -1368,6 +1438,7 @@
+         if (ret)
+             return ursus_mig_fail(ret);
+         printf("URSUS_UBI_MIGRATION_VOLUMES_VERIFIED count=7 ubootenv=OK ubootenv2=OK bosa=OK ri=OK fip=OK fit=OK rootfs_data=OK\n");
++        ursus_mig.last_success_stage = URSUS_MIG_VERIFY_FIT;
+         ursus_mig.stage = URSUS_MIG_COMMIT_BL2;
+         break;
+     case URSUS_MIG_COMMIT_BL2:
+@@ -1381,6 +1452,7 @@
+         ret = run_commandf("mtd write ursus-ubi-bl2 0x%08lx 0 0x20000",
+                            (ulong)(uintptr_t)ursus_bl2_candidate_buf);
+         if (ret) return ursus_mig_fail(ret);
++        ursus_mig.last_success_stage = URSUS_MIG_COMMIT_BL2;
+         ursus_mig.stage = URSUS_MIG_VERIFY_BL2;
+         break;
+     case URSUS_MIG_VERIFY_BL2:
+@@ -1390,6 +1462,7 @@
+             return ursus_mig_fail(ret ? ret : -EBADMSG);
+         printf("URSUS_UBI_MIGRATION_BL2_VERIFIED bytes=0x%x sha256=6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d\n",
+                (unsigned int)URSUS_UBI_BL2_SIZE);
++        ursus_mig.last_success_stage = URSUS_MIG_VERIFY_BL2;
+         ursus_mig.stage = URSUS_MIG_COMPLETE;
+         ursus_mig.active = false;
+         ursus_mig.error = 0;
+diff -urN a/cmd/ursusupdate.c b/cmd/ursusupdate.c
+--- a/cmd/ursusupdate.c	2026-09-03 14:41:08.000000000 +0000
++++ b/cmd/ursusupdate.c	2026-09-08 09:14:30.039138497 +0000
+@@ -79,6 +79,8 @@
+ 
+ struct ursus_update_ctx {
+     enum ursus_update_stage stage;
++    enum ursus_update_stage failed_stage;
++    enum ursus_update_stage last_success_stage;
+     ulong addr;
+     size_t len;
+     int error;
+@@ -87,6 +89,8 @@
+     ulong announced_at;
+     bool ubi_layout;
+     bool commit_started;
++    bool write_started;
++    char error_code[48];
+     u8 digest[SHA256_SUM_LEN];
+     u8 *stock_candidate;
+     u8 *stock_readback;
+@@ -440,17 +444,32 @@
+     return ret;
+ }
+ 
+-static int ursus_update_fail(int ret)
++static const char *ursus_update_stage_name(enum ursus_update_stage s);
++static const char *ursus_update_detail_text(enum ursus_update_stage s);
++
++static int ursus_update_fail_reason(int ret, const char *code)
+ {
++    enum ursus_update_stage failed = ursus_up.stage;
+     ursus_up.error = ret ? ret : -EIO;
++    ursus_up.failed_stage = failed;
++    if (!ursus_up.error_code[0])
++        snprintf(ursus_up.error_code, sizeof(ursus_up.error_code), "%s", code ? code : "URSUSBOOT_UPDATE_FAILED");
+     ursus_up.stage = URSUS_UP_FAILED;
+     ursus_up.active = false;
+-    printf("URSUS_UPDATE_FAILED ret=%d layout=%s commit_started=%u\n",
+-           ursus_up.error, ursus_up.ubi_layout ? "UBI" : "STOCK",
+-           ursus_up.commit_started);
++    printf("URSUS_UPDATE_FAILED failed_stage=%s ret=%d code=%s layout=%s transaction=%s commit_started=%u\n",
++           ursus_update_stage_name(failed), ursus_up.error, ursus_up.error_code,
++           ursus_up.ubi_layout ? "UBI" : "STOCK",
++           ursus_up.write_started ? "WRITE_STATE_UNKNOWN" : "NOT_STARTED", ursus_up.commit_started);
+     return ursus_up.error;
+ }
+ 
++static int ursus_update_fail(int ret)
++{
++    char code[48];
++    snprintf(code, sizeof(code), "%s_ERR_%d", ursus_update_stage_name(ursus_up.stage), ret ? -ret : EIO);
++    return ursus_update_fail_reason(ret, code);
++}
++
+ static const char *ursus_update_stage_name(enum ursus_update_stage s)
+ {
+     switch (s) {
+@@ -523,6 +542,16 @@
+ const char *ursus_fip_update_layout(void) { return ursus_up.ubi_layout ? "UBI" : "STOCK"; }
+ unsigned int ursus_fip_update_percent(void) { return ursus_update_percent_value(ursus_up.stage); }
+ int ursus_fip_update_error(void) { return ursus_up.error; }
++const char *ursus_fip_update_failed_stage(void) { return ursus_up.failed_stage ? ursus_update_stage_name(ursus_up.failed_stage) : "NONE"; }
++const char *ursus_fip_update_last_success_stage(void) { return ursus_up.last_success_stage ? ursus_update_stage_name(ursus_up.last_success_stage) : "IDLE"; }
++const char *ursus_fip_update_error_code(void) { return ursus_up.error_code[0] ? ursus_up.error_code : "NONE"; }
++const char *ursus_fip_update_transaction_state(void)
++{
++    if (ursus_up.stage == URSUS_UP_COMPLETE) return "COMPLETION_PROVEN";
++    if (ursus_up.stage == URSUS_UP_FAILED) return ursus_up.write_started ? "WRITE_STATE_UNKNOWN" : "NOT_STARTED";
++    if (ursus_up.active && ursus_up.write_started) return "IN_PROGRESS";
++    return "NOT_STARTED";
++}
+ 
+ int ursus_fip_update_start(ulong addr, size_t len)
+ {
+@@ -584,9 +613,10 @@
+     switch (ursus_up.stage) {
+     case URSUS_UP_PRECHECK:
+         ret = ursus_detect_ubi_layout(&ursus_up.ubi_layout);
+-        if (ret) return ursus_update_fail(ret);
++        if (ret) return ursus_update_fail_reason(ret, "PRECHECK_LAYOUT_DETECT_FAILED");
+         ret = ursus_fip_validate(ursus_up.addr, ursus_up.len, !ursus_up.ubi_layout);
+-        if (ret) return ursus_update_fail(ret);
++        if (ret) return ursus_update_fail_reason(ret, "PRECHECK_FIP_VALIDATE_FAILED");
++        ursus_up.last_success_stage = URSUS_UP_PRECHECK;
+         if (ursus_up.ubi_layout)
+             ursus_up.stage = URSUS_UP_UBI_ATTACH;
+         else
+@@ -615,17 +645,20 @@
+         unmap_sysmem(src);
+         printf("URSUS_UPDATE_STOCK_BACKUP_OK bytes=0x%lx old_fip=0x%x preserve_prefix=0x800 preserve_env=0x4000\n",
+                (ulong)URSUS_STOCK_BOOT_SIZE, (unsigned int)old_end);
++        ursus_up.last_success_stage = URSUS_UP_STOCK_BACKUP;
+         ursus_up.stage = URSUS_UP_STOCK_ERASE;
+         break;
+     }
+ 
+     case URSUS_UP_STOCK_ERASE: {
++        ursus_up.write_started = true;
+         struct erase_info ei = { .addr = 0, .len = URSUS_STOCK_BOOT_SIZE };
+         ursus_up.commit_started = true;
+         printf("URSUS_UPDATE_ERASE_BEGIN layout=STOCK off=0 size=0x%lx\n", (ulong)URSUS_STOCK_BOOT_SIZE);
+         ret = mtd_erase(ursus_update_nand, &ei);
+         if (ret) return ursus_update_fail(ret);
+         printf("URSUS_UPDATE_ERASE_OK layout=STOCK\n");
++        ursus_up.last_success_stage = URSUS_UP_STOCK_ERASE;
+         ursus_up.stage = URSUS_UP_STOCK_WRITE;
+         break;
+     }
+@@ -637,6 +670,7 @@
+         if (ret || written != URSUS_STOCK_BOOT_SIZE)
+             return ursus_update_fail(ret ? ret : -EIO);
+         printf("URSUS_UPDATE_WRITE_OK layout=STOCK bytes=0x%lx\n", (ulong)URSUS_STOCK_BOOT_SIZE);
++        ursus_up.last_success_stage = URSUS_UP_STOCK_WRITE;
+         ursus_up.stage = URSUS_UP_STOCK_VERIFY;
+         break;
+     }
+@@ -649,6 +683,8 @@
+             return ursus_update_fail(ret ? ret : -EBADMSG);
+         printf("URSUS_UPDATE_READBACK_OK layout=STOCK bytes=0x%lx prefix=preserved env=preserved\n",
+                (ulong)URSUS_STOCK_BOOT_SIZE);
++        ursus_up.last_success_stage = URSUS_UP_STOCK_VERIFY;
++        ursus_up.last_success_stage = URSUS_UP_UBI_VERIFY;
+         ursus_up.stage = URSUS_UP_COMPLETE;
+         ursus_up.active = false;
+         free(ursus_up.stock_candidate); ursus_up.stock_candidate = NULL;
+@@ -664,10 +700,12 @@
+         if (ret) return ursus_update_fail(ret);
+         if (run_command("ubi check fip", 0))
+             return ursus_update_fail(-ENOENT);
++        ursus_up.last_success_stage = URSUS_UP_UBI_ATTACH;
+         ursus_up.stage = URSUS_UP_UBI_STAGE_PREP;
+         break;
+ 
+     case URSUS_UP_UBI_STAGE_PREP:
++        ursus_up.write_started = true;
+         /* Removing stale backup/stage never touches the current fip volume. */
+         if (!run_command("ubi check fip.new", 0))
+             run_command("ubi remove fip.new", 0);
+@@ -678,6 +716,7 @@
+         ret = run_command("ubi create fip.new 0x100000 static", 0);
+         if (ret) return ursus_update_fail(ret);
+         printf("URSUS_UPDATE_STAGE_READY layout=UBI volume=fip.new current=fip-intact\n");
++        ursus_up.last_success_stage = URSUS_UP_UBI_STAGE_PREP;
+         ursus_up.stage = URSUS_UP_UBI_STAGE_WRITE;
+         break;
+ 
+@@ -685,6 +724,7 @@
+         ret = run_commandf("ubi write 0x%08lx fip.new 0x%lx", ursus_up.addr, (ulong)ursus_up.len);
+         if (ret) return ursus_update_fail(ret);
+         printf("URSUS_UPDATE_WRITE_OK layout=UBI volume=fip.new bytes=%u\n", (unsigned int)ursus_up.len);
++        ursus_up.last_success_stage = URSUS_UP_UBI_STAGE_WRITE;
+         ursus_up.stage = URSUS_UP_UBI_STAGE_VERIFY;
+         break;
+ 
+@@ -704,6 +744,7 @@
+         unmap_sysmem(src);
+         if (ret) return ursus_update_fail(ret);
+         printf("URSUS_UPDATE_READBACK_OK layout=UBI volume=fip.new\n");
++        ursus_up.last_success_stage = URSUS_UP_UBI_STAGE_VERIFY;
+         ursus_up.stage = URSUS_UP_UBI_PROMOTE;
+         break;
+ 
+@@ -713,6 +754,7 @@
+         ret = ursus_ubi_atomic_switch("fip", "fip.new", "fip.old");
+         if (ret) return ursus_update_fail(ret);
+         printf("URSUS_UPDATE_PROMOTE_OK layout=UBI backup=fip.old\n");
++        ursus_up.last_success_stage = URSUS_UP_UBI_PROMOTE;
+         ursus_up.stage = URSUS_UP_UBI_VERIFY;
+         break;
+ 
+@@ -722,7 +764,8 @@
+             ret = ursus_fip_validate(URSUS_UBI_READBACK_ADDR, ursus_up.len, false);
+         if (ret) {
+             printf("URSUS_UPDATE_POSTCOMMIT_VERIFY_FAIL ret=%d action=ROLLBACK\n", ret);
+-            ursus_up.stage = URSUS_UP_UBI_ROLLBACK;
++            ursus_up.last_success_stage = URSUS_UP_UBI_VERIFY;
++        ursus_up.stage = URSUS_UP_UBI_ROLLBACK;
+             break;
+         }
+         ursus_up.stage = URSUS_UP_COMPLETE;
+diff -urN a/cmd/ursusweb.c b/cmd/ursusweb.c
+--- a/cmd/ursusweb.c	2026-09-08 09:15:14.561663788 +0000
++++ b/cmd/ursusweb.c	2026-09-08 09:14:54.114537097 +0000
+@@ -59,6 +59,7 @@
+ #define URSUS_FIP_SERIAL       0x12345678U
+ #define URSUS_FIP_MAX_ENTRIES  32
+ #define URSUS_REBOOT_GRACE_MS   500U
++#define URSUS_REQ_MATCH(req, lit) (!strncmp((req), (lit), sizeof(lit) - 1))
+ 
+ #define URSUS_RC_OK                    "OK"
+ #define URSUS_RC_UPLOAD_INCOMPLETE     "UPLOAD_INCOMPLETE"
+@@ -90,7 +91,7 @@
+ static ulong ursus_last_rx_error_at;
+ static unsigned int ursus_conn_id;
+ static struct udevice *ursus_web_udev;
+-static char ursus_status_body[12288];
++static char ursus_status_body[16384];
+ static char ursus_reply_body[URSUS_JSON_MAX];
+ static char ursus_web_log[URSUS_WEB_LOG_MAX];
+ static size_t ursus_web_log_len;
+@@ -1549,6 +1550,14 @@
+                             boot_seen ? ursus_fip_update_detail() : "Idle";
+     int op_error = upd_seen ? ursus_ubi_update_error() : mig_seen ? ursus_ubi_migration_error() :
+                    boot_seen ? ursus_fip_update_error() : 0;
++    const char *op_failed_stage = upd_seen ? ursus_ubi_update_failed_stage() : mig_seen ? ursus_ubi_migration_failed_stage() :
++                                  boot_seen ? ursus_fip_update_failed_stage() : "NONE";
++    const char *op_last_success = upd_seen ? ursus_ubi_update_last_success_stage() : mig_seen ? ursus_ubi_migration_last_success_stage() :
++                                 boot_seen ? ursus_fip_update_last_success_stage() : "NONE";
++    const char *op_error_code = upd_seen ? ursus_ubi_update_error_code() : mig_seen ? ursus_ubi_migration_error_code() :
++                                boot_seen ? ursus_fip_update_error_code() : "NONE";
++    const char *op_transaction = upd_seen ? ursus_ubi_update_transaction_state() : mig_seen ? ursus_ubi_migration_transaction_state() :
++                                 boot_seen ? ursus_fip_update_transaction_state() : "NOT_STARTED";
+     const char *validation_result = ursus_img.type == URSUS_IMG_NONE ? "NOT_RUN" :
+                                     !strcmp(ursus_img.reason_class, URSUS_RC_OK) ? "VALID" : "REJECTED";
+     const char *update_result = upd_seen ? (op_complete ? "COMPLETE" : op_failed ? "FAILED" : "ACTIVE") : "NOT_RUN";
+@@ -1595,7 +1604,7 @@
+              "\"ip\":\"192.168.1.1\",\"stock_layout_install_available\":%s,\"factory_install_available\":%s,"
+              "\"ubi_update_available\":%s,\"ubi_migration_available\":%s,"
+              "\"flash_type\":\"%s\",\"flash_vendor\":\"%s\",\"flash_size_mib\":%u,"
+-             "\"flash_chip\":\"%s\",\"flash_id\":\"%s\",\"bad_blocks\":%u,\"network_up\":%s,\"ethernet_active\":%s,\"web_listening\":%s,"
++             "\"flash_chip\":\"%s\",\"flash_id\":\"%s\",\"flash_page_size\":%u,\"flash_oob_size\":%u,\"flash_erase_size\":%u,\"bad_blocks\":%u,\"network_up\":%s,\"ethernet_active\":%s,\"web_listening\":%s,"
+              "\"stage_state\":\"%s\",\"image_type\":\"%s\",\"staged_size\":%u,"
+              "\"metadata_valid\":%s,\"device_compatible\":%s,\"fit_valid\":%s,\"fit_hashes_valid\":%s,"
+              "\"kernel_found\":%s,\"fdt_found\":%s,\"root_found\":%s,\"kernel_arch_valid\":%s,\"fdt_compatible\":%s,"
+@@ -1614,7 +1623,9 @@
+              "\"bootloader_update_detail\":\"%s\",\"bootloader_update_error\":%d,\"bootloader_update_layout\":\"%s\"," 
+              "\"operation\":\"%s\",\"operation_active\":%s,\"operation_complete\":%s,\"operation_failed\":%s,"
+              "\"operation_stage\":\"%s\",\"operation_percent\":%u,\"operation_detail\":\"%s\",\"operation_error\":%d,"
+-             "\"api_version\":190}\n",
++             "\"operation_failed_at_stage\":\"%s\",\"operation_last_success_stage\":\"%s\","
++             "\"operation_error_code\":\"%s\",\"operation_transaction_state\":\"%s\","
++             "\"api_version\":200}\n",
+              URSUS_PRODUCT_NAME, URSUS_VERSION, U_BOOT_DATE, U_BOOT_TIME, profile_compatible,
+              (unsigned int)(gd->ram_size >> 20), ursus_current_layout,
+              ursus_dispatch_boot_reason(), ursus_dispatch_recovery_reason(),
+@@ -1630,7 +1641,8 @@
+              ursus_ubi_diag.fit_old.id, ursus_ubi_vol_type_name(ursus_ubi_diag.fit_old.type), ursus_ubi_diag.fit_old.used_bytes,
+              stock_layout_ready ? "true" : "false", stock_layout_ready ? "true" : "false",
+              ubi_update_ready ? "true" : "false", ubi_migrate_ready ? "true" : "false",
+-             ursus_flash_type, ursus_flash_vendor, ursus_flash_mib, ursus_flash_chip, ursus_flash_id, ursus_bad_blocks,
++             ursus_flash_type, ursus_flash_vendor, ursus_flash_mib, ursus_flash_chip, ursus_flash_id,
++             ursus_page_size, ursus_oob_size, ursus_erase_size, ursus_bad_blocks,
+              (ursus_web_udev && eth_is_active(ursus_web_udev)) ? "true" : "false",
+              (ursus_web_udev && eth_is_active(ursus_web_udev)) ? "true" : "false",
+              ursus_listen_pcb ? "true" : "false",
+@@ -1659,7 +1671,8 @@
+              ursus_fip_update_failed() ? "true" : "false", ursus_fip_update_stage(), ursus_fip_update_percent(),
+              ursus_fip_update_detail(), ursus_fip_update_error(), ursus_fip_update_layout(),
+              operation, op_active ? "true" : "false", op_complete ? "true" : "false", op_failed ? "true" : "false",
+-             op_stage, op_percent, op_detail, op_error);
++             op_stage, op_percent, op_detail, op_error,
++             op_failed_stage, op_last_success, op_error_code, op_transaction);
+ }
+ 
+ static void ursus_build_plan_reply(int ret)
+@@ -2034,15 +2047,16 @@
+     int ret;
+     ursus_build_status();
+ 
+-    if (!strncmp(c->reqhdr, "GET /logo.svg ", 14))
++    if (URSUS_REQ_MATCH(c->reqhdr, "GET /logo.svg "))
+         return ursus_http_start_response(pcb, c, 200, "image/svg+xml", ursus_logo_body);
+-    if (!strncmp(c->reqhdr, "GET /favicon.svg ", 17))
++    if (URSUS_REQ_MATCH(c->reqhdr, "GET /favicon.svg "))
+         return ursus_http_start_response(pcb, c, 200, "image/svg+xml", ursus_favicon_body);
+-    if (!strncmp(c->reqhdr, "GET /api/status ", 16))
++    if (URSUS_REQ_MATCH(c->reqhdr, "GET /api/status "))
+         return ursus_http_start_response(pcb, c, 200, "application/json", ursus_status_body);
+-    if (!strncmp(c->reqhdr, "GET /api/log ", 13))
++    if (URSUS_REQ_MATCH(c->reqhdr, "GET /api/log ") ||
++        URSUS_REQ_MATCH(c->reqhdr, "GET /api/operation-log "))
+         return ursus_http_start_response(pcb, c, 200, "text/plain; charset=utf-8", ursus_web_log);
+-    if (!strncmp(c->reqhdr, "POST /api/console ", 18)) {
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/console ")) {
+         char encoded[512], cmd[256];
+ 
+         /* Expert Web console is deliberately the real U-Boot command line.
+@@ -2054,7 +2068,7 @@
+         ursus_console_capture(cmd);
+         return ursus_http_start_response(pcb, c, 200, "text/plain; charset=utf-8", ursus_console_body);
+     }
+-    if (!strncmp(c->reqhdr, "POST /api/discard ", 18)) {
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/discard ")) {
+         ursus_logf("UPLOAD DISCARD: kind=firmware generation=%s filename=%s declared=%u received=%u class=%s\n",
+                    ursus_fw_upload.generation, ursus_fw_upload.filename,
+                    (unsigned int)ursus_fw_upload.total, (unsigned int)ursus_fw_upload.received,
+@@ -2062,7 +2076,7 @@
+         ursus_reset_image_state(); memset(&ursus_fw_upload, 0, sizeof(ursus_fw_upload));
+         return ursus_http_start_response(pcb, c, 200, "application/json", "{\"result\":\"DISCARDED\"}\n");
+     }
+-    if (!strncmp(c->reqhdr, "POST /api/expert/discard ", 25)) {
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/expert/discard ")) {
+         ursus_logf("UPLOAD DISCARD: kind=initramfs generation=%s filename=%s declared=%u received=%u class=%s\n",
+                    ursus_init_upload.generation, ursus_init_upload.filename,
+                    (unsigned int)ursus_init_upload.total, (unsigned int)ursus_init_upload.received,
+@@ -2070,7 +2084,7 @@
+         ursus_reset_expert_state(); memset(&ursus_init_upload, 0, sizeof(ursus_init_upload));
+         return ursus_http_start_response(pcb, c, 200, "application/json", "{\"result\":\"DISCARDED\"}\n");
+     }
+-    if (!strncmp(c->reqhdr, "POST /api/ubi-preloader-discard ", 32)) {
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/ubi-preloader-discard ")) {
+         ursus_logf("UPLOAD DISCARD: kind=ubi-preloader generation=%s filename=%s declared=%u received=%u class=%s\n",
+                    ursus_preloader_upload.generation, ursus_preloader_upload.filename,
+                    (unsigned int)ursus_preloader_upload.total, (unsigned int)ursus_preloader_upload.received,
+@@ -2079,7 +2093,7 @@
+         ursus_preloader_valid = false;
+         return ursus_http_start_response(pcb, c, 200, "application/json", "{\"result\":\"DISCARDED\"}\n");
+     }
+-    if (!strncmp(c->reqhdr, "POST /api/ursus-fip-discard ", 28)) {
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/ursus-fip-discard ")) {
+         ursus_logf("UPLOAD DISCARD: kind=ursus-fip generation=%s filename=%s declared=%u received=%u class=%s\n",
+                    ursus_fip_upload.generation, ursus_fip_upload.filename,
+                    (unsigned int)ursus_fip_upload.total, (unsigned int)ursus_fip_upload.received,
+@@ -2088,23 +2102,23 @@
+         ursus_fip_upload_valid = false;
+         return ursus_http_start_response(pcb, c, 200, "application/json", "{\"result\":\"DISCARDED\"}\n");
+     }
+-    if (!strncmp(c->reqhdr, "POST /api/firmware-begin ", 25))
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/firmware-begin "))
+         return ursus_begin_upload(pcb, c, URSUS_UPLOAD_FIRMWARE);
+-    if (!strncmp(c->reqhdr, "POST /api/initramfs-begin ", 26))
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/initramfs-begin "))
+         return ursus_begin_upload(pcb, c, URSUS_UPLOAD_INITRAMFS);
+-    if (!strncmp(c->reqhdr, "POST /api/ubi-preloader-begin ", 30))
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/ubi-preloader-begin "))
+         return ursus_begin_upload(pcb, c, URSUS_UPLOAD_UBI_PRELOADER);
+-    if (!strncmp(c->reqhdr, "POST /api/ursus-fip-begin ", 26))
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/ursus-fip-begin "))
+         return ursus_begin_upload(pcb, c, URSUS_UPLOAD_URSUS_FIP);
+-    if (!strncmp(c->reqhdr, "POST /api/firmware-chunk ", 25))
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/firmware-chunk "))
+         return ursus_prepare_chunk(pcb, c, URSUS_UPLOAD_FIRMWARE);
+-    if (!strncmp(c->reqhdr, "POST /api/initramfs-chunk ", 26))
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/initramfs-chunk "))
+         return ursus_prepare_chunk(pcb, c, URSUS_UPLOAD_INITRAMFS);
+-    if (!strncmp(c->reqhdr, "POST /api/ubi-preloader-chunk ", 30))
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/ubi-preloader-chunk "))
+         return ursus_prepare_chunk(pcb, c, URSUS_UPLOAD_UBI_PRELOADER);
+-    if (!strncmp(c->reqhdr, "POST /api/ursus-fip-chunk ", 26))
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/ursus-fip-chunk "))
+         return ursus_prepare_chunk(pcb, c, URSUS_UPLOAD_URSUS_FIP);
+-    if (!strncmp(c->reqhdr, "POST /api/expert/boot-once ", 27)) {
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/expert/boot-once ")) {
+         if (!ursus_expert_img.bootable_fit)
+             return ursus_http_start_response(pcb, c, 409, "application/json",
+                 "{\"result\":\"REJECTED\",\"reason_class\":\"OPERATION_LOCKED\",\"reason\":\"no validated initramfs/FIT\"}\n");
+@@ -2115,7 +2129,7 @@
+         return ursus_http_start_response(pcb, c, 200, "application/json",
+             "{\"result\":\"BOOT_ONCE_ARMED\",\"automatic_sysupgrade\":false}\n");
+     }
+-    if (!strncmp(c->reqhdr, "POST /api/install-openwrt-stock-layout ", 39)) {
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/install-openwrt-stock-layout ")) {
+         bool layout_ok = !strcmp(ursus_current_layout, "STOCK") || !strcmp(ursus_current_layout, "OPENWRT_STOCK_LAYOUT");
+         {
+             char confirm[32];
+@@ -2130,7 +2144,7 @@
+         ursus_logf("OPENWRT_STOCK_LAYOUT: installation armed\n");
+         return ursus_http_start_response(pcb, c, 200, "application/json", "{\"result\":\"OPENWRT_STOCK_LAYOUT_INSTALL_ARMED\"}\n");
+     }
+-    if (!strncmp(c->reqhdr, "POST /api/install-ubi ", 22)) {
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/install-ubi ")) {
+         bool is_ubi = !strcmp(ursus_current_layout, "OPENWRT_UBI");
+         bool migratable = !strcmp(ursus_current_layout, "STOCK") ||
+                           !strcmp(ursus_current_layout, "OPENWRT_STOCK_LAYOUT");
+@@ -2179,7 +2193,7 @@
+         return ursus_http_start_response(pcb, c, 200, "application/json",
+             "{\"result\":\"UBI_MIGRATION_STARTED\",\"commit\":\"BL2_LAST\",\"bl2_layout\":\"FF800+PRELOADER@800+FFPAD\"}\n");
+     }
+-    if (!strncmp(c->reqhdr, "POST /api/reset-openwrt-settings ", 34)) {
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/reset-openwrt-settings ")) {
+         char confirm[40];
+         int rret;
+ 
+@@ -2206,7 +2220,7 @@
+         return ursus_http_start_response(pcb, c, 200, "application/json",
+             "{\"result\":\"OPENWRT_SETTINGS_RESET_COMPLETE\",\"reboot\":\"MANUAL\"}\n");
+     }
+-    if (!strncmp(c->reqhdr, "POST /api/update-ursusboot ", 27)) {
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/update-ursusboot ")) {
+         char confirm[32];
+         int uret;
+         if (!ursus_parse_header_value(c->reqhdr, "X-Ursus-Confirm", confirm, sizeof(confirm)) ||
+@@ -2231,7 +2245,7 @@
+         return ursus_http_start_response(pcb, c, 200, "application/json",
+             "{\"result\":\"URSUSBOOT_UPDATE_STARTED\",\"reboot\":\"MANUAL\"}\n");
+     }
+-    if (!strncmp(c->reqhdr, "POST /api/reboot ", 17)) {
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/reboot ")) {
+         char confirm[32];
+         if ((!ursus_ubi_migration_complete() && !ursus_fip_update_complete()) ||
+             !ursus_parse_header_value(c->reqhdr, "X-Ursus-Confirm", confirm, sizeof(confirm)) ||
+@@ -2244,7 +2258,7 @@
+         return ursus_http_start_response(pcb, c, 200, "application/json",
+             "{\"result\":\"REBOOTING\"}\n");
+     }
+-    if (!strncmp(c->reqhdr, "GET / ", 6))
++    if (URSUS_REQ_MATCH(c->reqhdr, "GET / "))
+         return ursus_http_start_response(pcb, c, 200, "text/html; charset=utf-8", ursus_root_body);
+ 
+     ret = snprintf(ursus_reply_body, sizeof(ursus_reply_body), "{\"result\":\"NOT_FOUND\"}\n");
+diff -urN a/include/ursus_ubi.h b/include/ursus_ubi.h
+--- a/include/ursus_ubi.h	2026-09-03 14:41:08.000000000 +0000
++++ b/include/ursus_ubi.h	2026-09-08 09:14:30.039434482 +0000
+@@ -45,6 +45,10 @@
+ const char *ursus_ubi_update_detail(void);
+ unsigned int ursus_ubi_update_percent(void);
+ int ursus_ubi_update_error(void);
++const char *ursus_ubi_update_failed_stage(void);
++const char *ursus_ubi_update_last_success_stage(void);
++const char *ursus_ubi_update_error_code(void);
++const char *ursus_ubi_update_transaction_state(void);
+ 
+ int ursus_ubi_migrate_from_stock(ulong fit_addr, size_t fit_len,
+                                  ulong preloader_addr, size_t preloader_len);
+@@ -58,6 +62,10 @@
+ const char *ursus_ubi_migration_detail(void);
+ unsigned int ursus_ubi_migration_percent(void);
+ int ursus_ubi_migration_error(void);
++const char *ursus_ubi_migration_failed_stage(void);
++const char *ursus_ubi_migration_last_success_stage(void);
++const char *ursus_ubi_migration_error_code(void);
++const char *ursus_ubi_migration_transaction_state(void);
+ int ursus_ubi_validate_preloader(ulong addr, size_t len);
+ int ursus_ubi_prepare_bl2_candidate(ulong preloader_addr, size_t preloader_len);
+ bool ursus_ubi_bl2_candidate_valid(void);
+diff -urN a/include/ursus_update.h b/include/ursus_update.h
+--- a/include/ursus_update.h	2026-09-03 14:41:08.000000000 +0000
++++ b/include/ursus_update.h	2026-09-08 09:14:30.039527432 +0000
+@@ -18,5 +18,9 @@
+ const char *ursus_fip_update_layout(void);
+ unsigned int ursus_fip_update_percent(void);
+ int ursus_fip_update_error(void);
++const char *ursus_fip_update_failed_stage(void);
++const char *ursus_fip_update_last_success_stage(void);
++const char *ursus_fip_update_error_code(void);
++const char *ursus_fip_update_transaction_state(void);
+ 
+ #endif
+diff -urN a/include/ursus_version.h b/include/ursus_version.h
+--- a/include/ursus_version.h	2026-09-08 09:15:14.562018682 +0000
++++ b/include/ursus_version.h	2026-09-08 09:07:26.992191165 +0000
+@@ -3,7 +3,7 @@
+ #define __URSUS_VERSION_H
+ 
+ #define URSUS_PRODUCT_NAME "UrsusBoot"
+-#define URSUS_VERSION "0.1.0-alpha5-UBIUX1-WEBREBOOT1"
++#define URSUS_VERSION "0.1.0-alpha5-UBIUX1-TEST57"
+ #define URSUS_PRODUCT_VERSION URSUS_PRODUCT_NAME " " URSUS_VERSION
+ 
+ #endif

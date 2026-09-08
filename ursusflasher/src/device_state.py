@@ -409,7 +409,10 @@ def probe_device_state(host: str = "192.168.1.1", *, interactive_ssh: bool = Fal
         degrade_probe_status(state, PROBE_PARTIAL, "OPENWRT_ROOT_SSH_UNAVAILABLE")
         return state
 
-    if http_kind == "http" and _probe_stock_web(host, state):
+    # The lightweight HTTP fingerprint returns ``nokia_stock`` only after
+    # matching multiple vendor-login markers.  A generic ``http`` response is
+    # deliberately insufficient evidence for entering the stock Web flow.
+    if http_kind == "nokia_stock" and _probe_stock_web(host, state):
         return state
 
     degrade_probe_status(state, PROBE_PARTIAL, "NETWORK_IDENTITY_AMBIGUOUS")

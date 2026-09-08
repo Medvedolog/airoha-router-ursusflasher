@@ -24,7 +24,7 @@ assert terms.human('PERSISTENT_ROOT','execution_environment')=='установл
 unknown=ds.DeviceState(probe_status=ds.PROBE_COMPLETE,current_system='OPENWRT_UBI',current_layout='OPENWRT_UBI',execution_environment=ds.EXEC_UNKNOWN,bootloader='URSUSBOOT')
 ds.degrade_probe_status(unknown,ds.PROBE_PARTIAL,'EXECUTION_ENVIRONMENT_UNCONFIRMED')
 assert ds.action_applicability(unknown)[2].enabled
-assert ds.action_applicability(unknown)[2].resolved_backend=='AUTO_URSUSBOOT_INSTALL_UPDATE'
+assert ds.action_applicability(unknown)[2].resolved_backend=='EXPLICIT_OPERATOR_SELECTED_URSUSBOOT_UPDATE_ONLY; NEVER_CALLED_AUTOMATICALLY_FROM_ONEKEY'
 assert any('Среда выполнения:' in x and 'оперативной памяти' in x for x in ds.state_summary_lines(ram))
 assert not any('Среда выполнения:' in x for x in ds.state_summary_lines(stock))
 print('STATEUI4_EXECUTION_ENVIRONMENT_QA=PASS')

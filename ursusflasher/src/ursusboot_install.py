@@ -22,7 +22,7 @@ REPO_MODE = (_REPO_ROOT / "fw").is_dir() and (_REPO_ROOT / "payloads").is_dir() 
 ROOT = _REPO_ROOT if REPO_MODE else HERE.parent
 DATA = HERE if REPO_MODE else (ROOT / "data")
 PAYLOAD_DIR = (ROOT / "payloads" / "md" / "ursusboot") if REPO_MODE else (ROOT / "data" / "payloads" / "md" / "ursusboot")
-PAYLOAD = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip"
+PAYLOAD = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip"
 ALPHA3_REFERENCE_PAYLOAD = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha3-update.fip"
 WORK = ROOT / "work"
 PRIVATE = WORK / "private"
@@ -42,7 +42,7 @@ EXPECTED_ROM_HEADER_SHA256 = "82830140f4f8842702d0569065c27071b7cc24e0876e6c487c
 EXPECTED_HYBRID_FIP_SIZE = 0x7B000
 MANIFEST_PATH = (ROOT / 'config' / 'MANIFEST.json') if REPO_MODE else (ROOT / 'data' / 'MANIFEST.json')
 _URSUS_ROOT_META = json.loads(MANIFEST_PATH.read_text(encoding='utf-8'))['ursusboot']
-_URSUS_META = _URSUS_ROOT_META['alpha5_ubiux1_candidate']
+_URSUS_META = _URSUS_ROOT_META['alpha5_test61_candidate']
 EXPECTED_HYBRID_FIP_SHA256 = _URSUS_META['fip_sha256']
 EXPECTED_U_BOOT_SHA256 = _URSUS_META['raw_bl33_sha256']
 TARGET_URSUS = _URSUS_META['version']
@@ -189,7 +189,7 @@ def validate_direct_stock_lineage(target: bytes) -> dict:
     if not ALPHA3_REFERENCE_PAYLOAD.is_file():
         raise RuntimeError(f"alpha3 lineage reference missing: {ALPHA3_REFERENCE_PAYLOAD}")
     alpha3 = ALPHA3_REFERENCE_PAYLOAD.read_bytes()
-    if hashlib.sha256(alpha3).hexdigest() != _URSUS_ROOT_META['fip_sha256']:
+    if hashlib.sha256(alpha3).hexdigest() != _URSUS_ROOT_META['alpha3_lineage_fip_sha256']:
         raise RuntimeError("alpha3 lineage reference SHA256 mismatch")
     validate_checksum_entry(alpha3)
     validate_checksum_entry(target)
@@ -956,7 +956,7 @@ def run_preflight_only() -> int:
     return run_stock_access_check()
 
 
-def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery_after: bool = False, recovery_host: str = "192.168.1.1", route: str = "auto") -> int:
+def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery_after: bool = False, recovery_host: str = "192.168.1.1", route: str = "auto", skip_full_backup: bool = False) -> int:
     ui.enable()
     hybrid = require_payload()
     checksum = validate_checksum_entry(hybrid)
@@ -1042,40 +1042,50 @@ def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery
             pf = mtd0_write_preflight(telnet)
             result["preflight"] = pf
             _status_line(f"[ГОТОВО] Целевой раздел mtd0 загрузчика подтверждён. Способ записи: {pf['writer']}")
-            # ONE-KEY requires a complete restore-grade stock backup before the
-            # first destructive write. The backup includes mtd0..mtd16 plus
-            # DEVICE_IDENTITY metadata sourced read-only from RI.
-            FULL_BACKUPS.mkdir(parents=True, exist_ok=True)
-            full_backup = FULL_BACKUPS / f"stock-full-{run_stamp}"
-            _status_line(pb.tr(
-                "[ШАГ] До записи NAND сохраняю полную копию mtd0..mtd16. Запись не начнётся, пока копия не пройдёт проверку восстановления.",
-                "[BACKUP] Before writing NAND, capturing a complete stock mtd0..mtd16 backup. This may take a while; no write starts until the restore validator passes.",
-            ))
-            telnet.close()
-            telnet = None
-            pb.backup_tftp(access, access.host, full_backup, expected_family="md")
-            result["full_stock_backup"] = str(full_backup)
-            identity_json = full_backup / "DEVICE_IDENTITY.json"
-            if identity_json.is_file():
-                try:
-                    result["device_identity"] = json.loads(identity_json.read_text(encoding="utf-8"))
-                except Exception:
-                    pass
-            _status_line(pb.tr(
-                f"[ГОТОВО] Полная копия заводской прошивки Nokia сохранена: {full_backup}",
-                f"[PASS] Complete stock backup saved: {full_backup}",
-            ))
+            if skip_full_backup:
+                # EXPERT-only test convenience: caller explicitly chose to skip the
+                # long mtd0..mtd16 capture for this run. The live mtd0 capture below
+                # is still mandatory because prefix/env must come from this device.
+                result["full_stock_backup"] = None
+                result["full_stock_backup_skipped"] = True
+                _status_line(pb.tr(
+                    "[EXPERT] Полный backup mtd0..mtd16 пропущен для этого запуска по выбору оператора.",
+                    "[EXPERT] Full mtd0..mtd16 backup skipped for this run by operator choice.",
+                ))
+            else:
+                # Normal ONE-CLICK requires a complete restore-grade stock backup
+                # before the first destructive write.
+                FULL_BACKUPS.mkdir(parents=True, exist_ok=True)
+                full_backup = FULL_BACKUPS / f"stock-full-{run_stamp}"
+                _status_line(pb.tr(
+                    "[ШАГ] До записи NAND сохраняю полную копию mtd0..mtd16. Запись не начнётся, пока копия не пройдёт проверку восстановления.",
+                    "[BACKUP] Before writing NAND, capturing a complete stock mtd0..mtd16 backup. No write starts until the restore validator passes.",
+                ))
+                telnet.close()
+                telnet = None
+                pb.backup_tftp(access, access.host, full_backup, expected_family="md")
+                result["full_stock_backup"] = str(full_backup)
+                identity_json = full_backup / "DEVICE_IDENTITY.json"
+                if identity_json.is_file():
+                    try:
+                        result["device_identity"] = json.loads(identity_json.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+                _status_line(pb.tr(
+                    f"[ГОТОВО] Полная копия заводской прошивки Nokia сохранена: {full_backup}",
+                    f"[PASS] Complete stock backup saved: {full_backup}",
+                ))
 
-            # Re-open root after the long read-only backup and revalidate only
-            # the actual destructive target. Do not repeat unrelated MTD/tool gates.
-            telnet = pb.login_root_family(access, "md", allow_service_provisioning=True)
-            pb.require_supported_model_over_telnet(access, telnet)
-            rc, uid = telnet.command_clean("id -u")
-            if rc or not re.search(r"(?:^|\n)0(?:\n|$)", uid.strip() + "\n"):
-                raise RuntimeError("UID 0 not confirmed after full backup")
-            target_after = revalidate_mtd0_target(telnet)
-            result["mtd0_revalidated_after_full_backup"] = target_after
-            _status_line("[ГОТОВО] После копирования повторно подтверждён только целевой mtd0.")
+                # Re-open root after the long read-only backup and revalidate only
+                # the actual destructive target. Do not repeat unrelated gates.
+                telnet = pb.login_root_family(access, "md", allow_service_provisioning=True)
+                pb.require_supported_model_over_telnet(access, telnet)
+                rc, uid = telnet.command_clean("id -u")
+                if rc or not re.search(r"(?:^|\n)0(?:\n|$)", uid.strip() + "\n"):
+                    raise RuntimeError("UID 0 not confirmed after full backup")
+                target_after = revalidate_mtd0_target(telnet)
+                result["mtd0_revalidated_after_full_backup"] = target_after
+                _status_line("[ГОТОВО] После копирования повторно подтверждён только целевой mtd0.")
             remote_before, remote_sha = capture_live_mtd0(telnet, access, before_path)
             _status_line(f"[ГОТОВО] Текущий mtd0 сохранён на компьютере: {before_path}")
             _status_line(f"[ГОТОВО] SHA256 текущего mtd0: {remote_sha}")
@@ -1107,16 +1117,11 @@ def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery
                 _status_line("[ГОТОВО] Новый образ mtd0 передан в роутер, SHA256 совпал.")
                 _status_line("\n[ГОТОВО] Новый mtd0 подготовлен. Размер загрузочного блока: 512 КиБ.")
                 print("Разделы Nokia master/slave в эту запись не входят.")
-                if unattended:
-                    answer = "INSTALL"
-                else:
-                    _status_line("\n[ВНИМАНИЕ] Сейчас начнётся запись в NAND. После начала записи питание не отключать.")
-                    print(f"Что записываю: FIP с UrsusBoot {TARGET_URSUS} в mtd0, 512 КиБ.")
-                    print(f"Копия текущего mtd0: {before_path}")
-                    answer = ui.prompt("Начать запись mtd0? [y/N]: ").strip().lower()
-                if unattended:
-                    _status_line("[ШАГ] ONE-KEY завершил проверки. Начинаю разрешённую запись mtd0.")
-                if answer not in ("INSTALL", "y", "yes", "д", "да"):
+                _status_line("\n[ВНИМАНИЕ] Сейчас начнётся запись в NAND. После начала записи питание не отключать.")
+                print(f"Что записываю: FIP с UrsusBoot {TARGET_URSUS} в mtd0, 512 КиБ.")
+                print(f"Копия текущего mtd0: {before_path}")
+                answer = ui.prompt("Начать запись mtd0? [y/N]: ").strip().lower()
+                if answer not in ("y", "yes", "д", "да"):
                     result["status"] = "CANCELLED_BEFORE_WRITE"
                     result["completed_at"] = stamp()
                     result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -1205,22 +1210,29 @@ def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery
             telnet = None
             access.close_web(announce=False)
             access = None
-            _status_line("[ЖДУ] До 3 минут жду ответ роутера после перезагрузки...")
-            kind = wait_http_kind(recovery_host if (unattended and recovery_after) else str(result.get("host") or "192.168.1.1"), 180)
-            result["post_reboot_http_kind"] = kind
-            if kind == "stock_http":
-                _status_line(f"[ИНФО] Загрузилась заводская прошивка Nokia. Запись UrsusBoot {TARGET_URSUS} уже проверена; если нужен Recovery, повторять запись mtd0 не требуется.")
-                result["status"] = "PASS"
-            elif kind == "ursus_recovery":
-                if unattended and recovery_after:
-                    _status_line("[ГОТОВО] Роутер в режиме восстановления UrsusBoot. Красный индикатор должен гореть постоянно. Отпустите Reset.")
-                    result["status"] = "PASS_RECOVERY_READY"
-                else:
+            if unattended and recovery_after:
+                # REBOOTWAIT1: ONE-CLICK owns the post-reboot Recovery wait.
+                # Do not interpret a still-alive pre-reboot stock HTTP response as
+                # evidence that the new boot cycle already completed. Returning here
+                # also avoids the old 180 s inner wait + 10 s outer wait split brain.
+                result["post_reboot_http_kind"] = "DEFERRED_TO_ONECLICK"
+                result["status"] = "WRITE_PASS_RECOVERY_WAIT_DEFERRED"
+                _status_line(pb.tr(
+                    "[ЖДУ] Перезагрузка началась. ONE-CLICK теперь ждёт именно UrsusBoot Recovery; старый ответ stock Web не считается новой загрузкой.",
+                    "[WAIT] Reboot has started. ONE-CLICK now waits specifically for UrsusBoot Recovery; a stale stock Web response is not accepted as a new boot."))
+            else:
+                _status_line("[ЖДУ] До 3 минут жду ответ роутера после перезагрузки...")
+                kind = wait_http_kind(str(result.get("host") or "192.168.1.1"), 180)
+                result["post_reboot_http_kind"] = kind
+                if kind == "stock_http":
+                    _status_line(f"[ИНФО] Загрузилась заводская прошивка Nokia. Запись UrsusBoot {TARGET_URSUS} уже проверена.")
+                    result["status"] = "PASS"
+                elif kind == "ursus_recovery":
                     _status_line("[ВНИМАНИЕ] Режим восстановления UrsusBoot отвечает, но заводская прошивка Nokia не загрузилась. Загрузчик работает; смотрите UART-лог.")
                     result["status"] = "PERSISTENT_BOOT_RECOVERY_FALLBACK"
-            else:
-                _status_line("[ВНИМАНИЕ] За 3 минуты HTTP не ответил. Запись mtd0 уже сверена; проверьте UART.")
-                result["status"] = "WRITE_PASS_REBOOT_UNCONFIRMED"
+                else:
+                    _status_line("[ВНИМАНИЕ] За 3 минуты HTTP не ответил. Запись mtd0 уже сверена; проверьте UART.")
+                    result["status"] = "WRITE_PASS_REBOOT_UNCONFIRMED"
             result["completed_at"] = stamp()
             result_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             return 0
@@ -1339,7 +1351,7 @@ def selftest() -> int:
     candidate, meta = build_candidate(live, hybrid)
     if candidate[:FIP_PHYS_OFF] != live[:FIP_PHYS_OFF] or candidate[STOCK_BOOT_ENV_OFF:] != live[STOCK_BOOT_ENV_OFF:]:
         raise RuntimeError("candidate preservation selftest failed")
-    uboot = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha5-UBIUX1-u-boot.bin"
+    uboot = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-u-boot.bin"
     if sha_file(uboot) != EXPECTED_U_BOOT_SHA256:
         raise RuntimeError("UrsusBoot u-boot hash mismatch")
     reserves=control_fdt_memreserves(uboot.read_bytes())

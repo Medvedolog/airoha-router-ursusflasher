@@ -24,7 +24,7 @@ import console_ui as ui
 import ui_terms as terms
 import network_guidance
 
-TARGET_URSUS = "0.1.0-alpha5-UBIUX1"
+TARGET_URSUS = "0.1.0-alpha5-UBIUX1-TEST61"
 RECOVERY_HOST = os.environ.get("URSUS_RECOVERY_HOST", "192.168.1.1")
 DEFAULT_STOCK_HOST = os.environ.get("NOKIA_HOST", "192.168.1.1")
 
@@ -198,7 +198,7 @@ def wait_ursus(host: str = RECOVERY_HOST, seconds: int = 120) -> dict | None:
         st = ursus_status(host)
         if st:
             return st
-        remain = int(deadline - time.time())
+        remain = max(0, int(deadline - time.time()))
         bucket = remain // 10
         if bucket != last_notice:
             say(tr(f"[ЖДУ] Роутер ещё не ответил. Подожду ещё примерно {remain} секунд.",
@@ -268,28 +268,35 @@ def wait_for_manual_recovery() -> dict:
             raise RuntimeError(tr("Остановлено пользователем после успешной записи загрузчика.",
                                   "Stopped by the user after the bootloader write had already passed readback."))
 
-def ensure_target_ursus(st: dict) -> dict:
-    version = str(st.get("version") or "")
-    if version == TARGET_URSUS:
-        say(tr(f"[ГОТОВО] UrsusBoot {version} уже запущен.",
-               f"[OK] UrsusBoot {version} is already running."))
-        return st
+def report_ursus_version(st: dict) -> dict:
+    """Report runtime identity without ever turning a version mismatch into a writer."""
+    api_version = str(st.get("version") or "")
+    console_version = ""
+    try:
+        out = uw.console(RECOVERY_HOST, "version", timeout=20)
+        import re
+        m = re.search(r"U-Boot\s+\S*UrsusBoot-([^\s\r\n]+)", out)
+        if m:
+            console_version = m.group(1)
+    except Exception as exc:
+        proven._write_session_only("[IDENTITY1] console version unavailable: " + repr(exc))
 
-    stage(
-        "Обновление UrsusBoot",
-        "Updating UrsusBoot",
-        f"Сейчас в RAM работает {version or 'неизвестная версия'}. Целевая постоянная версия — {TARGET_URSUS}.",
-        f"The current RAM runtime is {version or 'unknown'}. The persistent target is {TARGET_URSUS}.",
-        "Загружаю alpha5-UBIUX1, UrsusBoot сам проверит FIP, запишет его и считает обратно. Перезагрузка между обновлением загрузчика и записью OpenWrt не нужна: текущая Recovery-сессия остаётся в RAM, а при STOCK→UBI миграции уже записанный alpha5-UBIUX1 FIP копируется в новый UBI volume fip.",
-        "alpha5-UBIUX1 is uploaded, validated, committed and read back by UrsusBoot. No intermediate reboot is required: the current Recovery runtime stays in RAM, and STOCK-to-UBI migration copies the already committed alpha5-UBIUX1 FIP into the new UBI fip volume.",
-    )
-    ursusboot_update.require_fip_payload()
-    st2 = uw.update_bootloader(RECOVERY_HOST, ursusboot_update.PRODUCTION_PAYLOAD, confirm=False)
-    st2["_persistent_ursus_target"] = TARGET_URSUS
-    st2["_runtime_ursus_version"] = version
-    say(tr(f"[ГОТОВО] Постоянный UrsusBoot {TARGET_URSUS} записан и считан обратно. Текущая RAM-сессия {version or 'старой версии'} продолжит операцию до финальной перезагрузки.",
-           f"[READY] Persistent UrsusBoot {TARGET_URSUS} is written and read back. The current RAM runtime {version or 'from the previous version'} will continue until the final reboot."))
-    return st2
+    if console_version and api_version and console_version != api_version:
+        say(tr(
+            f"[ВНИМАНИЕ] Несовпадение identity UrsusBoot: API={api_version}, console={console_version}. Автоматическое обновление загрузчика запрещено.",
+            f"[WARNING] UrsusBoot identity mismatch: API={api_version}, console={console_version}. Automatic bootloader update is forbidden.",
+        ))
+        proven._write_session_only(f"[IDENTITY1_SPLIT] api={api_version} console={console_version}")
+    elif api_version == TARGET_URSUS or console_version == TARGET_URSUS:
+        say(tr(f"[ГОТОВО] UrsusBoot {TARGET_URSUS} подтверждён.", f"[READY] UrsusBoot {TARGET_URSUS} confirmed."))
+    else:
+        shown = console_version or api_version or tr("неизвестно", "unknown")
+        say(tr(
+            f"[ИНФО] Запущен UrsusBoot {shown}; в комплекте {TARGET_URSUS}. ONE-CLICK не обновляет существующий UrsusBoot автоматически. При необходимости обновите его вручную через WebFailsafe или EXPERT → 2.",
+            f"[INFO] Running UrsusBoot is {shown}; bundled version is {TARGET_URSUS}. ONE-CLICK never auto-updates an existing UrsusBoot. Update it manually through WebFailsafe or EXPERT → 2 if needed.",
+        ))
+    st['_console_version'] = console_version
+    return st
 
 
 def install_ursus_from_openwrt(host: str) -> dict:
@@ -310,17 +317,17 @@ def install_ursus_from_openwrt(host: str) -> dict:
     )
     if rc:
         raise RuntimeError(f"OpenWrt SSH UrsusBoot install returned rc={rc}")
-    st = wait_ursus(RECOVERY_HOST, 20)
+    st = wait_ursus(RECOVERY_HOST, 90)
     if not st:
         say(tr(
-            "[ИНФО] alpha5-UBIUX1 записан и сверен, но Recovery не пойман автоматически. Повторять запись не нужно.",
-            "[INFO] alpha5-UBIUX1 was written and verified, but Recovery was not caught automatically. Do not repeat the write.",
+            "[ИНФО] UrsusBoot записан и сверен, но Recovery не появился за 90 секунд. Повторять запись не нужно.",
+            "[INFO] UrsusBoot was written and verified, but Recovery did not appear within 90 seconds. Do not repeat the write.",
         ))
         st = wait_for_manual_recovery()
     return st
 
 
-def install_ursus_from_stock(host: str) -> dict:
+def install_ursus_from_stock(host: str, *, skip_full_backup: bool = False) -> dict:
     """Install the production UrsusBoot only after positive Nokia STOCK proof."""
     stage(
         "Заводская прошивка Nokia: установка UrsusBoot",
@@ -333,17 +340,18 @@ def install_ursus_from_stock(host: str) -> dict:
     rc = ursusboot_install.run_install(
         unattended=True, host=host, recovery_after=True,
         recovery_host=RECOVERY_HOST, route="stock",
+        skip_full_backup=skip_full_backup,
     )
     if rc:
         raise RuntimeError(tr(
             "Не удалось установить alpha5-UBIUX1 из подтверждённой Nokia STOCK. Дальнейшая запись не начнётся.",
             "Failed to install alpha5-UBIUX1 from positively identified Nokia STOCK. No further write will start.",
         ))
-    st = wait_ursus(RECOVERY_HOST, 10)
+    st = wait_ursus(RECOVERY_HOST, 90)
     if not st:
         say(tr(
-            "[ИНФО] alpha5-UBIUX1 записан и сверен. Recovery не пойман с первого раза; повторять запись mtd0 не нужно.",
-            "[INFO] alpha5-UBIUX1 was written and verified. Recovery was missed on the first attempt; do not rewrite mtd0.",
+            "[ИНФО] UrsusBoot записан и сверен. Recovery не появился за 90 секунд; повторять запись mtd0 не нужно.",
+            "[INFO] UrsusBoot was written and verified. Recovery did not appear within 90 seconds; do not rewrite mtd0.",
         ))
         st = wait_for_manual_recovery()
     say(tr(
@@ -381,7 +389,9 @@ def install_or_update_openwrt(st: dict) -> dict:
             "После записи считаю всё обратно и сверю. Потом роутер перезагрузится сам.",
             "A full readback/validation follows the write, then the router reboots automatically.",
         )
-        return uw.update_firmware(RECOVERY_HOST, ubi_image, confirm=False)
+        result = uw.update_firmware(RECOVERY_HOST, ubi_image, confirm=False)
+        result["_onekey_keep_settings"] = True
+        return result
 
     if layout == "OPENWRT_STOCK_LAYOUT":
         ubi_image = require_bundle_role("OPENWRT_UBI_SYSUPGRADE")
@@ -401,7 +411,7 @@ def install_or_update_openwrt(st: dict) -> dict:
                           "The supported layout could not be determined. Nothing will be written."))
 
 
-def main() -> int:
+def main(*, skip_full_backup: bool = False) -> int:
     global _STAGE_NO
     _STAGE_NO = 0
     choose_language()
@@ -435,7 +445,7 @@ def main() -> int:
         if identity == "openwrt":
             st = install_ursus_from_openwrt(RECOVERY_HOST)
         elif identity == "nokia_stock":
-            st = install_ursus_from_stock(RECOVERY_HOST)
+            st = install_ursus_from_stock(RECOVERY_HOST, skip_full_backup=skip_full_backup)
         else:
             # A generic/unknown HTTP page is not STOCK proof. If SSH is open,
             # try one positive root/OpenWrt identity check. Any failure remains
@@ -459,34 +469,47 @@ def main() -> int:
                     "The device responds over HTTP, but the page is confirmed as neither OpenWrt nor the Nokia XG-040G-MD factory UI. Nothing will be written; use EXPERT → 10/11 for diagnostics.",
                 ))
 
-    st = ensure_target_ursus(st)
+    st = report_ursus_version(st)
     say(tr(
-        "[ИНФО] Режим восстановления UrsusBoot доступен на http://192.168.1.1. Продолжаю автоматически, браузер открывать не нужно.",
-        "[INFO] UrsusBoot Recovery is now active at http://192.168.1.1. ONE-KEY continues through the same API automatically; opening a browser is optional.",
+        "[ИНФО] Режим восстановления UrsusBoot доступен на http://192.168.1.1. Продолжаю через тот же API; автоматического обновления UrsusBoot не будет.",
+        "[INFO] UrsusBoot Recovery is active at http://192.168.1.1. ONE-KEY continues through the same API; UrsusBoot will not be auto-updated.",
     ))
-    if str(st.get("version") or "") != TARGET_URSUS and st.get("_persistent_ursus_target") != TARGET_URSUS:
-        raise RuntimeError(tr(
-            f"Не подтверждена целевая версия UrsusBoot {TARGET_URSUS}; runtime={st.get('version')}",
-            f"Target UrsusBoot {TARGET_URSUS} was not confirmed; runtime={st.get('version')}",
-        ))
 
+    source_layout = str(st.get("current_layout") or "UNKNOWN")
     st = install_or_update_openwrt(st)
 
     say(tr("[ГОТОВО] OpenWrt записан и сверен.",
            "[READY] sysupgrade was written and verified."))
+
+    reset_done = False
+    if source_layout == "OPENWRT_UBI" and st.get("_onekey_keep_settings"):
+        say(tr(
+            "[ИНФО] Обновление выполнено с сохранением настроек. Если после sysupgrade хотите получить чистую конфигурацию OpenWrt, сброс можно сделать сейчас до перезагрузки.",
+            "[INFO] The update preserved settings. If you want a clean OpenWrt configuration after sysupgrade, settings can be reset now before reboot.",
+        ))
+        answer = input(tr(
+            "Сбросить настройки OpenWrt и затем перезагрузиться? [y/N]: ",
+            "Reset OpenWrt settings and then reboot? [y/N]: ",
+        )).strip().lower()
+        if answer in ("y", "yes", "д", "да"):
+            uw.reset_openwrt_settings(RECOVERY_HOST, confirm=False)
+            reset_done = True
+            say(tr("[ГОТОВО] rootfs_data сброшен.", "[READY] rootfs_data was reset."))
+
     stage(
         "Готово",
         "Done",
-        "Перезагружаю роутер. От вас больше ничего не требуется.",
-        "ONE-KEY is issuing the reboot command. No further user action is required.",
-        "После загрузки откройте http://192.168.1.1. Если IP-адрес компьютера меняли вручную — верните обычные настройки сети. Для Recovery: после reboot дождитесь общего мигания индикаторов и сразу зажмите Reset до 2 коротких + 3 длинных красных миганий и постоянного красного. Если момент пропущен: питание OFF -> ON, через примерно 1 секунду зажмите Reset на 5-10 секунд до красной последовательности.",
-        "Wait for the installed system to boot. For advanced service later, hold Reset at UrsusBoot entry until the red LED pattern completes, then open http://192.168.1.1. If the PC network was configured manually, restore its normal settings afterwards.",
+        "Запись и проверка завершены. Перезагружаю роутер в OpenWrt.",
+        "Write and verification are complete. Rebooting the router into OpenWrt.",
+        "После загрузки откройте http://192.168.1.1. Если IP-адрес компьютера меняли вручную — верните обычные настройки сети.",
+        "After boot, open http://192.168.1.1. If the PC network was configured manually, restore its normal settings.",
     )
     try:
         uw.reboot(RECOVERY_HOST)
     except Exception:
         pass
-    say(tr("[ГОТОВО] Установка завершена.", "[READY] Installation completed."))
+    say(tr("[ГОТОВО] Установка завершена." + (" Настройки OpenWrt сброшены." if reset_done else ""),
+           "[READY] Installation completed." + (" OpenWrt settings were reset." if reset_done else "")))
     return 0
 
 

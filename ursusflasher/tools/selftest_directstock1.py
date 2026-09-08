@@ -8,9 +8,9 @@ sys.path.insert(0,str(D/'data'))
 import ursusboot_install as bi
 import one_key as ok
 
-assert bi.TARGET_URSUS == '0.1.0-alpha5-UBIUX1'
-assert bi.PAYLOAD.name == 'ursusboot-md-0.1.0-alpha5-UBIUX1-update.fip'
-assert hashlib.sha256(bi.PAYLOAD.read_bytes()).hexdigest() == '548c446555231ee1b6ec4666000831226e0749c576d702c06dc5f501a6f510db'
+assert bi.TARGET_URSUS == '0.1.0-alpha5-UBIUX1-TEST61'
+assert bi.PAYLOAD.name == 'ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip'
+assert hashlib.sha256(bi.PAYLOAD.read_bytes()).hexdigest() == '3c922e4256b6047376a7d445006e6cb2a4485bb412747033a77defd15e42fcea'
 assert bi.ALPHA3_REFERENCE_PAYLOAD.name == 'ursusboot-md-0.1.0-alpha3-update.fip'
 assert hashlib.sha256(bi.ALPHA3_REFERENCE_PAYLOAD.read_bytes()).hexdigest() == '597071e178470bfda23aab9738ad7ddb0b25e9b21ef336fd3eceb39c39f983ce'
 
@@ -35,7 +35,7 @@ assert 'first stock write uses exact alpha3' not in src.lower()
 
 m=json.loads((D/'data/MANIFEST.json').read_text(encoding='utf-8'))
 assert m['ursusboot']['stock_bootstrap_version'] == 'REMOVED_FROM_ONECLICK'
-assert m['ursusboot']['direct_stock_target_version'] == '0.1.0-alpha5-UBIUX1'
+assert m['ursusboot']['direct_stock_target_version'] == '0.1.0-alpha5-UBIUX1-TEST61'
 
 print('DIRECT_STOCK_HWFIX3_LINEAGE_QA=PASS')
 print('DIRECT_STOCK_HWFIX3_CANDIDATE_QA=PASS')

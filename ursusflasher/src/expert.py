@@ -49,25 +49,17 @@ def confirm_uart_recovery(kind_ru: str, kind_en: str, *, title_ru: str = "АВА
 
 
 def update_bootloader_network() -> None:
-    try:
-        ursusboot_update.web_fip_update()
-    except Exception as first:
-        print(tr(
-            f"[ВНИМАНИЕ] Передача через веб-интерфейс не завершилась: {first}",
-            f"[WARNING] WebFailsafe upload did not complete: {first}",
-        ))
-        print(tr(
-            "Пробую запасной способ передачи через TFTP и ту же консоль UrsusBoot.",
-            "Trying TFTP as the fallback transport through the same UrsusBoot console.",
-        ))
-        ursusboot_update.tftp_update_automated()
+    # Never launch a second writer merely because a UI/transport exception was
+    # raised after a flash transaction.  HTTP upload has its own bounded retry
+    # logic; TFTP remains an explicit recovery transport only.
+    ursusboot_update.web_fip_update()
 
 
 def _bootloader_menu_detail(state: ds.DeviceState, action: ds.ActionApplicability) -> str:
     if state.current_system == "RECOVERY":
         return tr(
-            "UrsusBoot Recovery: HTTP → обновление FIP; при сбое — TFTP",
-            "UrsusBoot Recovery: HTTP → FIP update; TFTP fallback on failure",
+            "UrsusBoot Recovery: HTTP → обновление FIP с сетевыми ретраями; TFTP только отдельным ручным recovery-путём",
+            "UrsusBoot Recovery: HTTP → FIP update with network retries; TFTP is a separate explicit recovery path",
         )
     if state.current_system.startswith("OPENWRT"):
         return tr(
@@ -606,7 +598,14 @@ def main() -> int:
             continue
 
         if number == 1:
-            run_action(one_key.main, write_may_happen=True)
+            skip_backup = False
+            if state.current_system == "NOKIA_STOCK":
+                ans = ui.prompt(tr(
+                    "EXPERT: пропустить полный backup mtd0..mtd16 для этого запуска? [y/N]: ",
+                    "EXPERT: skip the full mtd0..mtd16 backup for this run? [y/N]: ",
+                )).strip().lower()
+                skip_backup = ans in ("y", "yes", "д", "да")
+            run_action(lambda: one_key.main(skip_full_backup=skip_backup), write_may_happen=True)
         elif number == 2:
             network_guidance.show()
             # Item 2 is an explicit operator request, so raise the passive menu

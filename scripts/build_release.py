@@ -18,9 +18,11 @@ with tempfile.TemporaryDirectory() as td:
     root = export_tree(Path(td) / name)
     zpath = out / f'{name}.zip'
     with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
-        for p in sorted(root.rglob('*')):
+        for p in sorted(root.rglob('*'), key=lambda item: item.relative_to(root).as_posix()):
             if p.is_file():
                 z.write(p, p.relative_to(root.parent))
     sha = hashlib.sha256(zpath.read_bytes()).hexdigest()
-    (out / f'{name}.zip.sha256.txt').write_text(f'{sha}  {zpath.name}\n', encoding='utf-8')
+    (out / f'{name}.zip.sha256.txt').write_text(
+        f'{sha}  {zpath.name}\n', encoding='utf-8', newline='\n'
+    )
     print(zpath)

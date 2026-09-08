@@ -1,3 +1,20 @@
+# 0.2.61 PUBLIC TEST — TEST61 / SAFETYREG1
+
+- TEST59/60 are revoked for new hardware runs: split identity between `.scmversion` and `URSUS_VERSION` could make ONE-CLICK launch an unnecessary second FIP write after a proven direct mtd0 write/readback.
+- IDENTITY1: TEST61 reports one identity through native `version`, Web/API and build metadata.
+- NOAUTOFIP1: ONE-CLICK never updates an already installed UrsusBoot automatically; self-update is an explicit WebFailsafe/EXPERT operator action only.
+- UBIATTACH2: explicit FIP self-update reuses the expected active UBI attachment without `ubi detach`; an attachment mismatch stops before the writer.
+- UPLOADRETRY1/UPLOADABORT2: reconnect grace is 75 s; a new full upload cycle requires `[y/N]`; failure before the operation POST is recorded as `transaction_state=NOT_STARTED`.
+- SESSIONRECOVERY1: upload/validation/precheck failure before a writer does not lock the next attempt.
+- Direct stock mtd0 write always has one `[y/N]` after backup/preflight. EXPERT item 1 may explicitly skip the full backup for the current test run; the required live mtd0 capture remains.
+- POSTSYSRESET1: after a successful UBI update with `keep_settings=1`, UrsusFlasher offers an optional OpenWrt settings reset.
+- DIAGSTATE1: stock self-update no longer reports a false `UBI_VERIFY` success stage.
+- EMERGENCYMETA1: production TEST61 FIP metadata and emergency BootROM alpha3 metadata use separate manifest/hash fields.
+- REPROZIP1: PUBLIC TEST packaging uses a fixed `SOURCE_DATE_EPOCH`; independent builds must produce the same ZIP SHA256.
+- ROUTE1 integration: a positive `nokia_stock` fingerprint now reaches the authenticated read-only stock probe; generic HTTP remains ambiguous.
+- Fixed direct launch from a Git checkout, `config/UI_TERMS.json` discovery, the GitHub-safe SDK file list, and the TEST61 payload reference manifest. Manifest and ZIP path ordering is canonical across Windows and Linux.
+- CONFIGTRIM1 remains enabled. TEST61 is source/build/package QA only and requires hardware safety regression.
+
 # UrsusFlasher changelog
 
 ## 0.2.56 — alpha5-UBIUX1 / ROUTE1 / ROOTFSENV1

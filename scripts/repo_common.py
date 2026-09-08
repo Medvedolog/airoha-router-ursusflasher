@@ -16,11 +16,11 @@ def sha256(path: Path) -> str:
 def write_manifest(root: Path) -> None:
     manifest = root / 'SHA256SUMS'
     rows = []
-    for p in sorted(root.rglob('*')):
+    for p in sorted(root.rglob('*'), key=lambda item: item.relative_to(root).as_posix()):
         if not p.is_file() or p == manifest:
             continue
         rows.append(f'{sha256(p)}  {p.relative_to(root).as_posix()}')
-    manifest.write_text('\n'.join(rows) + '\n', encoding='utf-8')
+    manifest.write_text('\n'.join(rows) + '\n', encoding='utf-8', newline='\n')
 
 
 def export_tree(dest: Path) -> Path:
@@ -44,9 +44,12 @@ def export_tree(dest: Path) -> Path:
     shutil.copytree(ROOT / 'docs', dest / 'doc')
 
     payload_rows = []
-    for p in sorted((dest / 'data' / 'payloads').rglob('*')):
+    payload_root = dest / 'data' / 'payloads'
+    for p in sorted(payload_root.rglob('*'), key=lambda item: item.relative_to(payload_root).as_posix()):
         if p.is_file():
             payload_rows.append(f'{sha256(p)}  {p.relative_to(dest).as_posix()}')
-    (dest / 'PAYLOAD_SHA256SUMS.txt').write_text('\n'.join(payload_rows) + '\n', encoding='utf-8')
+    (dest / 'PAYLOAD_SHA256SUMS.txt').write_text(
+        '\n'.join(payload_rows) + '\n', encoding='utf-8', newline='\n'
+    )
     write_manifest(dest)
     return dest

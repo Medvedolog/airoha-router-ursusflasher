@@ -1,0 +1,35 @@
+UrsusBoot 0.1.0-alpha5-UBIUX1-TEST60
+Target: Nokia XG-040G-MD / Airoha AN7581 / 256 MiB SPI-NAND
+Base: TEST59 corrective line; no boot/update/reset logic changes in TEST60
+Toolchain: OpenWrt GCC 14.4.0 r35906+7-3d1645ee26
+SOURCE_DATE_EPOCH: 1788879600
+Build UTC: 2026-09-08 15:00:00 UTC
+
+CONFIGTRIM1:
+- CONFIG_CMD_UBIFS=n
+- CONFIG_CMD_PXE=n
+- CONFIG_BOOTMETH_EXTLINUX=n
+- CONFIG_BOOTMETH_EXTLINUX_PXE=n
+- CONFIG_PXE_UTILS=n
+Retained: CONFIG_CMD_UBI=y, CONFIG_MTD_UBI=y, CONFIG_CMD_TFTPBOOT=y, CONFIG_CMD_WGET=y
+Reason: UrsusBoot manipulates rootfs_data at UBI-volume level and never mounts UBIFS; normal boot is bootcmd=ursusdispatch and does not use extlinux/PXE bootflow.
+
+Raw BL33: 860176 bytes
+SHA256: 4679214615c5b53d67173a31ff9203b834a880e9b1f407b10fcc9cda8e2d32d1
+LZMA1EXT/no-EOPM: 291237 bytes
+SHA256: 335d92d42b63677e2d471c675cdab3867a062380919a207e407c8b074df168a9
+FIP: 503808 bytes
+SHA256: c0e88d734a33a72ef0ca002860eaf7ff6c7fa7cc856de3f781371259d013d9bb
+CRC32: 453bd1ff
+NT_FW offset: 0x27800
+NT_FW size: 0x471a5
+NT_FW end: 0x6e9a5
+First certificate: 0x77800
+LZMA/FIP margin before first certificate: 36443 bytes
+FIP physical end: 0x7b800
+
+TEST59 raw -> TEST60 raw: 956088 -> 860176 (-95912 bytes)
+TEST59 LZMA -> TEST60 LZMA: 327650 -> 291237 (-36413 bytes)
+TEST59 NT_FW margin -> TEST60: 30 -> 36443 bytes
+
+Status: reproducible source/build/package QA target; focused hardware regression required for CONFIGTRIM1 before production promotion.

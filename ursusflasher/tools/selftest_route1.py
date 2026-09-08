@@ -7,6 +7,7 @@ sys.path.insert(0, str(ROOT / 'data'))
 
 import device_state as ds
 import expert
+import one_key
 
 calls = []
 orig_install = expert.ursusboot_install.run_install
@@ -46,6 +47,42 @@ try:
 finally:
     expert.ursusboot_install.run_install = orig_install
     expert.update_bootloader_network = orig_update
+
+# A positive Nokia vendor fingerprint must enter the authenticated read-only
+# stock probe.  A generic HTTP page must remain ambiguous.
+orig_tcp = ds._tcp_open
+orig_ursus = ds._probe_ursus
+orig_stock = ds._probe_stock_web
+orig_http_identity = one_key.probe_http_identity
+try:
+    ds._tcp_open = lambda host, port, timeout=0.65: port == 80
+    ds._probe_ursus = lambda host, state: False
+
+    stock_calls = []
+    def fake_stock(host, state):
+        stock_calls.append(host)
+        state.current_system = 'NOKIA_STOCK'
+        state.current_layout = 'NOKIA_STOCK'
+        state.model = 'Nokia XG-040G-MD'
+        state.soc = 'Airoha AN7581'
+        return True
+    ds._probe_stock_web = fake_stock
+
+    one_key.probe_http_identity = lambda host: 'nokia_stock'
+    detected = ds.probe_device_state('192.168.1.1')
+    assert detected.current_system == 'NOKIA_STOCK', detected
+    assert stock_calls == ['192.168.1.1'], stock_calls
+
+    stock_calls.clear()
+    one_key.probe_http_identity = lambda host: 'http'
+    ambiguous = ds.probe_device_state('192.168.1.1')
+    assert ambiguous.current_system == 'UNKNOWN', ambiguous
+    assert not stock_calls, stock_calls
+finally:
+    ds._tcp_open = orig_tcp
+    ds._probe_ursus = orig_ursus
+    ds._probe_stock_web = orig_stock
+    one_key.probe_http_identity = orig_http_identity
 
 expert_src = (ROOT / 'data/expert.py').read_text(encoding='utf-8')
 installer_src = (ROOT / 'data/ursusboot_install.py').read_text(encoding='utf-8')

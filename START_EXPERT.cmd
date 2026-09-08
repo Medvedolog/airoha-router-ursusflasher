@@ -2,6 +2,8 @@
 chcp 65001 >nul 2>nul
 setlocal
 cd /d "%~dp0"
+set "entry=data\expert.py"
+if not exist "%entry%" set "entry=ursusflasher\src\expert.py"
 where py >nul 2>nul
 if not errorlevel 1 goto use_py
 where python >nul 2>nul
@@ -10,11 +12,11 @@ echo Python 3 not found.
 set "rc=1"
 goto done
 :use_py
-py -3 data\expert.py
+py -3 "%entry%"
 set "rc=%errorlevel%"
 goto done
 :use_python
-python data\expert.py
+python "%entry%"
 set "rc=%errorlevel%"
 :done
 if not "%rc%"=="0" (
