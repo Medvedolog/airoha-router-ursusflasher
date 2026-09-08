@@ -12,7 +12,7 @@
 ![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--UBIUX1--TEST61-b36b32)
 ![Target](https://img.shields.io/badge/Nokia-XG--040G--MD-555)
 ![OpenWrt](https://img.shields.io/badge/OpenWrt-r36009%2B75-00a4ef)
-![alpha5](https://img.shields.io/badge/alpha5--UBIUX1-нужен_прогон_на_FUDAN!-c27b00)
+![FUDAN test](https://img.shields.io/badge/FUDAN_NAND-нужен_полный_тест_и_отзыв-c27b00)
 
 **[📦 Скачать готовый комплект](../../releases/latest)** · [Инструкция](docs/INSTRUCTIONS_RU.md) · [Аварийное восстановление](docs/EMERGENCY_URSUSBOOT_RU.md)
 
@@ -47,7 +47,7 @@
 Текущий PUBLIC TEST — **UrsusFlasher 0.2.61** с **UrsusBoot `0.1.0-alpha5-UBIUX1-TEST61`**. TEST61 содержит исправления SAFETYREG1 и требует отдельного аппаратного прогона перед переводом в production.
 
 > [!IMPORTANT]
-> **Очень нужен тест на Nokia XG-040G-MD с NAND FUDAN, особенно FM25G02B, и отзыв по результату.** Полезен любой исход — успешная установка или ошибка. Пожалуйста, приложите модель NAND, описание пройденного сценария и сохранённый журнал/диагностику в [GitHub Issues](../../issues). Аппаратный PASS прежней сборки на SkyHigh нельзя автоматически переносить на FUDAN и TEST61.
+> **Очень нужен полный тест на Nokia XG-040G-MD с FUDAN NAND, особенно FM25G02B, и отзыв владельца такого устройства.** Нужен полный проход: заводская Nokia → резервная копия → UrsusBoot TEST61 → Recovery → OpenWrt UBI → перезагрузка и повторный вход в Recovery. Полезен любой исход — успешная установка или ошибка. Пожалуйста, приложите точную модель NAND, описание пройденного сценария и сохранённый журнал/диагностику в [GitHub Issues](../../issues). Аппаратный PASS прежней сборки на SkyHigh нельзя автоматически переносить на FUDAN и TEST61.
 
 ---
 
