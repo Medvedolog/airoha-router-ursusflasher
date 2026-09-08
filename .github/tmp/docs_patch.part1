@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
+
+
+def sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open('rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def replace_once(root: Path, rel: str, old: str, new: str) -> None:
+    p = root / rel
+    text = p.read_text(encoding='utf-8')
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f'{rel}: expected exactly one source fragment, found {count}')
+    p.write_text(text.replace(old, new, 1), encoding='utf-8')
+    print(f'PATCHED {rel}')
+
+
+def write_file(root: Path, rel: str, content: str) -> None:
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content, encoding='utf-8')
+    print(f'WROTE   {rel}')
+
+
+def update_root_manifest(root: Path, changed: set[str]) -> None:
+    manifest = root / 'SHA256SUMS'
+    rows: dict[str, str] = {}
+    for line in manifest.read_text(encoding='utf-8').splitlines():
+        if not line.strip():
+            continue
+        digest, name = line.split(None, 1)
+        rows[name.strip()] = digest
+    for rel in sorted(changed):
+        p = root / rel
+        if not p.is_file():
+            raise SystemExit(f'cannot hash missing file: {rel}')
+        rows[rel] = sha256(p)
+    manifest.write_text(''.join(f'{rows[name]}  {name}\n' for name in sorted(rows)), encoding='utf-8')
+    print(f'UPDATED SHA256SUMS ({len(rows)} entries)')
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description='Apply TEST61 documentation/QA synchronization to the current UrsusFlasher main checkout.')
+    ap.add_argument('--root', default='.', help='repository root (default: current directory)')
+    ap.add_argument('--full-qa', action='store_true', help='run scripts/verify_repo.py after patching')
+    args = ap.parse_args()
+
+    root = Path(args.root).resolve()
+    version_file = root / 'VERSION'
+    if not version_file.is_file():
+        raise SystemExit(f'not an UrsusFlasher repository root: {root}')
+    version = version_file.read_text(encoding='utf-8').strip()
+    if not version.startswith('0.2.61-'):
+        raise SystemExit(f'expected TEST61/0.2.61 checkout, got VERSION={version!r}')
+
+    manifest = json.loads((root / 'config/MANIFEST.json').read_text(encoding='utf-8'))
+    boot_version = manifest['ursusboot']['version']
+    if boot_version != '0.1.0-alpha5-UBIUX1-TEST61':
+        raise SystemExit(f'unexpected UrsusBoot target: {boot_version}')
+
+    changed: set[str] = set()
+
+    # ------------------------------------------------------------------ README RU
+    rel = 'README.md'
+    replace_once(root, rel,
+        '**[📦 Скачать готовый комплект](../../releases/latest)** · [Инструкция](docs/INSTRUCTIONS_RU.md) · [Changelog](docs/CHANGELOG_RU.md) · [Аварийное восстановление](docs/EMERGENCY_URSUSBOOT_RU.md)',
+        '**[📦 Опубликованные сборки](../../releases)** · [Инструкция](docs/INSTRUCTIONS_RU.md) · [Changelog](docs/CHANGELOG_RU.md) · [Аварийное восстановление](docs/EMERGENCY_URSUSBOOT_RU.md)')
+    replace_once(root, rel,
+        'Текущий PUBLIC TEST — **UrsusFlasher 0.2.61** с **UrsusBoot `0.1.0-alpha5-UBIUX1-TEST61`**. TEST61 содержит исправления SAFETYREG1 и требует отдельного аппаратного прогона перед переводом в production.',
+        'Текущий кандидат PUBLIC TEST в `main` — **UrsusFlasher 0.2.61** с **UrsusBoot `0.1.0-alpha5-UBIUX1-TEST61`**. TEST61 содержит исправления SAFETYREG1 и требует полного аппаратного прогона перед публикацией нового GitHub Release и переводом в production. На странице Releases пока могут находиться более старые опубликованные тестовые сборки.')
+    replace_once(root, rel,
+        '*   Запускается по удержанию кнопки `Reset` (держим 10+ сек через секунду ПОСЛЕ включения, пока не заморгает, а затем загорится красный диод).',
+        '*   Запускается в Recovery по кнопке `Reset`: после общего мигания/перезапуска индикаторов зажать Reset, держать через **2 коротких + 3 длинных** красных мигания и отпустить на постоянном красном свете. Reset, удерживаемый **до подачи питания**, относится уже к Airoha BootROM.')
+    replace_once(root, rel,
+        '**Важно:** Установка загрузчика *никогда* не начнется, пока флешер не убедится, что у вас есть надежная резервная копия. И да, ONE-CLICK всегда ставит разметку UBI, потому что UBI является целевой разметкой проекта.',
+        '**Важно:** в обычном ONE-CLICK direct-stock сценарии полный backup обязателен. Непосредственно перед persistent-записью `mtd0`, уже после backup/preflight, флешер задаёт один обычный `[y/N]`. Установленный UrsusBoot автоматически не обновляется: более новая комплектная версия только показывается оператору и ставится отдельно через WebFailsafe или EXPERT. ONE-CLICK всегда ставит разметку UBI, потому что UBI является целевой разметкой проекта.')
+    replace_once(root, rel,
+        '*   `! 1` Установить OpenWrt (тот же автомат, но с одним осмысленным `[y/N]` перед записью).',
+        '*   `! 1` Установить OpenWrt — тот же автоматический маршрут. На Nokia Stock EXPERT один раз позволяет явно пропустить полный `mtd0..mtd16` backup для текущего тестового запуска; обязательный live-capture текущего `mtd0` при этом не пропускается. Перед persistent-записью `mtd0` остаётся один `[y/N]`.')
+    changed.add(rel)
+
+    # ---------------------------------------------------------- INSTRUCTIONS RU
+    rel = 'docs/INSTRUCTIONS_RU.md'
+    replace_once(root, rel,
+        '# UrsusFlasher 0.2.56 — эксплуатационная инструкция',
+        '# UrsusFlasher 0.2.61 / TEST61 — эксплуатационная инструкция')
+    replace_once(root, rel,
+        'Эта инструкция относится к Nokia XG-040G-MD на Airoha AN7581.\n',
+        'Эта инструкция относится к Nokia XG-040G-MD на Airoha AN7581. Текущий `main` содержит кандидат PUBLIC TEST 0.2.61 / UrsusBoot TEST61; новый GitHub Release публикуется только после полного аппаратного regression cycle.\n\nДля запуска UrsusFlasher требуется **Python 3.12+** из стандартной библиотеки; `pip` не нужен.\n')
+    replace_once(root, rel,
+        'Перед первой записью NAND создаётся и проверяется полная копия `mtd0..mtd16`.',
+        'В обычном ONE-CLICK перед первой записью NAND создаётся и проверяется полная копия `mtd0..mtd16`. В EXPERT пункте 1 оператор может один раз явно пропустить полный backup для текущего тестового запуска; обязательный live-capture текущего `mtd0` для сохранения ROM prefix/env при этом остаётся. Непосредственно перед persistent-записью `mtd0` всегда задаётся один обычный `[y/N]`.')
+    replace_once(root, rel,
+        ' !  1  Установить OpenWrt\n       резервная копия → UrsusBoot → комплектная OpenWrt; транспорт выбирается автоматически',
+        ' !  1  Установить OpenWrt\n       маршрут ONE-CLICK; на Nokia STOCK EXPERT может явно пропустить полный backup только для этого запуска')
+    replace_once(root, rel,
+        '`!` означает, что операция может выполнять запись во flash-память (NAND).\n\nПункт 4 объединён с пунктом 2 и скрыт из меню; старый ввод `4` выполняет пункт 2. Пункты 6 и 9 пока недоступны.',
+        '`!` означает, что операция может выполнять запись во flash-память (NAND).\n\nДля пункта 1 на Nokia STOCK вопрос о пропуске полного backup появляется один раз в начале EXPERT-запуска. Это не отменяет обязательный live `mtd0` capture и не добавляет дополнительных destructive gates: перед самой записью `mtd0` остаётся один `[y/N]`.\n\nПункт 4 объединён с пунктом 2 и скрыт из меню; старый ввод `4` выполняет пункт 2. Пункты 6 и 9 пока недоступны.')
+    replace_once(root, rel,
+        'Образы передаются по частям через HTTP, проверяются загрузчиком и только затем допускаются к записи.',
+        'Образы передаются по частям через HTTP, проверяются загрузчиком и только затем допускаются к записи. До вызова operation endpoint передача остаётся RAM-only и имеет `transaction_state=NOT_STARTED`. При обрыве действует reconnect grace до 75 секунд; если исходную upload-session восстановить нельзя, новый полный цикл передачи начинается только после отдельного `[y/N]`, а не автоматически.')
+    replace_once(root, rel,
+        'Перед записью показываются определённое состояние устройства и выбранный способ выполнения операции.\n',
+        'Перед записью показываются определённое состояние устройства и выбранный способ выполнения операции.\n\nONE-CLICK не запускает self-update уже установленного UrsusBoot. Если комплект содержит более новый UrsusBoot, это только сообщается оператору; обновление выполняется отдельным явным действием WebFailsafe или EXPERT пунктом 2.\n')
+    changed.add(rel)

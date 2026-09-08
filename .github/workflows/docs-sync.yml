@@ -1,0 +1,46 @@
+name: One-shot TEST61 docs sync
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/docs-sync.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Assemble patcher
+        run: cat .github/tmp/docs_patch.part1 .github/tmp/docs_patch.part2 .github/tmp/docs_patch.part3 > /tmp/apply_test61_docs_update.py
+
+      - name: Apply documentation synchronization and full QA
+        run: python3 /tmp/apply_test61_docs_update.py --root . --full-qa
+
+      - name: Remove one-shot machinery
+        run: |
+          rm -f .github/workflows/docs-sync.yml
+          rm -f .github/tmp/docs_patch.part1 .github/tmp/docs_patch.part2 .github/tmp/docs_patch.part3
+          rmdir .github/tmp 2>/dev/null || true
+
+      - name: Verify diff and push final commit
+        run: |
+          set -euo pipefail
+          git diff --check
+          git status --short
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "docs: synchronize TEST61 documentation and QA"
+          git push origin HEAD:main
