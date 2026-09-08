@@ -1,6 +1,8 @@
-# UrsusFlasher 0.2.56 — operating instructions
+# UrsusFlasher 0.2.61 / TEST61 — operating instructions
 
-This document covers Nokia XG-040G-MD on Airoha AN7581.
+This document covers Nokia XG-040G-MD on Airoha AN7581. The current `main` contains the 0.2.61 / UrsusBoot TEST61 PUBLIC TEST candidate; a new GitHub Release is intentionally held until the complete hardware regression cycle passes.
+
+UrsusFlasher requires **Python 3.12+** and only the standard library; no `pip` packages are required.
 
 ## Required first: factory-reset the Nokia
 
@@ -35,7 +37,7 @@ The flasher detects the current state first and then selects the transport.
 
 ### Nokia factory firmware
 
-Control uses the stock HTTP/Web interface and a root Telnet session. TFTP is used for the complete flash backup and for transferring the prepared `mtd0` image. The complete `mtd0..mtd16` backup must validate before the first NAND write.
+Control uses the stock HTTP/Web interface and a root Telnet session. TFTP is used for the complete flash backup and for transferring the prepared `mtd0` image. In ordinary ONE-CLICK the complete `mtd0..mtd16` backup must validate before the first NAND write. EXPERT item 1 may explicitly skip that long full backup for the current test run, but the live `mtd0` capture remains mandatory and one ordinary `[y/N]` is always asked immediately before the persistent `mtd0` write.
 
 ### Installed OpenWrt or RAM/initramfs OpenWrt
 
@@ -43,13 +45,13 @@ Control uses root SSH and binary SSH streaming/SCP as appropriate. The flasher d
 
 ### UrsusBoot Recovery
 
-Control and chunked file upload use the UrsusBoot HTTP API at `192.168.1.1`.
+Control and chunked file upload use the UrsusBoot HTTP API at `192.168.1.1`. Before the operation POST the upload is RAM-only/`NOT_STARTED`; after a transport loss the client allows a 75-second reconnect grace and requires `[y/N]` before starting a completely new upload session.
 
 ## EXPERT
 
 Run `START_EXPERT.cmd` or `./START_EXPERT.sh` for manual operations.
 
-Actions marked `!` may write persistent flash/NAND. Passive menu detection is informational; each selected action performs its own authoritative preflight and may request credentials when needed.
+Actions marked `!` may write persistent flash/NAND. Passive menu detection is informational; each selected action performs its own authoritative preflight and may request credentials when needed. On Nokia stock, EXPERT item 1 asks once whether to skip the full backup for that run; it does not skip the mandatory live `mtd0` capture and does not add extra destructive gates. The direct `mtd0` writer still gets one `[y/N]`.
 
 ## Bootloader update transports
 
@@ -58,6 +60,8 @@ Actions marked `!` may write persistent flash/NAND. Passive menu detection is in
 - OpenWrt running from RAM/initramfs: SSH + SCP.
 - UrsusBoot Recovery: HTTP API; TFTP is available as the fallback FIP transport when WebFailsafe upload does not complete.
 - Airoha BootROM: USB-UART + XMODEM to start the recovery environment in RAM.
+
+ONE-CLICK never performs an automatic self-update of an already installed UrsusBoot. A newer bundled version is informational until the operator explicitly chooses WebFailsafe or EXPERT bootloader update.
 
 ## Verification
 
@@ -92,9 +96,9 @@ The page does not show everything at once. It reshapes itself around the state t
 The two that are most often mistaken for missing features:
 
 - **No "Keep OpenWrt settings" during a first install.** By design: migrating from Nokia stock or from the factory layout leaves nothing to keep, and the flag is forced to 0. The checkbox is for updating UBI on top of an already installed UBI system.
-- **No "Reset OpenWrt settings" right after an install.** It is for a router already running a recognised OpenWrt; while you are still in Recovery the layout has not been re-detected yet.
+- **No "Reset OpenWrt settings" right after an install.** It is for a router already running a recognised OpenWrt; while you are still in Recovery the layout has not been re-detected yet. After a successful keep-settings UBI update, the host may explicitly offer an optional settings reset before reboot.
 
-Buttons can also be present but disabled: **Migrate to UBI** needs every transition precheck to pass, and **Update UrsusBoot** needs a valid FIP and no active, completed or failed operation.
+Buttons can also be present but disabled: **Migrate to UBI** needs every transition precheck to pass, and **Update UrsusBoot** needs a valid FIP and no active operation. COMPLETE/FAILED state remains visible as history but does not by itself lock the next non-active attempt.
 
 Even a visible button does not guarantee a write. The bootloader refuses with a reason class:
 
@@ -107,4 +111,4 @@ WRITE_FAILED         the write or reset did not complete
 
 Every destructive action additionally requires an exact confirmation from the page — `INSTALL-UBI`, `INSTALL-OPENWRT-STOCK-LAYOUT`, `UPDATE-URSUSBOOT`, `RESET-OPENWRT-SETTINGS`, `REBOOT`.
 
-**Known behaviour:** the reboot button answers `REBOOTING`, but the actual reset runs after the connection closes. If the browser holds the connection open the router may stay powered on; power-cycle it by hand. In the UART log the successful path is marked `URSUS_UBI_MIGRATION_OPERATOR_REBOOT`.
+**Reboot semantics:** a completed write/readback remains a completed transaction even if the subsequent UI/reboot request has a transport problem. The Web UI checks the reboot HTTP result and reports rejection instead of silently treating it as success; a post-write UI/reboot issue must not trigger another writer automatically.

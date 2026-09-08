@@ -89,6 +89,7 @@ assert '0.1.0-alpha5-UBIUX1' in (ROOT / 'payloads/md/ursusboot/ursusboot-md-0.1.
 # Runtime syntax and current package self-tests. Compile in-process so QA does not
 # spawn one interpreter per source file on slow/shared filesystems.
 env = os.environ.copy(); env['PYTHONDONTWRITEBYTECODE'] = '1'
+subprocess.run([sys.executable, str(ROOT / 'scripts/verify_docs.py')], cwd=ROOT, check=True, env=env)
 for p in list(sorted((ROOT / 'ursusflasher/src').glob('*.py'))) + list(sorted((ROOT / 'ursusflasher/tools').glob('*.py'))):
     compile(p.read_text(encoding='utf-8'), str(p), 'exec')
 for d in ROOT.rglob('__pycache__'):

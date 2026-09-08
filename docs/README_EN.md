@@ -8,13 +8,13 @@
 
 **Airoha AN7581 · 256 MiB SPI-NAND · UrsusBoot · OpenWrt**
 
-![UrsusFlasher](https://img.shields.io/badge/UrsusFlasher-0.2.56-6f4b2f)
-![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--UBIUX1-b36b32)
+![UrsusFlasher](https://img.shields.io/badge/UrsusFlasher-0.2.61-6f4b2f)
+![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--UBIUX1--TEST61-b36b32)
 ![Target](https://img.shields.io/badge/Nokia-XG--040G--MD-555)
 ![OpenWrt](https://img.shields.io/badge/OpenWrt-r36009%2B75-00a4ef)
-![alpha5](https://img.shields.io/badge/alpha5--UBIUX1-hardware_run_required-c27b00)
+![TEST61](https://img.shields.io/badge/TEST61-hardware_safety_regression_required-c27b00)
 
-**[📦 Download the ready-made kit](https://github.com/Medvedolog/airoha-router-ursusflasher/releases/latest)** · [instructions](INSTRUCTIONS_EN.md) · [emergency recovery](EMERGENCY_URSUSBOOT_RU.md)
+**[📦 Published builds](https://github.com/Medvedolog/airoha-router-ursusflasher/releases)** · [instructions](INSTRUCTIONS_EN.md) · [changelog](CHANGELOG_EN.md) · [emergency recovery](EMERGENCY_URSUSBOOT_RU.md)
 
 🇷🇺 [Читать по-русски](../README.md)
 
@@ -41,6 +41,14 @@ No internet is needed while flashing — every image is in the kit.
 </div>
 
 That is a router with OpenWrt already installed: the layout is `OPENWRT_UBI`, which is exactly why the **Reset OpenWrt settings** button is visible. On stock firmware that spot is empty — what appears under which conditions is spelled out in the [instructions](INSTRUCTIONS_EN.md).
+
+---
+
+## Current development status
+
+The current PUBLIC TEST candidate in `main` is **UrsusFlasher 0.2.61** with **UrsusBoot `0.1.0-alpha5-UBIUX1-TEST61`**. TEST61 contains the SAFETYREG1 fixes and still requires a complete hardware regression cycle before a new GitHub Release is published or the build is treated as production. The Releases page may therefore still contain an older published test build.
+
+TEST59 and TEST60 are revoked for new hardware runs because their split build identity could make ONE-CLICK attempt an unnecessary second FIP write after a direct `mtd0` write/readback had already succeeded.
 
 ---
 
@@ -71,7 +79,7 @@ The base is **U-Boot v2026.07** plus the OpenWrt/Airoha patches for this board a
 
 Which carries a warning: the console does not restrain you. The checks and confirmations described below guard the buttons of the web interface, not what you type by hand.
 
-**What is available.** The build enables 67 U-Boot commands — MTD, UBI and UBIFS, networking with `tftpboot`, `ping`, `dhcp`, `wget`, `mii`, `mdio`, the full environment set, `bootm`, `fdt`, `gpio`, `led`, `button`, `hash`, `crc32`, `lzma`/`unzip` decompression.
+**What is available.** The build keeps the MTD and UBI command paths, networking with `tftpboot`, `ping`, `dhcp`, `wget`, `mii`, `mdio`, the environment commands, `bootm`, `fdt`, `gpio`, `led`, `button`, `hash`, `crc32`, and `lzma`/`unzip` decompression. TEST60/TEST61 CONFIGTRIM1 deliberately disables the UBIFS filesystem commands (`ubifsmount`, `ubifsload`, `ubifsls`, `ubifsumount`); the UBI layer itself remains enabled.
 
 **What is disabled.** Another 93 command options are built without support, and that is worth stating plainly rather than waving it off as "almost nothing was cut". Gone are filesystems this path never touches (`ext2/4`, `fat`, `squashfs`, `btrfs`, `zfs`), buses and media the board does not have (`pci`, `ide`, `sf`/`spi`, `onenand`), and some debugging conveniences (`memtest`, `md5sum`, `sha1sum`, `date`, `bootmenu`, `history`, `cat`, `xxd`, `nfs`). Everything needed to boot, reach the network, work with NAND and recover is present.
 
@@ -84,7 +92,7 @@ Which carries a warning: the console does not restrain you. The checks and confi
 - accept an OpenWrt firmware image (UBI or factory) over the network — through its own web page, or over TFTP if that page is not answering;
 - verify the image before writing: type, size, checksum;
 - repartition when the image requires it, write, and **read back**, comparing what landed against what should have;
-- come up on the Reset button even when the installed system is gone (hold Reset 10+ seconds **after** power-on, until the red LED comes on);
+- enter Recovery on Reset even when the installed system is gone: after the router-wide LED restart, hold Reset through **2 short + 3 long** red flashes and release it on steady red; holding Reset **before power-on** enters Airoha BootROM instead;
 - determine the router's current layout and the class of the uploaded image, and report both;
 - work on its own: installing or reinstalling OpenWrt needs neither a working system on the router nor UrsusFlasher on a PC — its own web page is enough.
 
@@ -115,17 +123,17 @@ The way back is still closed: you cannot return from UBI to the factory layout. 
 
 ---
 
-## What is new in 0.2.56
+## Current TEST61 safety-regression changes
 
-**OpenWrt settings on update are now your choice.** The UBI update in Recovery gained a "keep settings" checkbox: update and leave `rootfs_data` as it is, or install clean. A separate control there resets the settings, and it works for both UBI and the factory layout. From UART the same thing is `ursussettings reset`.
-
-**The overlay size no longer drifts.** On a clean install or a reset, `rootfs_data` is expanded to the maximum minus 16 free PEBs, and that value is written into the bootloader environment. After an ordinary `sysupgrade` from OpenWrt the overlay comes out the same size instead of a different one.
-
-**The move from the factory OpenWrt layout into UBI** — described above; it is the main change.
-
-**Environment detection got stricter.** OpenWrt is recognised by root SSH, Nokia stock by Web and Telnet. An open Telnet port alone is no longer treated as proof of stock firmware, and if the environment is not identified unambiguously the run stops instead of guessing.
-
-The bundled OpenWrt images are the same as in 0.2.55 — the bootloader and the logic around it are what changed.
+- **IDENTITY1:** native `version`, Web/API, build metadata and host manifest all identify the bootloader as TEST61.
+- **NOAUTOFIP1:** ONE-CLICK never self-updates an already installed UrsusBoot. A newer bundled bootloader is reported, but installing it is a separate explicit WebFailsafe/EXPERT action.
+- **UBIATTACH2:** explicit FIP self-update reuses the expected active UBI attachment and does not run `ubi detach`; a mismatched attachment stops before the writer.
+- **UPLOADRETRY1 / UPLOADABORT2:** interrupted HTTP upload remains RAM-only/`NOT_STARTED` before the operation POST, uses a 75-second reconnect grace, and requires `[y/N]` before starting a completely new transfer session.
+- **SESSIONRECOVERY1:** upload, validation or precheck failure before a writer no longer locks out the next attempt.
+- A direct stock `mtd0` write always gets one ordinary `[y/N]` after backup/preflight. EXPERT item 1 may explicitly skip the long full stock backup for that one test run, but the live `mtd0` capture remains mandatory.
+- **POSTSYSRESET1:** after a successful UBI update with settings preserved, the host can offer an optional OpenWrt settings reset.
+- **EMERGENCYMETA1:** production TEST61 and the pinned emergency alpha3 BootROM lineage use separate manifest/hash fields.
+- CONFIGTRIM1 remains enabled; TEST61 still requires hardware safety regression.
 
 ---
 
@@ -143,7 +151,7 @@ Unpack the archive and run from its folder:
 | **Ordinary install** | `START_ONECLICK.cmd` | `./START_ONECLICK.sh` |
 | **Manual mode** | `START_EXPERT.cmd` | `./START_EXPERT.sh` |
 
-Python 3 and an Ethernet cable are all you need. Nothing else has to be installed.
+Python **3.12+** and an Ethernet cable are all you need. No third-party Python packages are required.
 
 If the task is simple — "install OpenWrt" — run **ONE-CLICK**. If you need something specific: update only the bootloader, take a backup, work out why the router is silent — **EXPERT**.
 
@@ -166,7 +174,7 @@ ONE-CLICK does not assume the router is in one particular state. It looks first 
 
 **UrsusBoot Recovery is already open.** Then the bootloader does not need reinstalling: the image is transferred in chunks, verified by the bootloader and written.
 
-One rule holds throughout: **the bootloader write does not begin until a verified backup exists.**
+For the ordinary Nokia-stock ONE-CLICK path, the full backup is mandatory. Immediately before the persistent `mtd0` write, after backup/preflight, the flasher asks one ordinary `[y/N]`. EXPERT item 1 may explicitly skip the long full stock backup for that single test run; the live `mtd0` capture needed to preserve the ROM prefix/environment is still mandatory. ONE-CLICK does not automatically update an already installed UrsusBoot.
 
 ### ONE-CLICK always installs the UBI layout
 
@@ -204,7 +212,7 @@ A `!` marks an item that can write to flash.
 
 | | Item | Route |
 |---|---|---|
-| `!` | **1** Install OpenWrt | the same as ONE-CLICK, but you confirm each step |
+| `!` | **1** Install OpenWrt | the ONE-CLICK route; on Nokia stock EXPERT may explicitly skip the full backup for this run; one `[y/N]` remains immediately before direct `mtd0` write |
 | `!` | **2** Install or update UrsusBoot | Nokia stock → Web + Telnet; OpenWrt → SSH; Recovery → HTTP, TFTP on failure |
 | `!` | **3** Write a custom OpenWrt image | OpenWrt → SSH, `sysupgrade -T` first, then the write; Recovery → HTTP |
 
@@ -276,9 +284,9 @@ fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin       factory 
 fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb   UBI layout
 ```
 
-The bundled UrsusBoot `0.1.0-alpha5-UBIUX1` knows Fudan FM25G01B/FM25G02B as well as SkyHigh, Fudan FM25S01A and Winbond. It is built on top of alpha4-FUDAN1: BL2 and the preloader are unchanged, BL33 is what changed.
+The current candidate bundles UrsusBoot `0.1.0-alpha5-UBIUX1-TEST61`. It keeps the Fudan/SkyHigh NAND line while carrying SAFETYREG1 and CONFIGTRIM1. TEST59/60 are retained only as forensic history and are revoked for new hardware runs.
 
-> **On the alpha5 status.** The build and the packaging are verified, but there has been no separate acceptance run on a live router for the new Recovery/UBI logic. For now this is `HW_REGRESSION_REQUIRED`, and acceptance on Fudan NAND also remains open.
+> **TEST61 status:** source/build/package QA is complete, but a full hardware safety regression is still required. Historical full stock→OpenWrt ONE-CLICK PASS belongs to TEST57/SkyHigh; Fudan acceptance remains open.
 
 Exact sizes and checksums of every component are in `SHA256SUMS` and `data/MANIFEST.json`. The full build version string lives in `VERSION`: it is long and meant for tooling, not for people.
 
@@ -306,7 +314,7 @@ git config --global core.longpaths true
 
 ## Releases
 
-Only the finished user kit is published — [the latest release](https://github.com/Medvedolog/airoha-router-ursusflasher/releases/latest). The build is started manually through GitHub Actions (**Public test release**) and, before publishing, verifies the repository, builds the archive and then verifies the built archive separately.
+Published user kits are listed on the [Releases page](https://github.com/Medvedolog/airoha-router-ursusflasher/releases). The current 0.2.61/TEST61 candidate stays in `main` until the complete hardware cycle passes; no new Release is created merely because source/build/package QA passed. When publication is intentionally started, GitHub Actions (**Public test release**) verifies the repository, builds the archive and verifies the built archive separately.
 
 SDKs, compilers, build trees and development tools are not in that archive: they belong to the repository, not to whoever is flashing a router.
 
