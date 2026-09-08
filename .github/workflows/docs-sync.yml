@@ -28,13 +28,35 @@ jobs:
       - name: Apply documentation synchronization and full QA
         run: python3 /tmp/apply_test61_docs_update.py --root . --full-qa
 
-      - name: Remove one-shot machinery
+      - name: Prepare docs-only commit
+        shell: bash
         run: |
-          rm -f .github/workflows/docs-sync.yml
+          set -euo pipefail
+          # GITHUB_TOKEN has contents:write but no workflows scope. Keep workflow
+          # files unchanged in this Actions push; the connector will apply the
+          # already-QA-tested release-note workflow delta in the final cleanup commit.
+          git checkout -- .github/workflows/public-test-release.yml .github/workflows/docs-sync.yml
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('SHA256SUMS')
+          lines = p.read_text(encoding='utf-8').splitlines()
+          name = '.github/workflows/public-test-release.yml'
+          old = 'c79de3b9d30093e61d9e2174b1fbc56c4c3ff28340ac61faa61c762cb6d428dc'
+          out = []
+          seen = False
+          for line in lines:
+              if line.endswith('  ' + name):
+                  out.append(f'{old}  {name}')
+                  seen = True
+              else:
+                  out.append(line)
+          assert seen
+          p.write_text('\n'.join(out) + '\n', encoding='utf-8')
+          PY
           rm -f .github/tmp/docs_patch.part1 .github/tmp/docs_patch.part2 .github/tmp/docs_patch.part3
           rmdir .github/tmp 2>/dev/null || true
 
-      - name: Verify diff and push final commit
+      - name: Verify diff and push docs commit
         run: |
           set -euo pipefail
           git diff --check
