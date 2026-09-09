@@ -1,0 +1,139 @@
+name: MF2 AN7583 TEST5 RAMBOOT
+
+on:
+  push:
+    branches: [ feature/mf-an7583 ]
+    paths:
+      - 'ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_*'
+      - 'ursusboot/scripts/mf2_ramreadonly_transform.py'
+      - 'ursusboot/scripts/mf2_ramreadonly_transform_impl.py'
+      - 'ursusboot/scripts/mf2_lan23_led_pinmux.py'
+      - 'ursusboot/scripts/mf2_hwtest5_phy_led.py'
+      - 'ursusboot/scripts/mf2_hwtest5_build_identity.py'
+      - 'ursusboot/scripts/mf2_repack_from_medve.py'
+      - 'ursusboot/scripts/audit_mf2_ramboot_artifact.py'
+      - 'ursusboot/scripts/build_mf2_ramboot.sh'
+      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
+      - 'toolchains/**'
+      - '.github/workflows/mf2-test5-ramboot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout UrsusFlasher branch
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned MedveFlasher rc35 evidence/payloads
+        uses: actions/checkout@v4
+        with:
+          repository: Medvedolog/nokia-router-medveflasher
+          ref: 342cac4cb99a924f3d83eb8e4b5259490377704e
+          path: work/medveflasher-rc35
+
+      - name: Install host FIP repack dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends liblzma-dev
+
+      - name: Bind TEST5 deltas into isolated MF2 build
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('ursusboot/scripts/build_mf2_ramboot.sh')
+          s = p.read_text(encoding='utf-8')
+
+          old = 'python3 "$TRANSFORM" "$WORK/u-boot"\n'
+          new = old + (
+              'python3 "$ROOT/ursusboot/scripts/mf2_lan23_led_pinmux.py" "$WORK/u-boot"\n'
+              'python3 "$ROOT/ursusboot/scripts/mf2_hwtest5_phy_led.py" "$WORK/u-boot"\n'
+              'python3 "$ROOT/ursusboot/scripts/mf2_hwtest5_build_identity.py" "$WORK/u-boot" "${GITHUB_SHA}"\n'
+          )
+          if s.count(old) != 1:
+              raise SystemExit(f'build transform anchor count={s.count(old)}')
+          s = s.replace(old, new, 1)
+
+          old_epoch = 'export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$RELEASE_EPOCH"\n'
+          new_epoch = (
+              'BUILD_EPOCH=$(git show -s --format=%ct "${GITHUB_SHA}")\n'
+              'export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$BUILD_EPOCH"\n'
+          )
+          if s.count(old_epoch) != 1:
+              raise SystemExit(f'SOURCE_DATE_EPOCH anchor count={s.count(old_epoch)}')
+          s = s.replace(old_epoch, new_epoch, 1)
+
+          old_check = 'grep -Fq "#define URSUS_VERSION \\\"${VERSION}\\\"" include/ursus_version.h || { echo "MF2 version header mismatch" >&2; exit 1; }\n'
+          new_check = "grep -Eq '^#define URSUS_VERSION \\\"0\\.1\\.0-mf2-ram1\\+g[0-9a-f]{8}\\\"$' include/ursus_version.h || { echo \"MF2 HWTEST5 version header mismatch\" >&2; exit 1; }\n"
+          if s.count(old_check) != 1:
+              raise SystemExit(f'version-check anchor count={s.count(old_check)}')
+          s = s.replace(old_check, new_check, 1)
+
+          p.write_text(s, encoding='utf-8')
+
+          cfg = Path('ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig')
+          c = cfg.read_text(encoding='utf-8')
+          if c.count('CONFIG_LOGLEVEL=9') != 1:
+              raise SystemExit('CONFIG_LOGLEVEL=9 anchor missing')
+          cfg.write_text(c.replace('CONFIG_LOGLEVEL=9', 'CONFIG_LOGLEVEL=7', 1), encoding='utf-8')
+          print('MF2_TEST5_BUILD_BINDING=PASS pinmux=1 phy-led=1 identity=git loglevel=7')
+          PY
+
+      - name: Build MF2 TEST5 RAM-only UrsusBoot
+        env:
+          MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
+          JOBS: '2'
+        run: bash ursusboot/scripts/build_mf2_ramboot.sh
+
+      - name: Record TEST5 exact build identity
+        run: |
+          set -euxo pipefail
+          SHORT_SHA="${GITHUB_SHA:0:8}"
+          BUILD_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")
+          BUILD_UTC=$(date -u -d "@$BUILD_EPOCH" '+%Y-%m-%dT%H:%M:%SZ')
+          {
+            echo "HWTEST=5"
+            echo "GIT_SHA=$GITHUB_SHA"
+            echo "DISPLAY_VERSION=0.1.0-mf2-ram1+g$SHORT_SHA"
+            echo "SOURCE_DATE_EPOCH=$BUILD_EPOCH"
+            echo "BUILD_UTC=$BUILD_UTC"
+            echo "LED_POLICY=LED0 link10/100/1000 + TX/RX blink, active-low"
+            echo "UART_LOGLEVEL=7"
+          } | tee work/mf2-ramboot/out/HWTEST5-BUILD-ID.txt
+          cat work/mf2-ramboot/out/HWTEST5-BUILD-ID.txt >> work/mf2-ramboot/out/MF2-BUILD_INFO.txt
+
+      - name: Verify TEST5 compiled source scope
+        run: |
+          set -euxo pipefail
+          DTS=work/mf2-ramboot/u-boot/arch/arm/dts/an7583-nokia-xg-040g-mf.dts
+          PHY=$(find work/mf2-ramboot/u-boot/drivers/net/phy -name 'mtk-ge-soc.c' -o -name 'mediatek-ge-soc.c' | head -n1)
+          CFG=work/mf2-ramboot/out/u-boot.MF2_RAM.full.config
+          BIN=work/mf2-ramboot/out/u-boot.bin
+          grep -Fq 'URSUS_MF2_LAN23_LED_PINMUX' "$DTS"
+          grep -Fq 'function = "phy2_led0";' "$DTS"
+          grep -Fq 'pins = "gpio2";' "$DTS"
+          grep -Fq 'function = "phy3_led0";' "$DTS"
+          grep -Fq 'pins = "gpio3";' "$DTS"
+          test -n "$PHY"
+          grep -Fq 'URSUS_MF2_HWTEST5_PHY_LED0' "$PHY"
+          grep -Fq '0xc07f, 0xc007' "$PHY"
+          grep -Fq '0x03ff, 0x003f' "$PHY"
+          grep -Eq '^CONFIG_LOGLEVEL=7$' "$CFG"
+          ! grep -Eq '^CONFIG_PHY_AIROHA_EN8811=y$' "$CFG"
+          strings "$BIN" | grep -Fq 'URSUS_MF2_HWTEST5_PHY_LED0'
+          strings "$BIN" | grep -Eq '0\.1\.0-mf2-ram1\+g[0-9a-f]{8}'
+          echo 'MF2_TEST5_SCOPE=PASS lan23=pinmux+phy-led0 loglevel=7 identity=per-commit'
+
+      - name: Independent MF2 TEST5 artifact audit
+        run: python3 ursusboot/scripts/audit_mf2_ramboot_artifact.py work/mf2-ramboot/out
+
+      - name: Upload MF2 TEST5 RAMBOOT artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-mf2-ram1-an7583-hwtest5
+          path: work/mf2-ramboot/out
+          if-no-files-found: warn
+          retention-days: 14
