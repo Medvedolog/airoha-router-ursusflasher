@@ -23,14 +23,23 @@ def replace_exact(text: str, old: str, new: str, label: str, count: int = 1) -> 
     return text.replace(old, new, count)
 
 
+def replace_regex(text: str, pattern: str, new: str, label: str) -> str:
+    out, count = re.subn(pattern, new, text, count=1, flags=re.S)
+    if count != 1:
+        raise SystemExit(f"{label}: expected one regex match, got {count}")
+    return out
+
+
 def transform(root: Path) -> None:
     web = root / "cmd/ursusweb.c"
     update = root / "cmd/ursusupdate.c"
     ubi = root / "cmd/ursusubi.c"
+    led = root / "cmd/ursusled.c"
+    gpio_makefile = root / "drivers/gpio/Makefile"
     version_h = root / "include/ursus_version.h"
     scm = root / ".scmversion"
 
-    for path in (web, update, ubi, version_h, scm):
+    for path in (web, update, ubi, led, gpio_makefile, version_h, scm):
         if not path.is_file():
             raise SystemExit(f"missing source file: {path}")
 
@@ -78,6 +87,36 @@ def transform(root: Path) -> None:
     q = replace_exact(q, mig_anchor, mig_gate, "UBI migration gate")
     write(ubi, q)
 
+    # TEST61's LED module contains MD/AN7581 raw SCU + MT7531 register access.
+    # MF2 must not guess AN7583 register mappings. Use only native DM LED labels
+    # present in the MF DTS and make the LAN LED helper/command inert.
+    l = read(led)
+    l = replace_exact(l, '#define LED_STATUS_RED "status-red"', '#define LED_STATUS_RED "red:wan"', "MF red LED label")
+    l = replace_exact(l, '#define LED_USB1_GREEN "usb1-green"', '#define LED_USB1_GREEN "green:usb-1"', "MF USB1 LED label")
+    l = replace_exact(l, '#define LED_USB2_GREEN "usb2-green"', '#define LED_USB2_GREEN "green:usb-2"', "MF USB2 LED label")
+    l = replace_regex(
+        l,
+        r'/\* Nokia XG-040G-MD / AN7581 LAN2-LAN4 front-panel PHY LED0 routing\..*?\n}\n\n(?=struct ursus_led_step)',
+        '''/* MF2 / AN7583: LAN link LEDs are left entirely to the native AN7583\n * Ethernet/PCS/device-tree path.  The MD raw SCU/MT7531 MMIO sequence is not\n * applicable to MF and is deliberately absent from this RAM-only build. */\nvoid ursus_lan_led_enable(void)\n{\n    printf("URSUS_MF2_LAN_LED_SETUP raw_mmio=disabled native_an7583=1\\n");\n}\n\n''',
+        "remove AN7581 LAN LED MMIO",
+    )
+    l = replace_regex(
+        l,
+        r'static int do_ursuslanled\(struct cmd_tbl \*cmdtp, int flag, int argc,\n\s+char \*const argv\[\]\)\n\{.*?U_BOOT_CMD\(ursuslanled, 2, 0, do_ursuslanled,\n\s+"Nokia LAN2-LAN4 hardware PHY LED routing",\n\s+"<status\|enable>"\);',
+        '''static int do_ursuslanled(struct cmd_tbl *cmdtp, int flag, int argc,\n                           char *const argv[])\n{\n    if (argc != 2)\n        return CMD_RET_USAGE;\n    if (strcmp(argv[1], "status") && strcmp(argv[1], "enable"))\n        return CMD_RET_USAGE;\n    printf("URSUS_MF2_LAN_LED_STATUS raw_mmio=disabled native_an7583=1 action=%s\\n",\n           argv[1]);\n    return CMD_RET_SUCCESS;\n}\n\nU_BOOT_CMD(ursuslanled, 2, 0, do_ursuslanled,\n           "MF2 AN7583 LAN LED diagnostics; raw MMIO disabled",\n           "<status|enable>");''',
+        "replace AN7581 LAN LED command",
+    )
+    write(led, l)
+
+    gm = read(gpio_makefile)
+    gm = replace_exact(
+        gm,
+        "obj-y += ursus_an7581_safe_gpio.o",
+        "# MF2 AN7583: do not link the MD-only ursus_an7581_safe_gpio driver",
+        "remove AN7581 safe GPIO object",
+    )
+    write(gpio_makefile, gm)
+
     vh = read(version_h)
     vh2, n = re.subn(r'#define URSUS_VERSION "[^"]+"', f'#define URSUS_VERSION "{VERSION}"', vh, count=1)
     if n != 1:
@@ -88,6 +127,8 @@ def transform(root: Path) -> None:
     final_web = read(web)
     final_update = read(update)
     final_ubi = read(ubi)
+    final_led = read(led)
+    final_gpio_makefile = read(gpio_makefile)
     checks = {
         "mf identity": "Nokia XG-040G-MF" in final_web,
         "mf soc": "Airoha AN7583" in final_web,
@@ -99,6 +140,14 @@ def transform(root: Path) -> None:
         "migration gate": "URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION" in final_ubi,
         "no MD compatible in web": "nokia,xg-040g-md" not in final_web,
         "no MD compatible in update": "nokia,xg-040g-md" not in final_update,
+        "native MF red LED": 'LED_STATUS_RED "red:wan"' in final_led,
+        "native MF USB1 LED": 'LED_USB1_GREEN "green:usb-1"' in final_led,
+        "native MF USB2 LED": 'LED_USB2_GREEN "green:usb-2"' in final_led,
+        "AN7581 SCU base removed": "0x1fa20000" not in final_led,
+        "MT7531 raw base removed": "0x1fb58000" not in final_led,
+        "AN7581 raw helpers removed": "ursus_scu_read" not in final_led and "ursus_lanphy_c45_write" not in final_led,
+        "AN7581 safe GPIO object removed": "obj-y += ursus_an7581_safe_gpio.o" not in final_gpio_makefile,
+        "MF2 LAN LED no-op marker": "URSUS_MF2_LAN_LED_SETUP raw_mmio=disabled" in final_led,
     }
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
