@@ -5,12 +5,11 @@ on:
     branches: [ feature/mf-an7583 ]
     paths:
       - 'ursusboot/**'
-      - 'ursusflasher/tools/apply_restore_integration.py'
       - '.github/workflows/mf2-source-probe.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   probe:
@@ -69,7 +68,7 @@ jobs:
           cp "$S/cmd/Makefile" "$O/cmd/"
           cp "$S/include/ursus_version.h" "$O/"
           if [ -f "$S/drivers/gpio/ursus_an7581_safe_gpio.c" ]; then
-            cp "$S/drivers/gpio/ursus_an7581_safe_gpio.c" "$O/drivers/gpio/"
+            cp "$S/drivers/gpio/ursus_an7581_safe_gpio.c "$O/drivers/gpio/"
           fi
           cp "$S/drivers/gpio/Makefile" "$O/drivers/gpio/"
           cp "$S/drivers/gpio/Kconfig" "$O/drivers/gpio/" 2>/dev/null || true
@@ -89,29 +88,3 @@ jobs:
           path: work/mf2-source-probe/out
           if-no-files-found: error
           retention-days: 7
-
-  restore-integration:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Apply exact anchors once
-        run: |
-          set -euxo pipefail
-          if grep -q '^import stock_restore$' ursusflasher/src/expert.py; then
-            echo RESTORE_INTEGRATION_ALREADY_APPLIED=1
-            exit 0
-          fi
-          python3 ursusflasher/tools/apply_restore_integration.py
-          python3 -m py_compile \
-            ursusflasher/src/stock_restore.py \
-            ursusflasher/src/board_profiles.py \
-            ursusflasher/src/device_state.py \
-            ursusflasher/src/expert.py
-          python3 ursusflasher/tools/selftest_mf1_board_profiles.py
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ursusflasher/src/device_state.py ursusflasher/src/expert.py config/FIRMWARE_CAPABILITIES.json
-          git commit -m 'restore: expose proven MD/MF stock restore in EXPERT'
-          git push origin HEAD:feature/mf-an7583
