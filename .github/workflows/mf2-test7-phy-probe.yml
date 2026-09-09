@@ -1,0 +1,168 @@
+name: MF2 AN7583 TEST7 PHY PROBE
+
+on:
+  push:
+    branches: [ feature/mf-an7583 ]
+    paths:
+      - 'ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_*'
+      - 'ursusboot/scripts/mf2_ramreadonly_transform.py'
+      - 'ursusboot/scripts/mf2_ramreadonly_transform_impl.py'
+      - 'ursusboot/scripts/mf2_lan23_led_pinmux.py'
+      - 'ursusboot/scripts/mf2_hwtest7_phy_probe.py'
+      - 'ursusboot/scripts/mf2_hwtest5_web_quiet.py'
+      - 'ursusboot/scripts/mf2_hwtest5_build_identity.py'
+      - 'ursusboot/scripts/mf2_repack_from_medve.py'
+      - 'ursusboot/scripts/audit_mf2_ramboot_artifact.py'
+      - 'ursusboot/scripts/build_mf2_ramboot.sh'
+      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
+      - 'toolchains/**'
+      - '.github/workflows/mf2-test7-phy-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout UrsusFlasher branch
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned MedveFlasher rc35 evidence/payloads
+        uses: actions/checkout@v4
+        with:
+          repository: Medvedolog/nokia-router-medveflasher
+          ref: 342cac4cb99a924f3d83eb8e4b5259490377704e
+          path: work/medveflasher-rc35
+
+      - name: Install host FIP repack dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends liblzma-dev
+
+      - name: Bind TEST7 deltas into isolated MF2 build
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('ursusboot/scripts/build_mf2_ramboot.sh')
+          s = p.read_text(encoding='utf-8')
+
+          old = 'python3 "$TRANSFORM" "$WORK/u-boot"\n'
+          new = old + (
+              'python3 "$ROOT/ursusboot/scripts/mf2_lan23_led_pinmux.py" "$WORK/u-boot"\n'
+              'python3 "$ROOT/ursusboot/scripts/mf2_hwtest7_phy_probe.py" "$WORK/u-boot"\n'
+              'python3 "$ROOT/ursusboot/scripts/mf2_hwtest5_web_quiet.py" "$WORK/u-boot"\n'
+              'python3 "$ROOT/ursusboot/scripts/mf2_hwtest5_build_identity.py" "$WORK/u-boot" "${GITHUB_SHA}"\n'
+          )
+          if s.count(old) != 1:
+              raise SystemExit(f'build transform anchor count={s.count(old)}')
+          s = s.replace(old, new, 1)
+
+          old_epoch = 'export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$RELEASE_EPOCH"\n'
+          new_epoch = (
+              'BUILD_EPOCH=$(git show -s --format=%ct "${GITHUB_SHA}")\n'
+              'export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$BUILD_EPOCH"\n'
+          )
+          if s.count(old_epoch) != 1:
+              raise SystemExit(f'SOURCE_DATE_EPOCH anchor count={s.count(old_epoch)}')
+          s = s.replace(old_epoch, new_epoch, 1)
+
+          old_check = 'grep -Fq "#define URSUS_VERSION \\\"${VERSION}\\\"" include/ursus_version.h || { echo "MF2 version header mismatch" >&2; exit 1; }\n'
+          new_check = "grep -Eq '^#define URSUS_VERSION \\\"0\\.1\\.0-mf2-ram1\\+g[0-9a-f]{8}\\\"$' include/ursus_version.h || { echo \"MF2 HWTEST7 version header mismatch\" >&2; exit 1; }\n"
+          if s.count(old_check) != 1:
+              raise SystemExit(f'version-check anchor count={s.count(old_check)}')
+          s = s.replace(old_check, new_check, 1)
+
+          p.write_text(s, encoding='utf-8')
+
+          cfg = Path('ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig')
+          c = cfg.read_text(encoding='utf-8')
+          if c.count('CONFIG_LOGLEVEL=9') != 1:
+              raise SystemExit('CONFIG_LOGLEVEL=9 anchor missing')
+          cfg.write_text(c.replace('CONFIG_LOGLEVEL=9', 'CONFIG_LOGLEVEL=7', 1), encoding='utf-8')
+          print('MF2_TEST7_BUILD_BINDING=PASS pinmux234=1 phy-probe=read-only c22=read c45-led0=read web-quiet=1 identity=git loglevel=7')
+          PY
+
+      - name: Build MF2 TEST7 RAM-only UrsusBoot
+        env:
+          MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
+          JOBS: '2'
+        run: bash ursusboot/scripts/build_mf2_ramboot.sh
+
+      - name: Record TEST7 exact build identity
+        run: |
+          set -euxo pipefail
+          SHORT_SHA="${GITHUB_SHA:0:8}"
+          BUILD_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")
+          BUILD_UTC=$(date -u -d "@$BUILD_EPOCH" '+%Y-%m-%dT%H:%M:%SZ')
+          {
+            echo "HWTEST=7"
+            echo "GIT_SHA=$GITHUB_SHA"
+            echo "DISPLAY_VERSION=0.1.0-mf2-ram1+g$SHORT_SHA"
+            echo "SOURCE_DATE_EPOCH=$BUILD_EPOCH"
+            echo "BUILD_UTC=$BUILD_UTC"
+            echo "NETWORK_BASELINE=HWTEST4/HWTEST6; TEST5 PBUS/MMD LED writes absent"
+            echo "PINMUX=LAN2 gpio2->phy2_led0; LAN3 gpio3->phy3_led0; LAN4 gpio4->phy4_led0"
+            echo "PHY_PROBE=ursusmfphy; switch mt7531-mdio-mmio; LAN2=0x0a LAN3=0x0b LAN4=0x0c"
+            echo "PHY_ACCESS=READ_ONLY; C22 BMCR/BMSR/PHYID + C45 VEND2 LED0 0x24/0x25"
+            echo "WEB_UPLOAD_LOG=initramfs chunks allowed but not individually logged"
+            echo "UART_LOGLEVEL=7"
+          } | tee work/mf2-ramboot/out/HWTEST7-BUILD-ID.txt
+          cat work/mf2-ramboot/out/HWTEST7-BUILD-ID.txt >> work/mf2-ramboot/out/MF2-BUILD_INFO.txt
+
+      - name: Verify TEST7 read-only PHY-probe scope
+        run: |
+          set -euxo pipefail
+          DTS=work/mf2-ramboot/u-boot/arch/arm/dts/an7583-nokia-xg-040g-mf.dts
+          CFG=work/mf2-ramboot/out/u-boot.MF2_RAM.full.config
+          BIN=work/mf2-ramboot/out/u-boot.bin
+          CMD=work/mf2-ramboot/u-boot/cmd/ursusmfphy.c
+          WEB=work/mf2-ramboot/u-boot/cmd/ursusweb.c
+          ETH=work/mf2-ramboot/u-boot/drivers/net/airoha_eth.c
+
+          grep -Fq 'URSUS_MF2_HWTEST7_LAN234_LED_PINMUX' "$DTS"
+          grep -Fq 'function = "phy2_led0";' "$DTS"
+          grep -Fq 'pins = "gpio2";' "$DTS"
+          grep -Fq 'function = "phy3_led0";' "$DTS"
+          grep -Fq 'pins = "gpio3";' "$DTS"
+          grep -Fq 'function = "phy4_led0";' "$DTS"
+          grep -Fq 'pins = "gpio4";' "$DTS"
+
+          grep -Fq 'URSUS_MF2_HWTEST7_PHY_PROBE' "$CMD"
+          grep -Fq 'uclass_get_device_by_name(UCLASS_MDIO, "mt7531-mdio"' "$CMD"
+          grep -Fq 'dm_mdio_read' "$CMD"
+          ! grep -Fq 'dm_mdio_write' "$CMD"
+          grep -Fq '{ 2, 0x0a }' "$CMD"
+          grep -Fq '{ 3, 0x0b }' "$CMD"
+          grep -Fq '{ 4, 0x0c }' "$CMD"
+          grep -Fq 'URSUS_MF2_LED0_ON_CTRL' "$CMD"
+          grep -Fq 'URSUS_MF2_LED0_BLINK_CTRL' "$CMD"
+
+          ! grep -Fq 'URSUS_MF2_HWTEST5_PHY_LED0' "$ETH"
+          ! grep -Fq 'URSUS_MF2_LED_ON_POLARITY_LOW' "$ETH"
+          ! grep -Fq 'ursus_mf2_setup_phy_led0' "$ETH"
+
+          grep -Fq 'URSUS_MF2_HWTEST5_QUIET_CHUNKS' "$WEB"
+          grep -Eq '^CONFIG_LOGLEVEL=7$' "$CFG"
+          grep -Eq '^CONFIG_MDIO_MT7531_MMIO=y$' "$CFG"
+          ! grep -Eq '^CONFIG_PHY_AIROHA_EN8811=y$' "$CFG"
+
+          strings "$BIN" | grep -Fq 'URSUS_MF2_HWTEST7_PHY_PROBE_BEGIN'
+          strings "$BIN" | grep -Fq 'URSUS_MF2_HWTEST7_PHY lan='
+          strings "$BIN" | grep -Fq 'ursusmfphy'
+          strings "$BIN" | grep -Eq '0\.1\.0-mf2-ram1\+g[0-9a-f]{8}'
+          ! strings "$BIN" | grep -Fq 'URSUS_MF2_HWTEST5_PHY_LED0'
+
+          echo 'MF2_TEST7_SCOPE=PASS lan234=pinmux phy-addrs=0a,0b,0c mdio=read-only c22+led0-c45 test5-writes=absent'
+
+      - name: Independent MF2 TEST7 artifact audit
+        run: python3 ursusboot/scripts/audit_mf2_ramboot_artifact.py work/mf2-ramboot/out
+
+      - name: Upload MF2 TEST7 RAMBOOT artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-mf2-ram1-an7583-hwtest7-phy-probe
+          path: work/mf2-ramboot/out
+          if-no-files-found: warn
+          retention-days: 14
