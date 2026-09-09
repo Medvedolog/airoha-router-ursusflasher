@@ -74,3 +74,21 @@ def canonical_identity(*, model: str = "", soc: str = "", board: str = "") -> tu
 
 def persistent_writes_enabled(profile: dict[str, Any]) -> bool:
     return bool((profile.get("write_policy") or {}).get("persistent_write_enabled", False))
+
+
+def write_action_enabled(profile: dict[str, Any], action_key: str) -> bool:
+    """Authorize a persistent action from profile policy, fail-closed by default.
+
+    ``persistent_write_enabled`` remains the broad production switch.  A profile
+    that is otherwise read-only may expose a narrowly proven recovery writer via
+    ``allowed_write_actions`` without accidentally enabling install/update paths.
+    This is used for MF stock restore, whose MedveFlasher backend has independent
+    hardware evidence while UrsusBoot-MF persistent installation is still gated.
+    """
+    policy = profile.get("write_policy") or {}
+    if bool(policy.get("persistent_write_enabled", False)):
+        return True
+    allowed = policy.get("allowed_write_actions") or []
+    if not isinstance(allowed, list):
+        return False
+    return str(action_key) in {str(item) for item in allowed}
