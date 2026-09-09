@@ -91,13 +91,14 @@ grep -Fxq 'bootcmd=ursusweb' defenvs/an7583_nokia_xg-040g-mf_env || { echo "MF2 
 
 make -j"${JOBS:-$(nproc)}"
 
-gcc -O2 -Wall -Wextra lzma1ext_noeopm.c -llzma -o "$WORK/lzma1ext_noeopm"
-"$WORK/lzma1ext_noeopm" u-boot.bin u-boot.lzma 1048576
+# Do not introduce a second Airoha compressor here. The pinned MedveFlasher
+# RC18 patcher derives BL33 LZMA properties from the proven MF donor and emits
+# the same known-size/no-EOPM representation used by the hardware-tested path.
 python3 "$REPACK" \
     --medve-patcher "$MEDVE_PATCHER" \
     --source "$DONOR" \
-    --bl33 u-boot.lzma \
     --bl33-raw u-boot.bin \
+    --bl33-output u-boot.lzma \
     --output "ursusboot-mf-${VERSION}-ram.fip" \
     --report "$OUT/MF2-FIP-REPACK.json"
 
@@ -129,6 +130,8 @@ r=json.load(open(sys.argv[1], encoding='ascii'))
 assert r['entry_count'] == 2
 assert r['bl31_byte_exact'] is True
 assert r['mf2_bl33_roundtrip'] is True
+assert r['mf2_bl33_lzma_known_size'] is True
+assert r['mf2_bl33_lzma_eopm'] is False
 assert r['serial_preserved'] is True
 assert r['flags_preserved'] is True
 assert r['uuid_flags_preserved'] is True
@@ -144,6 +147,7 @@ printf '%s\n' \
   "OPENWRT_BASELINE=3d1645ee26d6a2e20be71d7fa1716721bac78e53" \
   "MEDVEFLASHER_COMMIT=342cac4cb99a924f3d83eb8e4b5259490377704e" \
   "MEDVE_FIP_PARSER=data/recovery/recovery-safe-uboot-source/patch_recovery_safe_fip.py" \
+  "MEDVE_FIP_COMPRESSOR=lzma_encode+lzma1ext_noeopm.c" \
   "UART_PRELOADER_SHA256=${EXPECTED_PRELOADER_SHA}" \
   "DONOR_SAFE_FIP_SHA256=${EXPECTED_DONOR_SHA}" \
   "PERSISTENT_WRITES=DISABLED" \
