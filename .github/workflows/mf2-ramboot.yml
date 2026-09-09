@@ -1,0 +1,41 @@
+name: MF2 AN7583 RAMBOOT
+
+on:
+  push:
+    branches: [ feature/mf-an7583 ]
+    paths:
+      - 'ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_*'
+      - 'ursusboot/scripts/mf2_ramreadonly_transform.py'
+      - 'ursusboot/scripts/build_mf2_ramboot.sh'
+      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
+      - 'toolchains/**'
+      - '.github/workflows/mf2-ramboot.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout UrsusFlasher branch
+        uses: actions/checkout@v4
+      - name: Checkout pinned MedveFlasher rc35 evidence/payloads
+        uses: actions/checkout@v4
+        with:
+          repository: Medvedolog/nokia-router-medveflasher
+          ref: 342cac4cb99a924f3d83eb8e4b5259490377704e
+          path: work/medveflasher-rc35
+      - name: Build MF2 RAM-only UrsusBoot
+        env:
+          MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
+          JOBS: '2'
+        run: bash ursusboot/scripts/build_mf2_ramboot.sh
+      - name: Upload MF2 RAMBOOT hardware-test artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-mf2-ram1-an7583-hwtest
+          path: work/mf2-ramboot/out
+          if-no-files-found: error
+          retention-days: 14
