@@ -6,15 +6,23 @@ import re
 from pathlib import Path
 
 
-def patch(root: Path) -> None:
-    candidates = (
-        root / "drivers/net/phy/mediatek/mtk-ge-soc.c",
-        root / "drivers/net/phy/mediatek-ge-soc.c",
-    )
-    path = next((p for p in candidates if p.is_file()), None)
-    if path is None:
-        raise SystemExit("AN7583 MediaTek SoC PHY driver not found")
+def _find_an7583_phy_driver(root: Path) -> Path:
+    matches: list[Path] = []
+    for path in root.rglob("*.c"):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if "an7583_phy_config_init" in text:
+            matches.append(path)
+    if len(matches) != 1:
+        shown = ", ".join(str(p.relative_to(root)) for p in matches[:12]) or "none"
+        raise SystemExit(f"AN7583 PHY config_init source match count={len(matches)}: {shown}")
+    return matches[0]
 
+
+def patch(root: Path) -> None:
+    path = _find_an7583_phy_driver(root)
     text = path.read_text(encoding="utf-8")
     marker = "URSUS_MF2_HWTEST5_PHY_LED0"
     if marker in text:
@@ -26,7 +34,7 @@ def patch(root: Path) -> None:
     )
     match = re.search(pattern, text, flags=re.S)
     if not match:
-        raise SystemExit(f"AN7583 config_init anchor not found in {path}")
+        raise SystemExit(f"AN7583 config_init anchor not found in {path.relative_to(root)}")
 
     replacement = r'''static int an7583_phy_config_init(struct phy_device *phydev)
 {
@@ -39,11 +47,11 @@ def patch(root: Path) -> None:
 
     /* URSUS_MF2_HWTEST5_PHY_LED0
      * Nokia XG-040G-MF routes LAN2/LAN3 RJ45 LEDs from the internal GPHY
-     * LED0 outputs through gpio2/gpio3.  TEST4 proved that pinmux alone is
+     * LED0 outputs through gpio2/gpio3. TEST4 proved that pinmux alone is
      * insufficient: LED state can latch and activity does not blink.
      *
      * Program the same MDIO_MMD_VEND2 LED block used by the Linux MediaTek
-     * SoC PHY driver.  LED0 is active-low on this board, ON for negotiated
+     * SoC PHY driver. LED0 is active-low on this board, ON for negotiated
      * 10/100/1000 link and BLINK for TX/RX activity at all three speeds.
      * This changes PHY volatile registers only; no flash/environment write.
      */
