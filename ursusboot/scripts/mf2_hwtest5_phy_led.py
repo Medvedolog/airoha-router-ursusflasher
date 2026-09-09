@@ -2,58 +2,47 @@
 from __future__ import annotations
 
 import argparse
-import re
 from pathlib import Path
 
 
-def _find_an7583_phy_driver(root: Path) -> Path:
-    matches: list[Path] = []
-    for path in root.rglob("*.c"):
+def _find_powerdown_anchor(root: Path) -> tuple[Path, str]:
+    matches: list[tuple[Path, str]] = []
+    needle = "phy_clear_bits(phydev, MII_BMCR, BMCR_PDOWN);"
+    for path in (root / "drivers" / "net").rglob("*.c"):
         try:
             text = path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             continue
-        if "an7583_phy_config_init" in text:
-            matches.append(path)
+        if needle in text:
+            matches.append((path, text))
     if len(matches) != 1:
-        shown = ", ".join(str(p.relative_to(root)) for p in matches[:12]) or "none"
-        raise SystemExit(f"AN7583 PHY config_init source match count={len(matches)}: {shown}")
+        shown = ", ".join(str(p.relative_to(root)) for p, _ in matches[:12]) or "none"
+        raise SystemExit(f"AN7583 PHY BMCR_PDOWN anchor count={len(matches)}: {shown}")
     return matches[0]
 
 
 def patch(root: Path) -> None:
-    path = _find_an7583_phy_driver(root)
-    text = path.read_text(encoding="utf-8")
+    path, text = _find_powerdown_anchor(root)
     marker = "URSUS_MF2_HWTEST5_PHY_LED0"
     if marker in text:
         raise SystemExit("HWTEST5 PHY LED patch already applied")
 
-    pattern = (
-        r"static int an7583_phy_config_init\(struct phy_device \*phydev\)\n"
-        r"\{.*?\n\}"
-    )
-    match = re.search(pattern, text, flags=re.S)
-    if not match:
-        raise SystemExit(f"AN7583 config_init anchor not found in {path.relative_to(root)}")
+    anchor = """    ret = phy_clear_bits(phydev, MII_BMCR, BMCR_PDOWN);\n    if (ret)\n        return ret;\n"""
+    if text.count(anchor) != 1:
+        raise SystemExit(
+            f"AN7583 PHY powerdown sequence count={text.count(anchor)} in {path.relative_to(root)}"
+        )
 
-    replacement = r'''static int an7583_phy_config_init(struct phy_device *phydev)
-{
-    int ret;
-
-    /* AN7583 internal GPHYs power up with BMCR_PDOWN set. */
-    ret = phy_clear_bits(phydev, MII_BMCR, BMCR_PDOWN);
-    if (ret)
-        return ret;
+    insert = anchor + """
 
     /* URSUS_MF2_HWTEST5_PHY_LED0
      * Nokia XG-040G-MF routes LAN2/LAN3 RJ45 LEDs from the internal GPHY
-     * LED0 outputs through gpio2/gpio3. TEST4 proved that pinmux alone is
-     * insufficient: LED state can latch and activity does not blink.
+     * LED0 outputs through gpio2/gpio3. TEST4 proved pinmux alone is not
+     * sufficient: the LED may latch and activity does not blink.
      *
-     * Program the same MDIO_MMD_VEND2 LED block used by the Linux MediaTek
-     * SoC PHY driver. LED0 is active-low on this board, ON for negotiated
-     * 10/100/1000 link and BLINK for TX/RX activity at all three speeds.
-     * This changes PHY volatile registers only; no flash/environment write.
+     * Program the MediaTek SoC PHY vendor LED block. LED0 is active-low,
+     * ON for negotiated 10/100/1000 link and BLINK for TX/RX activity.
+     * PHY MMD registers are volatile: no NAND/environment write is performed.
      */
     ret = phy_modify_mmd(phydev, MDIO_MMD_VEND2, 0x24,
                          0xc07f, 0xc007);
@@ -64,12 +53,11 @@ def patch(root: Path) -> None:
     if (ret)
         return ret;
 
-    printf("URSUS_MF2_HWTEST5_PHY_LED0 phy=%d on=link10/100/1000 blink=txrx polarity=active-low\n",
+    printf("URSUS_MF2_HWTEST5_PHY_LED0 phy=%d on=link10/100/1000 blink=txrx polarity=active-low\\n",
            phydev->addr);
-    return 0;
-}'''
+"""
 
-    out = text[:match.start()] + replacement + text[match.end():]
+    out = text.replace(anchor, insert, 1)
     path.write_text(out, encoding="utf-8")
 
     verify = path.read_text(encoding="utf-8")
@@ -85,7 +73,7 @@ def patch(root: Path) -> None:
         if token not in verify:
             raise SystemExit(f"HWTEST5 PHY LED marker missing after patch: {token}")
 
-    print(f"MF2_HWTEST5_PHY_LED=PASS driver={path.relative_to(root)}")
+    print(f"MF2_HWTEST5_PHY_LED=PASS driver={path.relative_to(root)} anchor=BMCR_PDOWN")
 
 
 def main() -> int:
