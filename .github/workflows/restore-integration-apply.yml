@@ -1,52 +1,55 @@
-name: Apply stock restore integration
+name: Stock restore integration QA
 
 on:
   push:
     branches: [ feature/mf-an7583 ]
     paths:
-      - 'ursusflasher/tools/apply_restore_integration.py'
+      - 'ursusflasher/src/stock_restore.py'
+      - 'ursusflasher/src/board_profiles.py'
+      - 'ursusflasher/src/device_state.py'
+      - 'ursusflasher/src/expert.py'
+      - 'ursusflasher/tools/selftest_stock_restore_integration.py'
+      - 'config/BOARD_PROFILES.json'
+      - 'config/FIRMWARE_CAPABILITIES.json'
       - '.github/workflows/restore-integration-apply.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
+  qa:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Apply exact restore integration patch
-        run: python3 ursusflasher/tools/apply_restore_integration.py
-      - name: Syntax and policy QA
+      - name: Syntax
         run: |
           python3 -m py_compile \
             ursusflasher/src/stock_restore.py \
             ursusflasher/src/board_profiles.py \
             ursusflasher/src/device_state.py \
             ursusflasher/src/expert.py
-          python3 ursusflasher/tools/selftest_mf1_board_profiles.py
+      - name: Board profile regression
+        run: python3 ursusflasher/tools/selftest_mf1_board_profiles.py
+      - name: Stock restore routing and safety policy
+        run: python3 ursusflasher/tools/selftest_stock_restore_integration.py
+      - name: Static restore invariants
+        run: |
+          set -euxo pipefail
+          grep -q 'import stock_restore' ursusflasher/src/expert.py
+          grep -q 'stock_restore.restore_nokia' ursusflasher/src/expert.py
+          grep -q 'bp.write_action_enabled(board_profile, key)' ursusflasher/src/device_state.py
           python3 - <<'PY'
           import json
           from pathlib import Path
-          p = json.loads(Path('config/BOARD_PROFILES.json').read_text())
-          mf = p['profiles']['mf']['write_policy']
+          profiles = json.loads(Path('config/BOARD_PROFILES.json').read_text())
+          mf = profiles['profiles']['mf']['write_policy']
           assert mf['persistent_write_enabled'] is False
           assert mf['allowed_write_actions'] == ['restore_nokia']
-          c = json.loads(Path('config/FIRMWARE_CAPABILITIES.json').read_text())
-          assert c['ui_actions']['restore_nokia']['implemented'] is True
-          print('RESTORE_POLICY_QA=PASS')
+          caps = json.loads(Path('config/FIRMWARE_CAPABILITIES.json').read_text())
+          restore = caps['ui_actions']['restore_nokia']
+          assert restore['implemented'] is True
+          assert restore['write_capable'] is True
+          assert 'BOOTROM_UART' in restore['backend']
+          print('STOCK_RESTORE_STATIC_QA=PASS')
           PY
-      - name: Commit generated integration
-        run: |
-          if git diff --quiet; then
-            echo 'No integration changes produced'
-            exit 0
-          fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add ursusflasher/src/device_state.py ursusflasher/src/expert.py config/FIRMWARE_CAPABILITIES.json
-          git commit -m 'restore: expose proven MD/MF stock restore in EXPERT'
-          git push origin HEAD:feature/mf-an7583
