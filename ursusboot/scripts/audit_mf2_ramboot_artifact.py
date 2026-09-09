@@ -29,6 +29,7 @@ REQUIRED_BINARY_MARKERS = (
     b"0.1.0-mf2-ram1",
     b"Nokia XG-040G-MF",
     b"Airoha AN7583",
+    b"Airoha EN8811H",
     b"MF2 RAM-only build: persistent operations disabled",
     b"MF2 READONLY: rejected HTTP POST",
     b"URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE",
@@ -76,6 +77,8 @@ REQUIRED_CONFIG_Y = (
     "CONFIG_NET_LWIP",
     "CONFIG_AIROHA_ETH",
     "CONFIG_PCS_AIROHA_AN7583",
+    "CONFIG_PHY_AIROHA",
+    "CONFIG_PHY_AIROHA_EN8811",
     "CONFIG_PINCTRL_AIROHA_AN7583",
     "CONFIG_ENV_IS_NOWHERE",
     "CONFIG_CONSOLE_RECORD",
@@ -226,6 +229,8 @@ def audit(outdir: Path) -> dict:
         "ursus_persistent_entrypoints": "HARD_REJECT_EROFS",
         "md_board_identity": "ABSENT",
         "md_stockbridge": "NOT_LINKED",
+        "ethernet_phy": "AIROHA_EN8811_NATIVE_DRIVER",
+        "ethernet_phy_leds": "NATIVE_LINK_RX_TX_SPEED",
     }
     (outdir / "MF2-INDEPENDENT-AUDIT.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="ascii"
