@@ -1,3 +1,20 @@
+# Development checkpoint — `feature/mf-an7583` / MF2 HWTEST4 / STOCKRESTORE1 (2026-09-09)
+
+- Добавлен слой `BoardProfile` для MD/MF и family-aware политика применимости/записи. MD остаётся reference production/HW baseline; широкие persistent writers для MF по-прежнему отключены.
+- Реализован native UrsusBoot-MF MF2 RAM bring-up для Airoha AN7583. MF2 использует `ENV_IS_NOWHERE`, `bootcmd=ursusweb`, не содержит generic MTD/UBI writer commands, все Ursus persistent entry points жёстко возвращают `-EROFS`, HTTP POST в RAM-only режиме глобально отвергается.
+- MF2 source/build artifact audit проверяет exact AN7583 target, byte-identical BL31, LZMA round-trip BL33, отсутствие MD identity leakage, Kconfig writer-state и generated reports.
+- HWTEST4 сужает первый Ethernet acceptance до внутренних GPHY AN7583: LAN2 `gpio2 -> phy2_led0`, LAN3 `gpio3 -> phy3_led0`. LAN1/EN8811 явно не линкуется, LAN4 отложен.
+- HWTEST4 FIP: 294272 байта, SHA256 `5ac6d1fad0805d4fe256fa44ac99043f4874137b39023fb1c44cf6ca105a52f6`; U-Boot SHA256 `1f4ddd95758f3621e58fa4d9c2db5d41705050686c0cb0b4e65bf4e2036c1c4e`; UART preloader остаётся 118322 байта / SHA256 `c2ac1c183b18bc34632c958dfe0bd1dfdfb607f090e39c41126956641893362f`.
+- GitHub Actions run `34360701468` прошёл build, compiled-source scope checks, independent artifact audit и upload. Артефакт: `ursusboot-mf2-ram1-an7583-hwtest4`, ZIP SHA256 `48ea1830f0d8befd0f31d5bd4de9659cd1a2d089c5f3e391b4b6edd2926de162`.
+- `mf_ramboot.py` теперь закрепляет exact green HWTEST4 FIP вместо предыдущего MF2 candidate.
+- EXPERT пункт 6 подключён к общему MD/MF coordinator восстановления заводской Nokia. При доказанном running OpenWrt/recovery выбирается family-specific no-UART путь U-Boot -> RAM recovery-initramfs; иначе используется BootROM/XMODEM UART.
+- Исправлен cross-board defect старого no-UART backend: прежний helper мог выбрать MD recovery initramfs для MF backup.
+- Stock restore сохраняет Ursus transaction policy: один осмысленный `[y/N]`, отсутствие автоматического второго bootcmd/writer после неопределённого handoff, critical readback и BL2 LAST, если затронут BL2.
+- Для MF `restore_nokia` является единственным profile-scoped исключением на persistent write; install/OpenWrt/bootloader/custom/recover writers MF остаются закрыты.
+- Постоянный `stock-restore-qa.yml` и integration selftests проходят. Ursus restore integration имеет статус **STATIC QA PASS / HW ACCEPTANCE REQUIRED**; UART destructive backend унаследован из HW-proven MedveFlasher lineage, но сам новый coordinator ещё не объявляется HW-proven.
+- Открытый recovery debt: direct network-U-Boot entry, когда production OpenWrt уже не жив, и emergency restore из совместимого donor backup с явной реконструкцией RI serial/MAC.
+- Статус MF2/HWTEST4: **STATIC QA PASS / HW-TEST CANDIDATE**, не hardware proof.
+
 # 0.2.61 PUBLIC TEST — TEST61 / SAFETYREG1
 
 - TEST59/60 отозваны для новых аппаратных прогонов: доказан split identity между `.scmversion` и `URSUS_VERSION`, из-за которого ONE-CLICK мог запустить лишнюю повторную запись FIP после уже доказанной direct mtd0 write/readback.
@@ -78,7 +95,7 @@
 
 ## 0.2.55 — STATEUI8 / DIAGAUTH1 / BACKUPRAW1
 
-- Пункты 7, 10 и 11 при неполной фоновой диагностике могут выполнить интерактивную read-only проверку root SSH: пароль запрашивает системный OpenSSH, UrsusFlasher его не сохраняет и временный ключ на роутер не устанавливает.
+- Пункты 7, 10 и 11 при неполной фоновой диагностике могут выполнить интерактивную read-only проверку root SSH: пароль запрашивает системный OpenSSH, UrsusFlasher его не сохраняет и временный ключ на роутер не устанавливается.
 - Пункт 7 больше не вызывает унаследованный глобальный `verify_kit()` и не требует отсутствующие `transition-bundle.bin`/MedveFlasher payloads.
 - Для пункта 7 возвращены только три точно закреплённых RAM-компонента MD: общий preloader, RC18 RECOVERY_SAFE FIP и recovery initramfs; каждый проверяется по размеру и SHA256 до UART/XMODEM.
 - Для OpenWrt UBI точная резервная копия создаётся как полный физический 256-МиБ `mtd0_all_flash.bin.gz` через BootROM → RAM → read-only `/dev/mtd0` → TFTP, с повторным чтением каждого блока и итоговым SHA256.
