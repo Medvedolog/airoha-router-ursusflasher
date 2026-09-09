@@ -1,3 +1,20 @@
+# Development checkpoint — `feature/mf-an7583` / MF2 HWTEST4 / STOCKRESTORE1 (2026-09-09)
+
+- Added the MD/MF `BoardProfile` layer and family-aware device/write policy. MD remains the reference production/HW baseline; MF broad persistent writers remain disabled.
+- Added native Airoha AN7583 UrsusBoot-MF MF2 RAM bring-up. MF2 uses `ENV_IS_NOWHERE`, `bootcmd=ursusweb`, no generic MTD/UBI writer commands, hard `-EROFS` gates on Ursus persistent entry points, and globally rejects HTTP POST in RAM-only mode.
+- MF2 source/build artifact auditing now checks the exact AN7583 target, BL31 byte identity, BL33 LZMA round-trip, forbidden MD identity leakage, writer Kconfig state, and generated reports.
+- HWTEST4 narrows the first Ethernet acceptance target to AN7583 internal GPHY LAN2/LAN3 only: `gpio2 -> phy2_led0`, `gpio3 -> phy3_led0`. LAN1/EN8811 is explicitly not linked and LAN4 remains deferred.
+- HWTEST4 FIP: 294272 bytes, SHA256 `5ac6d1fad0805d4fe256fa44ac99043f4874137b39023fb1c44cf6ca105a52f6`; U-Boot SHA256 `1f4ddd95758f3621e58fa4d9c2db5d41705050686c0cb0b4e65bf4e2036c1c4e`; UART preloader remains 118322 bytes / SHA256 `c2ac1c183b18bc34632c958dfe0bd1dfdfb607f090e39c41126956641893362f`.
+- GitHub Actions run `34360701468` passed build, compiled-source scope checks, independent artifact audit, and artifact upload. Artifact: `ursusboot-mf2-ram1-an7583-hwtest4`, ZIP SHA256 `48ea1830f0d8befd0f31d5bd4de9659cd1a2d089c5f3e391b4b6edd2926de162`.
+- `mf_ramboot.py` now pins the exact green HWTEST4 FIP identity instead of the previous MF2 candidate.
+- EXPERT item 6 is now wired to a common MD/MF stock-restore coordinator. It chooses a family-specific no-UART U-Boot -> RAM recovery-initramfs route when a proven running OpenWrt/recovery environment is available, otherwise the BootROM/XMODEM UART route.
+- Fixed the retained no-UART restore cross-board bug where the old helper could select the MD recovery initramfs for an MF backup.
+- Stock restore preserves the Ursus transaction policy: one meaningful `[y/N]`, no automatic second bootcmd/writer after an unknown handoff, critical readback, and BL2 last when BL2 is touched.
+- MF `restore_nokia` is the only profile-scoped persistent-write exception; MF install/OpenWrt/bootloader/custom/recover writers remain blocked.
+- Permanent `stock-restore-qa.yml` and integration selftests are green. Ursus restore integration is **STATIC QA PASS / HW ACCEPTANCE REQUIRED**; the underlying UART destructive backend has MedveFlasher hardware lineage, but the Ursus coordinator itself is not yet declared HW-proven.
+- Remaining recovery debt: direct network-U-Boot entry when no production OpenWrt is alive, and emergency compatible-donor backup restore with explicit RI serial/MAC reconstruction.
+- MF2/HWTEST4 status is **STATIC QA PASS / HW-TEST CANDIDATE**, not hardware proof.
+
 # 0.2.61 PUBLIC TEST — TEST61 / SAFETYREG1
 
 - TEST59/60 are revoked for new hardware runs: split identity between `.scmversion` and `URSUS_VERSION` could make ONE-CLICK launch an unnecessary second FIP write after a proven direct mtd0 write/readback.
