@@ -21,6 +21,7 @@ import proven_backend as proven
 import stock_web
 import ui_terms as terms
 import network_guidance
+import stock_restore
 import ursus_web_client as uw
 import ursusboot_install
 import ursusboot_update
@@ -537,8 +538,8 @@ def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApp
         )
     if number == 6:
         return (
-            "Заводской образ Nokia из проверенной резервной копии; backend пока не подключён",
-            "Nokia factory image from a validated backup; backend is not connected yet",
+            "Проверенный stock backup: автоматически без UART через U-Boot+RAM initramfs при доступной OpenWrt/recovery; иначе BootROM/XMODEM",
+            "Validated stock backup: automatically without UART through U-Boot+RAM initramfs when OpenWrt/recovery is available; otherwise BootROM/XMODEM",
         )
     if number == 7:
         return (
@@ -671,6 +672,12 @@ def main() -> int:
                 "Airoha BootROM will start recovery from RAM; the destructive backend remains unchanged until the transaction refactor.",
             ):
                 run_action(ursusboot_update.uart_bootrom_recover, write_may_happen=True)
+        elif number == 6:
+            network_guidance.show()
+            # Restore owns its single destructive y/N at the latest safe point:
+            # before one-shot persistent bootcmd on the no-UART route, or after
+            # RECOVERY_SAFE + geometry + TFTP preflight on the UART route.
+            run_action(lambda: stock_restore.restore_nokia(_interactive_diagnostic_state(state)), write_may_happen=True)
         elif number == 7:
             run_action(lambda: full_backup_readonly(_interactive_diagnostic_state(state)))
         elif number == 8:

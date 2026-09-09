@@ -531,15 +531,15 @@ def action_applicability(state: DeviceState) -> dict[int, ActionApplicability]:
         if enabled and write_capable and board_profile is not None:
             try:
                 import board_profiles as bp
-                writes_enabled = bp.persistent_writes_enabled(board_profile)
+                writes_enabled = bp.write_action_enabled(board_profile, key)
             except Exception:
                 writes_enabled = False
             if not writes_enabled:
                 enabled = False
                 backend = str((board_profile.get("write_policy") or {}).get("backend") or "BOARD_PROFILE_WRITE_DISABLED")
                 reason = terms.tr(
-                    f"профиль {board_key.upper()} подключён только для чтения; persistent write будет включён после аппаратной приёмки",
-                    f"{board_key.upper()} profile is read-only; persistent writes stay disabled until hardware acceptance",
+                    f"профиль {board_key.upper()} не разрешает это persistent write действие; доступны только явно доказанные recovery writers",
+                    f"{board_key.upper()} profile does not authorize this persistent write action; only explicitly proven recovery writers are available",
                 )
 
         # Contract: reason describes disabled state only; enabled actions use note.
