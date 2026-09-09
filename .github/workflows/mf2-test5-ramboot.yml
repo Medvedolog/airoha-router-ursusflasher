@@ -9,6 +9,7 @@ on:
       - 'ursusboot/scripts/mf2_ramreadonly_transform_impl.py'
       - 'ursusboot/scripts/mf2_lan23_led_pinmux.py'
       - 'ursusboot/scripts/mf2_hwtest5_phy_led.py'
+      - 'ursusboot/scripts/mf2_hwtest5_web_quiet.py'
       - 'ursusboot/scripts/mf2_hwtest5_build_identity.py'
       - 'ursusboot/scripts/mf2_repack_from_medve.py'
       - 'ursusboot/scripts/audit_mf2_ramboot_artifact.py'
@@ -50,6 +51,7 @@ jobs:
           new = old + (
               'python3 "$ROOT/ursusboot/scripts/mf2_lan23_led_pinmux.py" "$WORK/u-boot"\n'
               'python3 "$ROOT/ursusboot/scripts/mf2_hwtest5_phy_led.py" "$WORK/u-boot"\n'
+              'python3 "$ROOT/ursusboot/scripts/mf2_hwtest5_web_quiet.py" "$WORK/u-boot"\n'
               'python3 "$ROOT/ursusboot/scripts/mf2_hwtest5_build_identity.py" "$WORK/u-boot" "${GITHUB_SHA}"\n'
           )
           if s.count(old) != 1:
@@ -78,7 +80,7 @@ jobs:
           if c.count('CONFIG_LOGLEVEL=9') != 1:
               raise SystemExit('CONFIG_LOGLEVEL=9 anchor missing')
           cfg.write_text(c.replace('CONFIG_LOGLEVEL=9', 'CONFIG_LOGLEVEL=7', 1), encoding='utf-8')
-          print('MF2_TEST5_BUILD_BINDING=PASS pinmux=1 phy-led=1 identity=git loglevel=7')
+          print('MF2_TEST5_BUILD_BINDING=PASS pinmux=1 phy-led=1 web-quiet=1 identity=git loglevel=7')
           PY
 
       - name: Build MF2 TEST5 RAM-only UrsusBoot
@@ -101,11 +103,8 @@ jobs:
             echo '=== PHY/MDIO/AN7583/LED anchors ==='
             grep -RnsE 'BMCR_PDOWN|phy_clear_bits|phy_modify_mmd|MDIO_MMD_VEND2|an7583|AN7583|LED_ON|LED_BLINK|led_ctrl|phy_config|phy_startup|phy_connect|mdio|MMD' "$ROOT/drivers/net" "$ROOT/include" 2>/dev/null | head -n 2500
             echo
-            echo '=== Airoha ethernet source excerpts ==='
-            for f in $(grep -RIlE 'AN7583|an7583|airoha|Airoha' "$ROOT/drivers/net" 2>/dev/null | head -n 80); do
-              echo "----- $f -----"
-              sed -n '1,280p' "$f"
-            done
+            echo '=== Airoha ethernet switch init ==='
+            sed -n '800,930p' "$ROOT/drivers/net/airoha_eth.c"
           } | tee "$REPORT"
           test -s "$REPORT"
 
@@ -130,7 +129,8 @@ jobs:
             echo "DISPLAY_VERSION=0.1.0-mf2-ram1+g$SHORT_SHA"
             echo "SOURCE_DATE_EPOCH=$BUILD_EPOCH"
             echo "BUILD_UTC=$BUILD_UTC"
-            echo "LED_POLICY=LED0 link10/100/1000 + TX/RX blink, active-low"
+            echo "LED_POLICY=LAN2/PHY2 + LAN3/PHY3 LED0; link 10/100/1000 + TX/RX blink; active-low"
+            echo "WEB_UPLOAD_LOG=initramfs chunks allowed but not individually logged"
             echo "UART_LOGLEVEL=7"
           } | tee work/mf2-ramboot/out/HWTEST5-BUILD-ID.txt
           cat work/mf2-ramboot/out/HWTEST5-BUILD-ID.txt >> work/mf2-ramboot/out/MF2-BUILD_INFO.txt
@@ -141,17 +141,23 @@ jobs:
           DTS=work/mf2-ramboot/u-boot/arch/arm/dts/an7583-nokia-xg-040g-mf.dts
           CFG=work/mf2-ramboot/out/u-boot.MF2_RAM.full.config
           BIN=work/mf2-ramboot/out/u-boot.bin
+          WEB=work/mf2-ramboot/u-boot/cmd/ursusweb.c
           grep -Fq 'URSUS_MF2_LAN23_LED_PINMUX' "$DTS"
           grep -Fq 'function = "phy2_led0";' "$DTS"
           grep -Fq 'pins = "gpio2";' "$DTS"
           grep -Fq 'function = "phy3_led0";' "$DTS"
           grep -Fq 'pins = "gpio3";' "$DTS"
-          grep -Rqs 'URSUS_MF2_HWTEST5_PHY_LED0' work/mf2-ramboot/u-boot/drivers/net
+          grep -Fq 'URSUS_MF2_HWTEST5_PHY_LED0' work/mf2-ramboot/u-boot/drivers/net/airoha_eth.c
+          grep -Fq 'for (i = 1; i <= 2; i++)' work/mf2-ramboot/u-boot/drivers/net/airoha_eth.c
+          grep -Fq 'URSUS_MF2_HWTEST5_QUIET_CHUNKS' "$WEB"
+          grep -Fq 'allowed RAM transport; intentionally no per-chunk log' "$WEB"
+          ! grep -Fq 'URSUS_MF2_RAM_POST_ALLOW route=initramfs_or_boot_once' "$WEB"
           grep -Eq '^CONFIG_LOGLEVEL=7$' "$CFG"
           ! grep -Eq '^CONFIG_PHY_AIROHA_EN8811=y$' "$CFG"
           strings "$BIN" | grep -Fq 'URSUS_MF2_HWTEST5_PHY_LED0'
           strings "$BIN" | grep -Eq '0\.1\.0-mf2-ram1\+g[0-9a-f]{8}'
-          echo 'MF2_TEST5_SCOPE=PASS lan23=pinmux+phy-led0 loglevel=7 identity=per-commit'
+          ! strings "$BIN" | grep -Fq 'URSUS_MF2_RAM_POST_ALLOW route=initramfs_or_boot_once'
+          echo 'MF2_TEST5_SCOPE=PASS lan23=pinmux+phy-led0 web-chunks=quiet loglevel=7 identity=per-commit'
 
       - name: Independent MF2 TEST5 artifact audit
         run: python3 ursusboot/scripts/audit_mf2_ramboot_artifact.py work/mf2-ramboot/out
