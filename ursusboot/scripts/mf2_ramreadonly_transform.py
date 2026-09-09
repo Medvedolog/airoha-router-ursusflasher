@@ -97,6 +97,24 @@ def harden_entrypoints(root: Path) -> None:
         "factory settings reset gate",
     )
 
+    # The preserved MF2 transform originally rejected every HTTP POST. That is
+    # broader than the actual RAM-only safety contract: uploading, validating
+    # and booting an initramfs/FIT only stages bytes in DRAM and then hands off
+    # via bootm. Permit only that narrow Expert path. Keep the real U-Boot Web
+    # console and every install/update/reset route blocked so the HTTP surface
+    # cannot bypass the persistent-write gates below.
+    global_post_gate = '''    if (!strncmp(c->reqhdr, "POST ", 5)) {\n        ursus_logf("MF2 READONLY: rejected HTTP POST\\n");\n        return ursus_http_start_response(pcb, c, 403, "application/json",\n            "{\\\"result\\\":\\\"REJECTED\\\",\\\"reason_class\\\":\\\"READ_ONLY_BRINGUP\\\",\\\"reason\\\":\\\"MF2 RAM-only build: persistent operations disabled\\\"}\\n");\n    }\n'''
+    selective_post_gate = '''    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/initramfs-begin ") ||\n        URSUS_REQ_MATCH(c->reqhdr, "POST /api/initramfs-chunk ") ||\n        URSUS_REQ_MATCH(c->reqhdr, "POST /api/expert/discard ") ||\n        URSUS_REQ_MATCH(c->reqhdr, "POST /api/expert/boot-once ")) {\n        ursus_logf("URSUS_MF2_RAM_POST_ALLOW route=initramfs_or_boot_once\\n");\n    } else if (!strncmp(c->reqhdr, "POST ", 5)) {\n        ursus_logf("MF2 READONLY: rejected HTTP POST\\n");\n        return ursus_http_start_response(pcb, c, 403, "application/json",\n            "{\\\"result\\\":\\\"REJECTED\\\",\\\"reason_class\\\":\\\"READ_ONLY_BRINGUP\\\",\\\"reason\\\":\\\"MF2 RAM-only build: persistent operations disabled\\\"}\\n");\n    }\n'''
+    if web.count(global_post_gate) != 1:
+        raise SystemExit(f"MF2 selective POST policy: expected one global gate, got {web.count(global_post_gate)}")
+    web = web.replace(global_post_gate, selective_post_gate, 1)
+
+    status_old = '\\\"ram_read_only\\\":true,\\\"persistent_write_enabled\\\":false,\\\"boot_fdt_compatible\\\"'
+    status_new = '\\\"ram_read_only\\\":true,\\\"persistent_write_enabled\\\":false,\\\"ram_boot_enabled\\\":true,\\\"boot_fdt_compatible\\\"'
+    if web.count(status_old) != 1:
+        raise SystemExit(f"MF2 status RAM boot capability: expected one marker, got {web.count(status_old)}")
+    web = web.replace(status_old, status_new, 1)
+
     # MF2 boots straight into ursusweb instead of ursusdispatch. TEST61's
     # recovery LED latch therefore never ran on real MF hardware even though
     # the native AN7583 gpio-leds device (red:wan, GPIO27 active-low) was
@@ -130,6 +148,8 @@ def harden_entrypoints(root: Path) -> None:
         web_path: (
             "URSUS_MF2_READONLY_REJECT operation=FACTORY_INSTALL",
             "URSUS_MF2_READONLY_REJECT operation=FACTORY_SETTINGS_RESET",
+            "URSUS_MF2_RAM_POST_ALLOW route=initramfs_or_boot_once",
+            "ram_boot_enabled",
             "URSUS_MF2_LED_RECOVERY_PATTERN board=AN7583 driver=native-dm label=red:wan",
         ),
         dispatch_path: (
