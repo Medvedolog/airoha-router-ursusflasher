@@ -96,6 +96,18 @@ def harden_entrypoints(root: Path) -> None:
         '''static int ursus_factory_reset_settings(void)\n{\n    printf("URSUS_MF2_READONLY_REJECT operation=FACTORY_SETTINGS_RESET\\n");\n    return -EROFS;\n}\n\n''',
         "factory settings reset gate",
     )
+
+    # MF2 boots straight into ursusweb instead of ursusdispatch. TEST61's
+    # recovery LED latch therefore never ran on real MF hardware even though
+    # the native AN7583 gpio-leds device (red:wan, GPIO27 active-low) was
+    # present and the DM LED driver was linked. Start the existing Ursus
+    # recovery pattern explicitly before network bring-up: native DM only,
+    # no AN7581 raw GPIO/MMIO. It ends in steady red while WebFailsafe runs.
+    led_anchor = '''    ret = net_lwip_eth_start();\n'''
+    led_start = '''    printf("URSUS_MF2_LED_RECOVERY_PATTERN board=AN7583 driver=native-dm label=red:wan\\n");\n    ursus_led_recovery_latched();\n    ret = net_lwip_eth_start();\n'''
+    if web.count(led_anchor) != 1:
+        raise SystemExit(f"MF2 native recovery LED hook: expected one exact match, got {web.count(led_anchor)}")
+    web = web.replace(led_anchor, led_start, 1)
     web_path.write_text(web, encoding="utf-8")
 
     dispatch = dispatch_path.read_text(encoding="utf-8")
@@ -118,6 +130,7 @@ def harden_entrypoints(root: Path) -> None:
         web_path: (
             "URSUS_MF2_READONLY_REJECT operation=FACTORY_INSTALL",
             "URSUS_MF2_READONLY_REJECT operation=FACTORY_SETTINGS_RESET",
+            "URSUS_MF2_LED_RECOVERY_PATTERN board=AN7583 driver=native-dm label=red:wan",
         ),
         dispatch_path: (
             "URSUS_MF2_STOCKBRIDGE_DISABLED board=AN7583 mode=RAM_ONLY",
