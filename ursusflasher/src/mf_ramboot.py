@@ -15,9 +15,9 @@ PRELOADER = PAYLOAD_DIR / "ursusboot-mf-0.1.0-mf2-ram1-uart-preloader.bin"
 FIP = PAYLOAD_DIR / "ursusboot-mf-0.1.0-mf2-ram1-ram.fip"
 PRELOADER_SIZE = 118322
 PRELOADER_SHA256 = "c2ac1c183b18bc34632c958dfe0bd1dfdfb607f090e39c41126956641893362f"
-# Exact current green MF2 artifact: RAM-only POST allowlist + native EN8811 PHY/LED driver.
-FIP_SIZE = 297507
-FIP_SHA256 = "3e5ef3645cdcc1589534da79d22e753691aa0f381b74690a3039125b7b207b05"
+# Exact green TEST4 artifact: LAN2 gpio2->phy2_led0, LAN3 gpio3->phy3_led0; LAN1 EN8811 excluded.
+FIP_SIZE = 294272
+FIP_SHA256 = "5ac6d1fad0805d4fe256fa44ac99043f4874137b39023fb1c44cf6ca105a52f6"
 
 IDENTITY_VERSION = b"0.1.0-mf2-ram1"
 IDENTITY_BOARD = b"Nokia XG-040G-MF"
