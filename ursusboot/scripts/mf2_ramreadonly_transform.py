@@ -34,14 +34,16 @@ def replace_regex(text: str, pattern: str, new: str, label: str) -> str:
 
 def transform(root: Path) -> None:
     web = root / "cmd/ursusweb.c"
+    web_ui = root / "cmd/ursusweb_ui.inc"
     update = root / "cmd/ursusupdate.c"
     ubi = root / "cmd/ursusubi.c"
     led = root / "cmd/ursusled.c"
+    cmd_makefile = root / "cmd/Makefile"
     gpio_makefile = root / "drivers/gpio/Makefile"
     version_h = root / "include/ursus_version.h"
     scm = root / ".scmversion"
 
-    for path in (web, update, ubi, led, gpio_makefile, version_h, scm):
+    for path in (web, web_ui, update, ubi, led, cmd_makefile, gpio_makefile, version_h, scm):
         if not path.is_file():
             raise SystemExit(f"missing source file: {path}")
 
@@ -70,10 +72,40 @@ def transform(root: Path) -> None:
     w = replace_exact(w, status_old, status_new, "status read-only capability")
     write(web, w)
 
+    # The TEST61 web UI is a generated include and therefore was not covered by
+    # replacing strings in ursusweb.c itself.  Canonicalize all board-facing
+    # MD identity and payload labels in the MF2 RAM UI.  POST remains rejected,
+    # so these names are informational only during bring-up.
+    ui = read(web_ui)
+    ui_replacements = (
+        ("openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin",
+         "openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-preloader.bin"),
+        ("Nokia XG-040G-MD", "Nokia XG-040G-MF"),
+        ("Nokia_XG-040G-MD", "Nokia_XG-040G-MF"),
+        ("nokia_xg-040g-md", "nokia_xg-040g-mf"),
+        ("nokia,xg-040g-md", "nokia,xg-040g-mf"),
+        ("xg-040g-md", "xg-040g-mf"),
+        ("AN7581", "AN7583"),
+        ("an7581", "an7583"),
+    )
+    for old, new in ui_replacements:
+        ui = ui.replace(old, new)
+    write(web_ui, ui)
+
     u = read(update)
     u = u.replace("Nokia XG-040G-MD / Airoha AN7581", "Nokia XG-040G-MF / Airoha AN7583")
+    u = u.replace("Nokia XG-040G-MD", "Nokia XG-040G-MF")
     u = u.replace("nokia,xg-040g-md-ubi", "nokia,xg-040g-mf-ubi")
     u = u.replace("nokia,xg-040g-md", "nokia,xg-040g-mf")
+    u = u.replace("nokia_xg-040g-md", "nokia_xg-040g-mf")
+    u = u.replace("URSUSBOOT_MD", "URSUSBOOT_MF")
+    u = u.replace("NOKIA_XG040GMD_STOCK", "MF2_STOCK_FIP_DISABLED")
+    # MF stock-FIP identity is deliberately not guessed during RAM bring-up.
+    # Make the old MD stock marker impossible to accept while retaining the
+    # read-only validator structure for later board-specific MF3 work.
+    u = u.replace("XG040GMC2P5G", "MF2_STOCK_FIP_VALIDATION_DISABLED")
+    u = u.replace("AN7581", "AN7583")
+    u = u.replace("an7581", "an7583")
     start_anchor = '''int ursus_fip_update_start(ulong addr, size_t len)\n{\n    bool is_ubi = false;\n    int ret;\n    const u8 *buf;\n\n'''
     start_gate = start_anchor + '''    printf("URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE\\n");\n    return -EROFS;\n\n'''
     u = replace_exact(u, start_anchor, start_gate, "FIP update gate")
@@ -87,6 +119,12 @@ def transform(root: Path) -> None:
     mig_anchor = '''int ursus_ubi_migration_start(ulong fit_addr, size_t fit_len,\n                              ulong preloader_addr, size_t preloader_len)\n{\n'''
     mig_gate = mig_anchor + '''    printf("URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION\\n");\n    return -EROFS;\n\n'''
     q = replace_exact(q, mig_anchor, mig_gate, "UBI migration gate")
+    q = replace_regex(
+        q,
+        r'int ursus_ubi_reset_settings\(void\)\n\{.*?\n\}\n\n(?=static const char \*ursus_upd_stage_name)',
+        '''int ursus_ubi_reset_settings(void)\n{\n    printf("URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET_BACKEND\\n");\n    return -EROFS;\n}\n\n''',
+        "settings reset backend gate",
+    )
     write(ubi, q)
 
     # TEST61's LED module contains MD/AN7581 raw SCU + MT7531 register access.
@@ -110,6 +148,17 @@ def transform(root: Path) -> None:
     )
     write(led, l)
 
+    # StockBridge is MD/tcboot-specific and has no role in MF2 RAM bring-up.
+    # Do not carry its board-specific ABI or command into the AN7583 binary.
+    cm = read(cmd_makefile)
+    cm = replace_exact(
+        cm,
+        "obj-y += ursusweb.o ursusubi.o ursusdispatch.o ursusupdate.o ursusstock.o ursusled.o",
+        "obj-y += ursusweb.o ursusubi.o ursusdispatch.o ursusupdate.o ursusled.o",
+        "remove MD StockBridge object",
+    )
+    write(cmd_makefile, cm)
+
     gm = read(gpio_makefile)
     gm = replace_exact(
         gm,
@@ -127,21 +176,29 @@ def transform(root: Path) -> None:
     write(scm, f"-UrsusBoot-{VERSION}\n")
 
     final_web = read(web)
+    final_ui = read(web_ui)
     final_update = read(update)
     final_ubi = read(ubi)
     final_led = read(led)
+    final_cmd_makefile = read(cmd_makefile)
     final_gpio_makefile = read(gpio_makefile)
     checks = {
         "mf identity": "Nokia XG-040G-MF" in final_web,
         "mf soc": "Airoha AN7583" in final_web,
         "readonly status": "persistent_write_enabled\\\":false" in final_web,
         "POST gate": "MF2 READONLY: rejected HTTP POST" in final_web,
-        "settings gate": "URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET" in final_web,
+        "settings command gate": "URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET" in final_web,
+        "settings backend gate": "URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET_BACKEND" in final_ubi,
         "FIP gate": "URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE" in final_update,
         "UBI update gate": "URSUS_MF2_READONLY_REJECT operation=UBI_UPDATE" in final_ubi,
         "migration gate": "URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION" in final_ubi,
         "no MD compatible in web": "nokia,xg-040g-md" not in final_web,
         "no MD compatible in update": "nokia,xg-040g-md" not in final_update,
+        "no MD UI identity": "Nokia XG-040G-MD" not in final_ui and "nokia_xg-040g-md" not in final_ui,
+        "MF UI identity": "Nokia XG-040G-MF" in final_ui,
+        "MF UI SoC": "AN7583" in final_ui,
+        "MD stock FIP marker disabled": "XG040GMC2P5G" not in final_update,
+        "MD StockBridge object removed": "ursusstock.o" not in final_cmd_makefile,
         "native MF red LED": 'LED_STATUS_RED "red:wan"' in final_led,
         "native MF USB1 LED": 'LED_USB1_GREEN "green:usb-1"' in final_led,
         "native MF USB2 LED": 'LED_USB2_GREEN "green:usb-2"' in final_led,
