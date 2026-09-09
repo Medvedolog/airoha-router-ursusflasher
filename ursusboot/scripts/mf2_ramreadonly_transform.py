@@ -24,6 +24,35 @@ def replace_regex(text: str, pattern: str, replacement: str, label: str) -> str:
     return out
 
 
+def c_concat_pattern(token: str) -> str:
+    # The embedded UI is emitted as adjacent C string literals and may split a
+    # board token at arbitrary byte boundaries, e.g. "No"\n"kia" or
+    # "XG-04"\n"0G-MD". Match the semantic token across those boundaries.
+    sep = r'(?:"\s*")?'
+    return sep.join(re.escape(ch) for ch in token)
+
+
+def canonicalize_embedded_ui(root: Path) -> None:
+    path = root / "include/ursusweb_ui.inc"
+    data = path.read_text(encoding="utf-8")
+    replacements = (
+        ("Nokia XG-040G-MD", "Nokia XG-040G-MF"),
+        ("Nokia_XG-040G-MD", "Nokia_XG-040G-MF"),
+        ("nokia_xg-040g-md", "nokia_xg-040g-mf"),
+        ("nokia,xg-040g-md", "nokia,xg-040g-mf"),
+        ("openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin",
+         "openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-preloader.bin"),
+    )
+    changed = 0
+    for old, new in replacements:
+        data, count = re.subn(c_concat_pattern(old), lambda _m, new=new: new, data)
+        changed += count
+        if re.search(c_concat_pattern(old), data):
+            raise SystemExit(f"MF2 embedded UI token survived C-concat rewrite: {old}")
+    path.write_text(data, encoding="utf-8")
+    print(f"MF2_EMBEDDED_UI_CANONICALIZE=PASS replacements={changed}")
+
+
 def harden_entrypoints(root: Path) -> None:
     ubi_path = root / "cmd/ursusubi.c"
     update_path = root / "cmd/ursusupdate.c"
@@ -121,7 +150,7 @@ def harden_entrypoints(root: Path) -> None:
     for path in board_identity_files:
         data = path.read_text(encoding="utf-8")
         for token in forbidden:
-            if token in data:
+            if token in data or re.search(c_concat_pattern(token), data):
                 leaks.append(f"{path.relative_to(root)}:{token}")
     if leaks:
         raise SystemExit("MF2 board identity leak after transform: " + ", ".join(leaks))
@@ -149,6 +178,7 @@ def transform(root: Path) -> None:
         if compat_ui.is_symlink():
             compat_ui.unlink()
 
+    canonicalize_embedded_ui(root)
     harden_entrypoints(root)
 
 
