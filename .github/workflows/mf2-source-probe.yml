@@ -68,7 +68,7 @@ jobs:
           cp "$S/cmd/Makefile" "$O/cmd/"
           cp "$S/include/ursus_version.h" "$O/"
           if [ -f "$S/drivers/gpio/ursus_an7581_safe_gpio.c" ]; then
-            cp "$S/drivers/gpio/ursus_an7581_safe_gpio.c "$O/drivers/gpio/"
+            cp "$S/drivers/gpio/ursus_an7581_safe_gpio.c" "$O/drivers/gpio/"
           fi
           cp "$S/drivers/gpio/Makefile" "$O/drivers/gpio/"
           cp "$S/drivers/gpio/Kconfig" "$O/drivers/gpio/" 2>/dev/null || true
