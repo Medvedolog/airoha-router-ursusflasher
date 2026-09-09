@@ -6,6 +6,7 @@ on:
     paths:
       - 'ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_*'
       - 'ursusboot/scripts/mf2_ramreadonly_transform.py'
+      - 'ursusboot/scripts/mf2_repack_from_medve.py'
       - 'ursusboot/scripts/build_mf2_ramboot.sh'
       - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
       - 'toolchains/**'
