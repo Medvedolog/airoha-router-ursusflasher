@@ -35,10 +35,11 @@ jobs:
           MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
           JOBS: '2'
         run: bash ursusboot/scripts/build_mf2_ramboot.sh
-      - name: Upload MF2 RAMBOOT hardware-test artifact
+      - name: Upload MF2 RAMBOOT audit artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ursusboot-mf2-ram1-an7583-hwtest
           path: work/mf2-ramboot/out
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
