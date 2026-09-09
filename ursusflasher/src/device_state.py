@@ -53,6 +53,7 @@ HUMAN_ENUM_VALUES = {
         "NO_NETWORK_ENDPOINT",
         "NETWORK_IDENTITY_AMBIGUOUS",
         "EXECUTION_ENVIRONMENT_UNCONFIRMED",
+        "BOARD_PROFILE_WRITE_DISABLED",
         "UNKNOWN",
     ),
 }
@@ -174,6 +175,41 @@ def _normalize_layout(value: Any) -> str:
     return raw
 
 
+def _canonicalize_profile_identity(
+    state: DeviceState,
+    *,
+    model: str = "",
+    soc: str = "",
+    board: str = "",
+    require_soc: bool = False,
+) -> str | None:
+    """Apply canonical MD/MF identity from BOARD_PROFILES without authorizing writes."""
+    if require_soc and not str(soc or "").strip():
+        return None
+    try:
+        import board_profiles as bp
+        identity = bp.canonical_identity(model=model, soc=soc, board=board)
+    except Exception as exc:
+        state.evidence["board_profile_error"] = f"{type(exc).__name__}: {exc}"
+        return None
+    if not identity:
+        return None
+    key, canonical_model, canonical_soc = identity
+    state.model = canonical_model
+    state.soc = canonical_soc
+    state.evidence["board_profile"] = key
+    return key
+
+
+def _profile_for_state(state: DeviceState) -> tuple[str, dict[str, Any]] | None:
+    try:
+        import board_profiles as bp
+        return bp.match_profile(model=state.model, soc=state.soc)
+    except Exception as exc:
+        state.evidence["board_profile_error"] = f"{type(exc).__name__}: {exc}"
+        return None
+
+
 def _extract_nand_from_ursus(st: dict[str, Any], state: DeviceState) -> None:
     for key in ("nand_model", "spinand_model", "nand_name", "flash_model"):
         value = st.get(key)
@@ -218,16 +254,15 @@ def _probe_ursus(host: str, state: DeviceState) -> bool:
     state.bootloader_version = version
     board = str(st.get("board") or st.get("board_name") or st.get("fdt_model") or "")
     soc = str(st.get("soc") or st.get("soc_name") or "")
-    if re.search(r"xg[-_,]?040g[-_,]?md", board, re.I):
-        state.model = "Nokia XG-040G-MD"
-        state.soc = soc or "Airoha AN7581"
-    elif board:
-        state.model = board
-        state.soc = soc or "UNKNOWN"
-    elif state.current_layout in ("NOKIA_STOCK", "OPENWRT_UBI", "OPENWRT_FACTORY"):
-        # API v190+ is device-local and the shipped MD recovery payload is board-specific.
-        state.model = "Nokia XG-040G-MD"
-        state.soc = soc or "Airoha AN7581"
+    if not _canonicalize_profile_identity(state, board=board, soc=soc):
+        if board:
+            state.model = board
+            state.soc = soc or "UNKNOWN"
+        elif state.current_layout in ("NOKIA_STOCK", "OPENWRT_UBI", "OPENWRT_FACTORY"):
+            # Legacy fallback applies only to the shipped MD-only UrsusBoot lineage.
+            state.model = "Nokia XG-040G-MD"
+            state.soc = soc or "Airoha AN7581"
+            state.evidence["board_profile"] = "md-legacy-fallback"
     _extract_nand_from_ursus(st, state)
     if state.model == "UNKNOWN":
         degrade_probe_status(state, PROBE_PARTIAL, "URSUS_MODEL_UNCONFIRMED")
@@ -255,10 +290,12 @@ def _probe_stock_web(host: str, state: DeviceState) -> bool:
     state.bootloader = "UNKNOWN"
     state.bootloader_version = "UNKNOWN"
     state.evidence["stock_device_info"] = info
-    if state.model.upper() == "XG-040G-MD" and re.search(r"7581", state.soc, re.I):
-        state.model = "Nokia XG-040G-MD"
-        state.soc = "Airoha AN7581"
-    else:
+    if not _canonicalize_profile_identity(
+        state,
+        model=str(info.get("model") or ""),
+        soc=str(info.get("chipset") or ""),
+        require_soc=True,
+    ):
         degrade_probe_status(state, PROBE_PARTIAL, "STOCK_MODEL_SOC_MISMATCH")
     return True
 
@@ -324,9 +361,11 @@ def _probe_openwrt_ssh(host: str, state: DeviceState, *, interactive: bool = Fal
         state.evidence["openwrt_ssh_error"] = f"{type(exc).__name__}: {exc}"
         return False
     state.evidence["openwrt_probe"] = out[-12000:]
+
     def val(name: str) -> str:
         m = re.search(rf"(?:^|\n){re.escape(name)}=([^\r\n]*)", out)
         return m.group(1).strip() if m else ""
+
     board = val("BOARD")
     model = val("MODEL") or val("MACHINE")
     mtd = val("MTD")
@@ -338,22 +377,23 @@ def _probe_openwrt_ssh(host: str, state: DeviceState, *, interactive: bool = Fal
     state.evidence["root_mount"] = root_mount
     state.evidence["rom_mount"] = rom_mount
     state.evidence["overlay_mount"] = overlay_mount
-    if "xg-040g-md" in board.lower() or "xg-040g-md" in model.lower():
-        state.model = "Nokia XG-040G-MD"
-        state.soc = "Airoha AN7581"
-    if board.endswith("-ubi"):
+
+    profile_key = _canonicalize_profile_identity(state, model=model, board=board)
+    if fip == "fip":
         state.current_system = "OPENWRT_UBI"
         state.current_layout = "OPENWRT_UBI"
-    elif "xg-040g-md" in board.lower() or "xg-040g-md" in model.lower():
+    elif profile_key:
         state.current_system = "OPENWRT_FACTORY"
         state.current_layout = "OPENWRT_FACTORY"
     else:
         state.current_system = "UNKNOWN"
+
     if fip == "fip":
         state.bootloader = "URSUSBOOT"
         state.bootloader_version = "UNKNOWN"
     else:
         state.bootloader = "UNKNOWN"
+
     # Physical capacity/erase geometry can often be inferred from /proc/mtd without vendor guessing.
     rows = re.findall(r"mtd\d+:\s+([0-9a-fA-F]+)\s+([0-9a-fA-F]+)\s+\"([^\"]+)\"", mtd)
     if rows:
@@ -434,6 +474,9 @@ def _spec_text(spec: dict[str, Any], base: str, default_ru: str, default_en: str
 def action_applicability(state: DeviceState) -> dict[int, ActionApplicability]:
     specs = _action_specs()
     out: dict[int, ActionApplicability] = {}
+    board_match = _profile_for_state(state)
+    board_profile = board_match[1] if board_match else None
+    board_key = board_match[0] if board_match else None
     for number, key in ACTION_KEYS.items():
         spec = specs.get(key, {}) if isinstance(specs, dict) else {}
         write_capable = bool(spec.get("write_capable", number in (1, 2, 3, 4, 5, 6)))
@@ -481,6 +524,24 @@ def action_applicability(state: DeviceState) -> dict[int, ActionApplicability]:
                 "Локальная копия не найдена. Можно указать путь вручную.",
                 "No local backup was found. A path can be entered manually.",
             )
+
+        # MF1 contract: recognition and read-only operations are enabled, but a
+        # board profile may explicitly withhold every persistent writer.  This
+        # is a profile-level safety gate, not a backend-specific pile of `if mf`.
+        if enabled and write_capable and board_profile is not None:
+            try:
+                import board_profiles as bp
+                writes_enabled = bp.persistent_writes_enabled(board_profile)
+            except Exception:
+                writes_enabled = False
+            if not writes_enabled:
+                enabled = False
+                backend = str((board_profile.get("write_policy") or {}).get("backend") or "BOARD_PROFILE_WRITE_DISABLED")
+                reason = terms.tr(
+                    f"профиль {board_key.upper()} подключён только для чтения; persistent write будет включён после аппаратной приёмки",
+                    f"{board_key.upper()} profile is read-only; persistent writes stay disabled until hardware acceptance",
+                )
+
         # Contract: reason describes disabled state only; enabled actions use note.
         if enabled:
             reason = ""
