@@ -6,7 +6,9 @@ on:
     paths:
       - 'ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_*'
       - 'ursusboot/scripts/mf2_ramreadonly_transform.py'
+      - 'ursusboot/scripts/mf2_ramreadonly_transform_impl.py'
       - 'ursusboot/scripts/mf2_repack_from_medve.py'
+      - 'ursusboot/scripts/audit_mf2_ramboot_artifact.py'
       - 'ursusboot/scripts/build_mf2_ramboot.sh'
       - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
       - 'toolchains/**'
@@ -35,6 +37,8 @@ jobs:
           MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
           JOBS: '2'
         run: bash ursusboot/scripts/build_mf2_ramboot.sh
+      - name: Independent MF2 artifact audit
+        run: python3 ursusboot/scripts/audit_mf2_ramboot_artifact.py work/mf2-ramboot/out
       - name: Upload MF2 RAMBOOT audit artifact
         if: always()
         uses: actions/upload-artifact@v4
