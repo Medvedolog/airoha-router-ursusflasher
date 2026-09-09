@@ -5,11 +5,12 @@ on:
     branches: [ feature/mf-an7583 ]
     paths:
       - 'ursusboot/**'
+      - 'ursusflasher/tools/apply_restore_integration.py'
       - '.github/workflows/mf2-source-probe.yml'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   probe:
@@ -88,3 +89,29 @@ jobs:
           path: work/mf2-source-probe/out
           if-no-files-found: error
           retention-days: 7
+
+  restore-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply exact anchors once
+        run: |
+          set -euxo pipefail
+          if grep -q '^import stock_restore$' ursusflasher/src/expert.py; then
+            echo RESTORE_INTEGRATION_ALREADY_APPLIED=1
+            exit 0
+          fi
+          python3 ursusflasher/tools/apply_restore_integration.py
+          python3 -m py_compile \
+            ursusflasher/src/stock_restore.py \
+            ursusflasher/src/board_profiles.py \
+            ursusflasher/src/device_state.py \
+            ursusflasher/src/expert.py
+          python3 ursusflasher/tools/selftest_mf1_board_profiles.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ursusflasher/src/device_state.py ursusflasher/src/expert.py config/FIRMWARE_CAPABILITIES.json
+          git commit -m 'restore: expose proven MD/MF stock restore in EXPERT'
+          git push origin HEAD:feature/mf-an7583
