@@ -7,7 +7,9 @@ SOURCE_BUNDLE="$ROOT/ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-sourc
 CONFIG="$ROOT/ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig"
 ENVFILE="$ROOT/ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_env"
 TRANSFORM="$ROOT/ursusboot/scripts/mf2_ramreadonly_transform.py"
+REPACK="$ROOT/ursusboot/scripts/mf2_repack_from_medve.py"
 MEDVE_DIR=${MF2_MEDVE_DIR:-"$ROOT/work/medveflasher-rc35"}
+MEDVE_PATCHER="$MEDVE_DIR/data/recovery/recovery-safe-uboot-source/patch_recovery_safe_fip.py"
 PRELOADER="$MEDVE_DIR/data/payloads/nokia-xg-040g-mf-an7583-uart-preloader.bin"
 DONOR="$MEDVE_DIR/data/payloads/nokia-xg-040g-mf-an7583-uart-recovery-safe-bl31-uboot.fip"
 OUT="$WORK/out"
@@ -23,6 +25,8 @@ for x in tar make gcc perl python3 sha256sum strings patch stat; do command -v "
 [ -f "$SOURCE_BUNDLE" ] || { echo "TEST61 source snapshot missing" >&2; exit 1; }
 [ -f "$CONFIG" ] || { echo "MF2 config missing" >&2; exit 1; }
 [ -f "$ENVFILE" ] || { echo "MF2 env missing" >&2; exit 1; }
+[ -f "$REPACK" ] || { echo "MF2 Medve repack adapter missing" >&2; exit 1; }
+[ -f "$MEDVE_PATCHER" ] || { echo "Pinned MedveFlasher FIP parser missing: $MEDVE_PATCHER" >&2; exit 1; }
 [ -f "$PRELOADER" ] || { echo "Pinned MedveFlasher MF UART preloader missing: $PRELOADER" >&2; exit 1; }
 [ -f "$DONOR" ] || { echo "Pinned MedveFlasher MF SAFE FIP missing: $DONOR" >&2; exit 1; }
 
@@ -48,6 +52,14 @@ tar --zstd -xf "$SOURCE_BUNDLE" -C "$WORK/u-boot"
 python3 "$TRANSFORM" "$WORK/u-boot"
 cp "$ENVFILE" "$WORK/u-boot/defenvs/an7583_nokia_xg-040g-mf_env"
 cp "$CONFIG" "$WORK/u-boot/.config"
+
+# Source-level board separation before compiler/linker can hide dead MD code.
+! grep -q '0x1fa20000' "$WORK/u-boot/cmd/ursusled.c" || { echo "AN7581 SCU raw MMIO survived MF2 transform" >&2; exit 1; }
+! grep -q '0x1fb58000' "$WORK/u-boot/cmd/ursusled.c" || { echo "MT7531 raw MMIO survived MF2 transform" >&2; exit 1; }
+! grep -q '^obj-y += ursus_an7581_safe_gpio.o$' "$WORK/u-boot/drivers/gpio/Makefile" || { echo "AN7581 safe GPIO object still linked in MF2" >&2; exit 1; }
+grep -Fq '#define LED_STATUS_RED "red:wan"' "$WORK/u-boot/cmd/ursusled.c" || { echo "MF red LED DT label missing" >&2; exit 1; }
+grep -Fq '#define LED_USB1_GREEN "green:usb-1"' "$WORK/u-boot/cmd/ursusled.c" || { echo "MF USB1 LED DT label missing" >&2; exit 1; }
+grep -Fq '#define LED_USB2_GREEN "green:usb-2"' "$WORK/u-boot/cmd/ursusled.c" || { echo "MF USB2 LED DT label missing" >&2; exit 1; }
 
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
 [ -n "$SDK_ROOT" ] || { echo "SDK root not found" >&2; exit 1; }
@@ -81,7 +93,13 @@ make -j"${JOBS:-$(nproc)}"
 
 gcc -O2 -Wall -Wextra lzma1ext_noeopm.c -llzma -o "$WORK/lzma1ext_noeopm"
 "$WORK/lzma1ext_noeopm" u-boot.bin u-boot.lzma 1048576
-python3 repack_persistent_fip.py "$DONOR" u-boot.lzma "ursusboot-mf-${VERSION}-ram.fip"
+python3 "$REPACK" \
+    --medve-patcher "$MEDVE_PATCHER" \
+    --source "$DONOR" \
+    --bl33 u-boot.lzma \
+    --bl33-raw u-boot.bin \
+    --output "ursusboot-mf-${VERSION}-ram.fip" \
+    --report "$OUT/MF2-FIP-REPACK.json"
 
 cp u-boot u-boot.bin u-boot.map u-boot.sym System.map u-boot.lzma "ursusboot-mf-${VERSION}-ram.fip" "$OUT/"
 cp "$PRELOADER" "$OUT/ursusboot-mf-${VERSION}-uart-preloader.bin"
@@ -91,30 +109,30 @@ cp defenvs/an7583_nokia_xg-040g-mf_env "$OUT/MF2_RAM.env"
 [ "$(cat .scmversion)" = "-UrsusBoot-${VERSION}" ] || { echo "MF2 .scmversion mismatch" >&2; exit 1; }
 grep -Fq "#define URSUS_VERSION \"${VERSION}\"" include/ursus_version.h || { echo "MF2 version header mismatch" >&2; exit 1; }
 strings u-boot.bin > "$WORK/u-boot.strings"
-for marker in "$VERSION" 'Nokia XG-040G-MF' 'Airoha AN7583' 'URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE' 'URSUS_MF2_READONLY_REJECT operation=UBI_UPDATE' 'URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION' 'URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET' 'MF2 RAM-only build: persistent operations disabled'; do
+for marker in "$VERSION" 'Nokia XG-040G-MF' 'Airoha AN7583' 'URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE' 'URSUS_MF2_READONLY_REJECT operation=UBI_UPDATE' 'URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION' 'URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET' 'MF2 RAM-only build: persistent operations disabled' 'URSUS_MF2_LAN_LED_SETUP raw_mmio=disabled'; do
     grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "MF2 binary marker missing: $marker" >&2; exit 1; }
 done
 if grep -Fq 'Nokia XG-040G-MD' "$WORK/u-boot.strings"; then
     echo "MD board identity leaked into MF2 binary" >&2
     exit 1
 fi
+for symbol in ursus_scu_read ursus_scu_write ursus_lanphy_c45_write ursus_lanphy_c45_read ursus_an7581_safe_gpio; do
+    if grep -Fq "$symbol" u-boot.sym; then
+        echo "MD-only symbol leaked into MF2 link: $symbol" >&2
+        exit 1
+    fi
+done
 
-python3 - "$OUT/ursusboot-mf-${VERSION}-ram.fip" <<'PYQA'
-import hashlib, struct, sys
-p=sys.argv[1]
-d=open(p,'rb').read()
-assert struct.unpack_from('<I',d,0)[0] == 0xaa640001
-pos=16; nt=None
-for _ in range(32):
-    u=d[pos:pos+16]
-    off,size,flags=struct.unpack_from('<QQQ',d,pos+16)
-    if u == b'\0'*16: break
-    if u == bytes.fromhex('d6d0eea7fcead54b97829934f234b6e4'):
-        nt=(off,size)
-    pos += 40
-assert nt, 'BL33/NT_FW_CONFIG entry missing'
-assert nt[0]+nt[1] <= len(d), (nt, len(d))
-print(f'MF2_FIP_QA=PASS size={len(d)} nt_off=0x{nt[0]:x} nt_size={nt[1]} sha256={hashlib.sha256(d).hexdigest()}')
+python3 - "$OUT/MF2-FIP-REPACK.json" <<'PYQA'
+import json, sys
+r=json.load(open(sys.argv[1], encoding='ascii'))
+assert r['entry_count'] == 2
+assert r['bl31_byte_exact'] is True
+assert r['mf2_bl33_roundtrip'] is True
+assert r['serial_preserved'] is True
+assert r['flags_preserved'] is True
+assert r['uuid_flags_preserved'] is True
+print('MF2_FIP_QA=PASS output_sha256=' + r['output_sha256'] + ' output_size=' + str(r['output_size']))
 PYQA
 
 sha256sum "$OUT/ursusboot-mf-${VERSION}-uart-preloader.bin" "$OUT/ursusboot-mf-${VERSION}-ram.fip" "$OUT/u-boot.bin" "$OUT/u-boot.lzma" | tee "$OUT/SHA256SUMS"
@@ -125,11 +143,14 @@ printf '%s\n' \
   "SOURCE=TEST61 exact source snapshot" \
   "OPENWRT_BASELINE=3d1645ee26d6a2e20be71d7fa1716721bac78e53" \
   "MEDVEFLASHER_COMMIT=342cac4cb99a924f3d83eb8e4b5259490377704e" \
+  "MEDVE_FIP_PARSER=data/recovery/recovery-safe-uboot-source/patch_recovery_safe_fip.py" \
   "UART_PRELOADER_SHA256=${EXPECTED_PRELOADER_SHA}" \
   "DONOR_SAFE_FIP_SHA256=${EXPECTED_DONOR_SHA}" \
   "PERSISTENT_WRITES=DISABLED" \
   "HTTP_POST=REJECTED" \
   "ENV=NOWHERE" \
+  "AN7581_RAW_LED_MMIO=REMOVED" \
+  "AN7581_SAFE_GPIO_DRIVER=NOT_LINKED" \
   "RECOVERY_PORTS=LAN2,LAN3" \
   "LAN1_EN8811=OUT_OF_SCOPE_MF2" > "$OUT/MF2-BUILD_INFO.txt"
 
