@@ -13,6 +13,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
+import board_profiles as bp
 import console_ui as ui
 import device_state as ds
 import one_key
@@ -210,8 +211,14 @@ def _tcp_open(host: str, port: int, timeout: float = 1.0) -> bool:
         s.close()
 
 
-def _readonly_stock_access(host: str) -> proven.StockAccess:
-    """Authenticate to stock Web without enabling Telnet/FTP/Samba or changing settings."""
+def _readonly_stock_access(host: str, *, expected_family: str | None = None) -> proven.StockAccess:
+    """Authenticate to stock Web without enabling services or changing settings.
+
+    The family is re-read from device_status.cgi and resolved through the same
+    BOARD_PROFILES catalog as DeviceState.  This deliberately reuses the
+    MedveFlasher-derived family-aware backup backend instead of authorizing a
+    writer from the passive menu probe.
+    """
     client = stock_web.StockWeb(host)
     user = stock_web.DEFAULT_WEB_USER
     password = stock_web.DEFAULT_WEB_PASSWORD
@@ -232,7 +239,26 @@ def _readonly_stock_access(host: str) -> proven.StockAccess:
             client = stock_web.StockWeb(host)
             client.login(user, password, allow_plain=False)
         setup = stock_web.StockSetup(client)
-        info = setup.require_model(("XG-040G-MD",))
+        info = setup.read_device_info()
+        match = bp.match_profile(
+            model=str(info.get("model") or ""),
+            soc=str(info.get("chipset") or ""),
+        )
+        if not match:
+            raise stock_web.UnsupportedModel(
+                tr(
+                    f"неподдерживаемая или противоречивая пара model/SoC: {info.get('model') or 'unknown'} / {info.get('chipset') or 'unknown'}",
+                    f"unsupported or conflicting model/SoC pair: {info.get('model') or 'unknown'} / {info.get('chipset') or 'unknown'}",
+                )
+            )
+        family, profile = match
+        if expected_family and family != expected_family:
+            raise stock_web.UnsupportedModel(
+                tr(
+                    f"семья устройства изменилась между preflight и backup: ожидалась {expected_family.upper()}, получена {family.upper()}",
+                    f"device family changed between preflight and backup: expected {expected_family.upper()}, got {family.upper()}",
+                )
+            )
         credentials = setup.read_credentials()
         telnet_port = int(credentials["telnet_port"])
         if not bool(credentials.get("telnet_enabled")) or not _tcp_open(host, telnet_port):
@@ -252,10 +278,10 @@ def _readonly_stock_access(host: str) -> proven.StockAccess:
             ftp_port=int(credentials.get("ftp_port") or 21),
             ftp_enabled=bool(credentials.get("ftp_enabled")),
             model_verified=True,
-            model_verification_source="stock-web-device_status.cgi-readonly",
-            family="md",
-            model_name=str(info.get("model") or "XG-040G-MD"),
-            chipset=str(info.get("chipset") or "AN7581"),
+            model_verification_source="stock-web-device_status.cgi-readonly-board-profile",
+            family=family,
+            model_name=str(profile.get("model") or info.get("model") or "UNKNOWN"),
+            chipset=str(profile.get("soc") or info.get("chipset") or "UNKNOWN"),
             web_client=client,
             web_setup=setup,
             web_module=stock_web,
@@ -268,21 +294,21 @@ def _readonly_stock_access(host: str) -> proven.StockAccess:
         raise
 
 
-def backup_stock_readonly(host: str) -> None:
+def backup_stock_readonly(host: str, *, expected_family: str | None = None) -> None:
     access = None
     try:
-        access = _readonly_stock_access(host)
+        access = _readonly_stock_access(host, expected_family=expected_family)
         stamp = time.strftime("%Y%m%d-%H%M%S")
-        default_dest = Path(proven.WORK) / "backups" / f"stock-full-readonly-{stamp}"
+        default_dest = Path(proven.WORK) / "backups" / f"stock-{access.family}-full-readonly-{stamp}"
         raw = input(tr(f"Каталог для полной копии [{default_dest}]: ",
                        f"Full backup directory [{default_dest}]: ")).strip().strip('"')
         destination = Path(raw).expanduser() if raw else default_dest
         print(tr(
-            "[ШАГ] Снимаю mtd0..mtd16. Службы Telnet/FTP/Samba не включаются, NAND не изменяется.",
-            "[STEP] Capturing mtd0..mtd16. Service provisioning is forbidden: Telnet/FTP/Samba are not enabled and NAND is not modified.",
+            f"[ШАГ] Снимаю mtd0..mtd16 для {access.family.upper()}. Службы Telnet/FTP/Samba не включаются, NAND не изменяется.",
+            f"[STEP] Capturing mtd0..mtd16 for {access.family.upper()}. Service provisioning is forbidden: Telnet/FTP/Samba are not enabled and NAND is not modified.",
         ))
         proven.backup_tftp(
-            access, access.host, destination, expected_family="md",
+            access, access.host, destination, expected_family=access.family,
             allow_service_provisioning=False,
         )
         print(tr(f"[ГОТОВО] Полная копия сохранена: {destination}",
@@ -295,7 +321,13 @@ def backup_stock_readonly(host: str) -> None:
 def full_backup_readonly(state: ds.DeviceState) -> None:
     if state.current_system == "NOKIA_STOCK" and state.probe_status == ds.PROBE_COMPLETE:
         try:
-            backup_stock_readonly(state.host)
+            match = bp.match_profile(model=state.model, soc=state.soc)
+            if not match:
+                raise RuntimeError(tr(
+                    "DeviceState не содержит подтверждённый board profile для stock backup.",
+                    "DeviceState does not contain a confirmed board profile for stock backup.",
+                ))
+            backup_stock_readonly(state.host, expected_family=match[0])
             return
         except Exception as exc:
             proven._write_session_only("[READONLY-STOCK-BACKUP] " + repr(exc))
