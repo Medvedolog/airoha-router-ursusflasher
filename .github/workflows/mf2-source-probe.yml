@@ -31,7 +31,7 @@ jobs:
           test -f "$S/arch/arm/dts/an7583-nokia-xg-040g-mf.dts"
           grep -q 'CONFIG_TARGET_AN7583=y' "$S/configs/an7583_nokia_xg-040g-mf_defconfig"
           grep -q 'compatible = "nokia,xg-040g-mf", "airoha,an7583"' "$S/arch/arm/dts/an7583-nokia-xg-040g-mf.dts"
-      - name: Collect UrsusBoot writer and API entry points
+      - name: Collect UrsusBoot writer API and board-specific entry points
         run: |
           set -euxo pipefail
           S=work/mf2-source-probe/src
@@ -39,19 +39,24 @@ jobs:
           cp "$S/configs/an7583_nokia_xg-040g-mf_defconfig" "$O/"
           cp "$S/defenvs/an7583_nokia_xg-040g-mf_env" "$O/"
           cp "$S/arch/arm/dts/an7583-nokia-xg-040g-mf.dts" "$O/"
-          for f in cmd/ursusweb.c cmd/ursusubi.c cmd/ursusupdate.c cmd/ursusdispatch.c cmd/Makefile include/ursus_version.h; do
-            if [ -f "$S/$f" ]; then
-              mkdir -p "$O/$(dirname "$f")"
-              cp "$S/$f" "$O/$f"
-            fi
-          done
+          mkdir -p "$O/cmd" "$O/drivers/gpio"
+          cp "$S"/cmd/ursus*.c "$O/cmd/"
+          cp "$S/cmd/Makefile" "$O/cmd/"
+          cp "$S/include/ursus_version.h" "$O/"
+          if [ -f "$S/drivers/gpio/ursus_an7581_safe_gpio.c" ]; then
+            cp "$S/drivers/gpio/ursus_an7581_safe_gpio.c" "$O/drivers/gpio/"
+          fi
+          cp "$S/drivers/gpio/Makefile" "$O/drivers/gpio/"
+          cp "$S/drivers/gpio/Kconfig" "$O/drivers/gpio/" 2>/dev/null || true
           {
             echo '=== U_BOOT_CMD ==='
             grep -R -n 'U_BOOT_CMD' "$S/cmd" | grep -E 'ursus|ubi|mtd' || true
-            echo '=== persistent words in Ursus sources ==='
-            grep -R -n -E 'saveenv|mtd erase|mtd write|ubi (write|create|remove|rename|detach)|ursus_.*(start|update|migration)' "$S/cmd/ursus"*.c || true
+            echo '=== persistent APIs/commands in every Ursus source ==='
+            grep -R -n -E 'saveenv|env_save|mtd_(erase|write)|mtd erase|mtd write|ubi_(create|remove|write|update|detach|attach)|ubi (write|create|remove|rename|detach)|ursus_.*(start|update|migration)' "$S"/cmd/ursus*.c || true
             echo '=== API routes ==='
             grep -n -E 'GET /api/|POST /api/' "$S/cmd/ursusweb.c" || true
+            echo '=== AN7581 safe GPIO references ==='
+            grep -R -n -E 'ursus_an7581_safe_gpio|AN7581_SAFE|TARGET_AN7581|TARGET_AN7583' "$S/drivers/gpio" "$S/cmd" "$S/arch/arm/dts/an7583-nokia-xg-040g-mf.dts" || true
           } > "$O/ENTRYPOINTS.txt"
       - uses: actions/upload-artifact@v4
         with:
