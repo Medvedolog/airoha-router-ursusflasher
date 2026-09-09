@@ -19,7 +19,7 @@ def load_medve(path: Path):
     return module
 
 
-def rebuild(medve, source: bytes, new_bl33: bytes, raw_bl33: bytes) -> tuple[bytes, dict]:
+def rebuild(medve, source: bytes, raw_bl33: bytes) -> tuple[bytes, bytes, dict]:
     serial, flags, entries, _term_pos, old_end = medve.parse_fip(source)
     if len(entries) != 2:
         raise ValueError(f"expected Medve MF BL31+BL33 FIP, got {len(entries)} entries")
@@ -28,6 +28,12 @@ def rebuild(medve, source: bytes, new_bl33: bytes, raw_bl33: bytes) -> tuple[byt
 
     source_payloads = [source[o:o + s] for _uuid, o, s, _eflags in entries]
     bl31 = source_payloads[0]
+    source_bl33 = source_payloads[1]
+
+    # Reuse the exact MedveFlasher RC18 compressor.  It derives LZMA
+    # properties/dictionary from the proven MF donor BL33 and emits the
+    # canonical known-size/no-EOPM representation accepted by AN7583.
+    new_bl33 = medve.lzma_encode(raw_bl33, source_bl33)
     if medve.lzma_decode(new_bl33) != raw_bl33:
         raise ValueError("new MF2 BL33 compressed payload does not round-trip to u-boot.bin")
 
@@ -78,6 +84,7 @@ def rebuild(medve, source: bytes, new_bl33: bytes, raw_bl33: bytes) -> tuple[byt
 
     report = {
         "parser_source": "MedveFlasher recovery-safe-uboot-source/patch_recovery_safe_fip.py",
+        "compressor_source": "MedveFlasher recovery-safe-uboot-source/lzma1ext_noeopm.c via lzma_encode",
         "source_sha256": medve.sha256(source),
         "output_sha256": medve.sha256(final),
         "source_size": len(source),
@@ -85,35 +92,37 @@ def rebuild(medve, source: bytes, new_bl33: bytes, raw_bl33: bytes) -> tuple[byt
         "entry_count": 2,
         "bl31_compressed_sha256": medve.sha256(bl31),
         "bl31_byte_exact": True,
-        "source_bl33_compressed_sha256": medve.sha256(source_payloads[1]),
+        "source_bl33_compressed_sha256": medve.sha256(source_bl33),
         "mf2_bl33_compressed_sha256": medve.sha256(new_bl33),
         "mf2_bl33_raw_sha256": medve.sha256(raw_bl33),
         "mf2_bl33_roundtrip": True,
+        "mf2_bl33_lzma_known_size": True,
+        "mf2_bl33_lzma_eopm": False,
         "serial_preserved": True,
         "flags_preserved": True,
         "uuid_flags_preserved": True,
     }
-    return final, report
+    return final, new_bl33, report
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--medve-patcher", type=Path, required=True)
     ap.add_argument("--source", type=Path, required=True)
-    ap.add_argument("--bl33", type=Path, required=True)
     ap.add_argument("--bl33-raw", type=Path, required=True)
+    ap.add_argument("--bl33-output", type=Path, required=True)
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--report", type=Path, required=True)
     args = ap.parse_args()
 
     medve = load_medve(args.medve_patcher.resolve())
-    final, report = rebuild(
+    final, new_bl33, report = rebuild(
         medve,
         args.source.read_bytes(),
-        args.bl33.read_bytes(),
         args.bl33_raw.read_bytes(),
     )
     args.output.write_bytes(final)
+    args.bl33_output.write_bytes(new_bl33)
     args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="ascii")
     for key, value in report.items():
         print(f"{key}={value}")
