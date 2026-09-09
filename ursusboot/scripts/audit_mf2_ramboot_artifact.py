@@ -23,13 +23,13 @@ FORBIDDEN_BOARD_TOKENS = (
     b"URSUSBOOT_MD",
     b"TCBOOT_MD",
     b"openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin",
+    b"Airoha EN8811H",
 )
 
 REQUIRED_BINARY_MARKERS = (
     b"0.1.0-mf2-ram1",
     b"Nokia XG-040G-MF",
     b"Airoha AN7583",
-    b"Airoha EN8811H",
     b"MF2 RAM-only build: persistent operations disabled",
     b"MF2 READONLY: rejected HTTP POST",
     b"URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE",
@@ -53,6 +53,8 @@ FORBIDDEN_SYMBOL_TOKENS = (
     "ursus_an7581_safe_gpio",
     "do_ursusstockboot",
     "ursusstockboot",
+    "en8811h_config",
+    "en8811h_probe",
 )
 
 FORBIDDEN_CONFIG_Y = (
@@ -67,6 +69,7 @@ FORBIDDEN_CONFIG_Y = (
     "CONFIG_CMD_PXE",
     "CONFIG_ENV_IS_IN_MTD",
     "CONFIG_ENV_IS_IN_UBI",
+    "CONFIG_PHY_AIROHA_EN8811",
 )
 
 REQUIRED_CONFIG_Y = (
@@ -77,8 +80,6 @@ REQUIRED_CONFIG_Y = (
     "CONFIG_NET_LWIP",
     "CONFIG_AIROHA_ETH",
     "CONFIG_PCS_AIROHA_AN7583",
-    "CONFIG_PHY_AIROHA",
-    "CONFIG_PHY_AIROHA_EN8811",
     "CONFIG_PINCTRL_AIROHA_AN7583",
     "CONFIG_ENV_IS_NOWHERE",
     "CONFIG_CONSOLE_RECORD",
@@ -142,7 +143,7 @@ def audit(outdir: Path) -> dict:
     raw = uboot.read_bytes()
     for token in FORBIDDEN_BOARD_TOKENS:
         if token in raw:
-            raise SystemExit(f"MD board token leaked into u-boot.bin: {token!r}")
+            raise SystemExit(f"forbidden board/LAN1 token leaked into u-boot.bin: {token!r}")
     for marker in REQUIRED_BINARY_MARKERS:
         if marker not in raw:
             raise SystemExit(f"required MF2 binary marker missing: {marker!r}")
@@ -150,12 +151,12 @@ def audit(outdir: Path) -> dict:
     syms = sym.read_text(encoding="utf-8", errors="replace")
     for token in FORBIDDEN_SYMBOL_TOKENS:
         if token in syms:
-            raise SystemExit(f"MD-only/StockBridge symbol leaked into link: {token}")
+            raise SystemExit(f"forbidden MD/LAN1 symbol leaked into link: {token}")
 
     cfg = config.read_text(encoding="utf-8")
     for name in FORBIDDEN_CONFIG_Y:
         if re.search(rf"^{re.escape(name)}=y$", cfg, re.M):
-            raise SystemExit(f"writer config enabled: {name}=y")
+            raise SystemExit(f"forbidden/writer config enabled: {name}=y")
     for name in REQUIRED_CONFIG_Y:
         if not re.search(rf"^{re.escape(name)}=y$", cfg, re.M):
             raise SystemExit(f"required MF2 config missing: {name}=y")
@@ -229,8 +230,10 @@ def audit(outdir: Path) -> dict:
         "ursus_persistent_entrypoints": "HARD_REJECT_EROFS",
         "md_board_identity": "ABSENT",
         "md_stockbridge": "NOT_LINKED",
-        "ethernet_phy": "AIROHA_EN8811_NATIVE_DRIVER",
-        "ethernet_phy_leds": "NATIVE_LINK_RX_TX_SPEED",
+        "recovery_ports": "LAN2_LAN3_AN7583_INTERNAL_GPHY",
+        "lan23_led_pinmux": "GPIO2_PHY2_LED0_GPIO3_PHY3_LED0",
+        "lan1_en8811": "NOT_LINKED_OUT_OF_SCOPE",
+        "lan4_led": "DEFERRED",
     }
     (outdir / "MF2-INDEPENDENT-AUDIT.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="ascii"
