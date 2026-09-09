@@ -1,0 +1,84 @@
+{
+  "schema": 1,
+  "profiles": {
+    "md": {
+      "model": "Nokia XG-040G-MD",
+      "model_tokens": ["XG-040G-MD", "nokia_xg-040g-md", "nokia-xg-040g-md"],
+      "soc": "Airoha AN7581",
+      "soc_tokens": ["AN7581", "7581"],
+      "openwrt_board_tokens": ["xg-040g-md"],
+      "stock": {
+        "web_supported": true
+      },
+      "flash": {
+        "nand_size": 268435456,
+        "erase_size": 131072
+      },
+      "network": {
+        "recovery_preferred_ports": ["LAN2", "LAN3"],
+        "recovery_excluded_ports": ["LAN1"]
+      },
+      "write_policy": {
+        "mf1_enabled": false,
+        "persistent_write_enabled": true,
+        "backend": "MD_EXISTING"
+      }
+    },
+    "mf": {
+      "model": "Nokia XG-040G-MF",
+      "model_tokens": ["XG-040G-MF", "nokia_xg-040g-mf", "nokia-xg-040g-mf"],
+      "soc": "Airoha AN7583",
+      "soc_tokens": ["AN7583", "7583"],
+      "openwrt_board_tokens": ["xg-040g-mf"],
+      "stock": {
+        "web_supported": true
+      },
+      "flash": {
+        "nand_size": 268435456,
+        "erase_size": 131072,
+        "bl2_offset": 0,
+        "bl2_size": 131072,
+        "ubi_offset": 131072,
+        "ubi_size": 268304384,
+        "bosa_offset": 85721088,
+        "bosa_size": 262144,
+        "ri_offset": 85983232,
+        "ri_size": 262144,
+        "transition_fit_offset": 786432
+      },
+      "ubi": {
+        "volumes": [
+          {"id": 0, "name": "ubootenv"},
+          {"id": 1, "name": "ubootenv2"},
+          {"id": 2, "name": "bosa"},
+          {"id": 3, "name": "ri"},
+          {"id": 4, "name": "fip", "type": "static", "size": 1048576},
+          {"id": 5, "name": "fit"}
+        ]
+      },
+      "network": {
+        "recovery_preferred_ports": ["LAN2", "LAN3"],
+        "recovery_excluded_ports": ["LAN1"],
+        "lan4_status": "DEFERRED"
+      },
+      "write_policy": {
+        "mf1_enabled": true,
+        "persistent_write_enabled": false,
+        "backend": "DISABLED_READ_ONLY_BRINGUP",
+        "bl2_last_required": true,
+        "automatic_alternate_writer": false
+      },
+      "evidence": {
+        "source": "Medvedolog/nokia-router-medveflasher",
+        "capability_baseline": "1.0.0-rc35",
+        "full_backup": "HW_PROVEN",
+        "ram_openwrt": "HW_PROVEN",
+        "ubi_format": "HW_PROVEN",
+        "ubi_volume_write": "HW_PROVEN",
+        "bootloader_replace_bl2_last": "HW_PROVEN",
+        "permanent_install": "HW_PROVEN",
+        "ursusboot_an7583": "NOT_YET_PROVEN"
+      }
+    }
+  }
+}
