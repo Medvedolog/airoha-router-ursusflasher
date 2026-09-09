@@ -24,7 +24,9 @@ def replace_exact(text: str, old: str, new: str, label: str, count: int = 1) -> 
 
 
 def replace_regex(text: str, pattern: str, new: str, label: str) -> str:
-    out, count = re.subn(pattern, new, text, count=1, flags=re.S)
+    # Use a callable replacement so backslashes in generated C source are not
+    # interpreted a second time by re.sub (for example C "\\n" -> real LF).
+    out, count = re.subn(pattern, lambda _match: new, text, count=1, flags=re.S)
     if count != 1:
         raise SystemExit(f"{label}: expected one regex match, got {count}")
     return out
@@ -148,6 +150,7 @@ def transform(root: Path) -> None:
         "AN7581 raw helpers removed": "ursus_scu_read" not in final_led and "ursus_lanphy_c45_write" not in final_led,
         "AN7581 safe GPIO object removed": "obj-y += ursus_an7581_safe_gpio.o" not in final_gpio_makefile,
         "MF2 LAN LED no-op marker": "URSUS_MF2_LAN_LED_SETUP raw_mmio=disabled" in final_led,
+        "no multiline C printf literal": re.search(r'printf\("[^"\\]*\n', final_led) is None,
     }
     failed = [name for name, ok in checks.items() if not ok]
     if failed:
