@@ -1,0 +1,41 @@
+name: MD MF HW-test base export
+
+on:
+  push:
+    branches:
+      - feature/mf-an7583
+    paths:
+      - '.github/workflows/md-mf-hwtest-export.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout current feature branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Export current runnable tree
+        run: |
+          set -euo pipefail
+          python3 scripts/build_public_release.py --out-dir dist-hwtest-base
+          sha256sum dist-hwtest-base/*.zip
+
+      - name: Upload base runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusflasher-md-mf-hwtest-base
+          path: |
+            dist-hwtest-base/*.zip
+            dist-hwtest-base/*.sha256.txt
+          if-no-files-found: error
+          retention-days: 14
