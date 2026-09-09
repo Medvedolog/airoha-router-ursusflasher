@@ -11,6 +11,7 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(SRC))
 
 import board_profiles as bp  # noqa: E402
+import device_state as ds  # noqa: E402
 import stock_restore as sr  # noqa: E402
 
 
@@ -27,6 +28,34 @@ def main() -> int:
     require(not bp.persistent_writes_enabled(mf), "MF broad persistent writes must remain disabled")
     for key in ("install_openwrt", "install_or_repair_bootloader", "custom_openwrt", "recover_bootloader"):
         require(not bp.write_action_enabled(mf, key), f"MF unexpectedly authorizes {key}")
+
+    mf_state = ds.DeviceState(
+        probe_status=ds.PROBE_COMPLETE,
+        model="Nokia XG-040G-MF",
+        soc="Airoha AN7583",
+        current_system="OPENWRT_UBI",
+        current_layout="OPENWRT_UBI",
+        execution_environment=ds.EXEC_PERSISTENT_ROOT,
+        access={"ssh": True, "root": True},
+        evidence={"board_profile": "mf", "openwrt_board": "nokia,xg-040g-mf-ubi"},
+    )
+    mf_actions = ds.action_applicability(mf_state)
+    require(mf_actions[6].enabled, "MF EXPERT item 6 should be enabled")
+    require(mf_actions[6].write_capable, "MF item 6 must remain visibly write-capable")
+    for number in (1, 2, 3, 4, 5):
+        require(not mf_actions[number].enabled, f"MF write action {number} escaped the profile gate")
+
+    md_state = ds.DeviceState(
+        probe_status=ds.PROBE_COMPLETE,
+        model="Nokia XG-040G-MD",
+        soc="Airoha AN7581",
+        current_system="OPENWRT_UBI",
+        current_layout="OPENWRT_UBI",
+        execution_environment=ds.EXEC_PERSISTENT_ROOT,
+        access={"ssh": True, "root": True},
+        evidence={"board_profile": "md", "openwrt_board": "nokia,xg-040g-md-ubi"},
+    )
+    require(ds.action_applicability(md_state)[6].enabled, "MD EXPERT item 6 should be enabled")
 
     source = (SRC / "stock_restore.py").read_text(encoding="utf-8")
     required_tokens = (
