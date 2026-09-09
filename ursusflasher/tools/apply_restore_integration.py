@@ -6,6 +6,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
+# One-shot exact-anchor integration helper. Remove after the generated commit is verified.
+
 
 def replace_once(path: Path, old: str, new: str, label: str) -> None:
     text = path.read_text(encoding="utf-8")
