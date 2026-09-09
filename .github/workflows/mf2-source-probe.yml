@@ -1,0 +1,61 @@
+name: MF2 AN7583 source probe
+
+on:
+  push:
+    branches: [ feature/mf-an7583 ]
+    paths:
+      - 'ursusboot/**'
+      - '.github/workflows/mf2-source-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract TEST61 source snapshot
+        run: |
+          set -euxo pipefail
+          rm -rf work/mf2-source-probe
+          mkdir -p work/mf2-source-probe/src work/mf2-source-probe/out
+          tar --zstd -xf ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst -C work/mf2-source-probe/src
+      - name: Verify AN7583 baseline exists
+        run: |
+          set -euxo pipefail
+          S=work/mf2-source-probe/src
+          test -f "$S/configs/an7583_nokia_xg-040g-mf_defconfig"
+          test -f "$S/defenvs/an7583_nokia_xg-040g-mf_env"
+          test -f "$S/arch/arm/dts/an7583-nokia-xg-040g-mf.dts"
+          grep -q 'CONFIG_TARGET_AN7583=y' "$S/configs/an7583_nokia_xg-040g-mf_defconfig"
+          grep -q 'compatible = "nokia,xg-040g-mf", "airoha,an7583"' "$S/arch/arm/dts/an7583-nokia-xg-040g-mf.dts"
+      - name: Collect UrsusBoot writer and API entry points
+        run: |
+          set -euxo pipefail
+          S=work/mf2-source-probe/src
+          O=work/mf2-source-probe/out
+          cp "$S/configs/an7583_nokia_xg-040g-mf_defconfig" "$O/"
+          cp "$S/defenvs/an7583_nokia_xg-040g-mf_env" "$O/"
+          cp "$S/arch/arm/dts/an7583-nokia-xg-040g-mf.dts" "$O/"
+          for f in cmd/ursusweb.c cmd/ursusubi.c cmd/ursusupdate.c cmd/ursusdispatch.c cmd/Makefile include/ursus_version.h; do
+            if [ -f "$S/$f" ]; then
+              mkdir -p "$O/$(dirname "$f")"
+              cp "$S/$f" "$O/$f"
+            fi
+          done
+          {
+            echo '=== U_BOOT_CMD ==='
+            grep -R -n 'U_BOOT_CMD' "$S/cmd" | grep -E 'ursus|ubi|mtd' || true
+            echo '=== persistent words in Ursus sources ==='
+            grep -R -n -E 'saveenv|mtd erase|mtd write|ubi (write|create|remove|rename|detach)|ursus_.*(start|update|migration)' "$S/cmd/ursus"*.c || true
+            echo '=== API routes ==='
+            grep -n -E 'GET /api/|POST /api/' "$S/cmd/ursusweb.c" || true
+          } > "$O/ENTRYPOINTS.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mf2-source-probe
+          path: work/mf2-source-probe/out
+          if-no-files-found: error
+          retention-days: 7
