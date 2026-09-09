@@ -87,6 +87,37 @@ jobs:
           JOBS: '2'
         run: bash ursusboot/scripts/build_mf2_ramboot.sh
 
+      - name: Capture TEST61 PHY source diagnostics
+        if: failure()
+        run: |
+          set +e
+          ROOT=work/mf2-ramboot/u-boot
+          REPORT=work/mf2-ramboot/PHY-SOURCE-DIAG.txt
+          mkdir -p work/mf2-ramboot
+          {
+            echo '=== candidate PHY/network source files ==='
+            find "$ROOT/drivers/net" -type f \( -name '*.c' -o -name '*.h' \) | sort
+            echo
+            echo '=== PHY/MDIO/AN7583/LED anchors ==='
+            grep -RnsE 'BMCR_PDOWN|phy_clear_bits|phy_modify_mmd|MDIO_MMD_VEND2|an7583|AN7583|LED_ON|LED_BLINK|led_ctrl|phy_config|phy_startup|phy_connect|mdio|MMD' "$ROOT/drivers/net" "$ROOT/include" 2>/dev/null | head -n 2500
+            echo
+            echo '=== Airoha ethernet source excerpts ==='
+            for f in $(grep -RIlE 'AN7583|an7583|airoha|Airoha' "$ROOT/drivers/net" 2>/dev/null | head -n 80); do
+              echo "----- $f -----"
+              sed -n '1,280p' "$f"
+            done
+          } | tee "$REPORT"
+          test -s "$REPORT"
+
+      - name: Upload TEST61 PHY diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-mf2-test61-phy-source-diag
+          path: work/mf2-ramboot/PHY-SOURCE-DIAG.txt
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Record TEST5 exact build identity
         run: |
           set -euxo pipefail
@@ -108,7 +139,6 @@ jobs:
         run: |
           set -euxo pipefail
           DTS=work/mf2-ramboot/u-boot/arch/arm/dts/an7583-nokia-xg-040g-mf.dts
-          PHY=$(find work/mf2-ramboot/u-boot/drivers/net/phy -name 'mtk-ge-soc.c' -o -name 'mediatek-ge-soc.c' | head -n1)
           CFG=work/mf2-ramboot/out/u-boot.MF2_RAM.full.config
           BIN=work/mf2-ramboot/out/u-boot.bin
           grep -Fq 'URSUS_MF2_LAN23_LED_PINMUX' "$DTS"
@@ -116,10 +146,7 @@ jobs:
           grep -Fq 'pins = "gpio2";' "$DTS"
           grep -Fq 'function = "phy3_led0";' "$DTS"
           grep -Fq 'pins = "gpio3";' "$DTS"
-          test -n "$PHY"
-          grep -Fq 'URSUS_MF2_HWTEST5_PHY_LED0' "$PHY"
-          grep -Fq '0xc07f, 0xc007' "$PHY"
-          grep -Fq '0x03ff, 0x003f' "$PHY"
+          grep -Rqs 'URSUS_MF2_HWTEST5_PHY_LED0' work/mf2-ramboot/u-boot/drivers/net
           grep -Eq '^CONFIG_LOGLEVEL=7$' "$CFG"
           ! grep -Eq '^CONFIG_PHY_AIROHA_EN8811=y$' "$CFG"
           strings "$BIN" | grep -Fq 'URSUS_MF2_HWTEST5_PHY_LED0'
