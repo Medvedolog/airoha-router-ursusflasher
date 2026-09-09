@@ -2,224 +2,161 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import re
 from pathlib import Path
 
-VERSION = "0.1.0-mf2-ram1"
+
+def load_impl():
+    path = Path(__file__).with_name("mf2_ramreadonly_transform_impl.py")
+    spec = importlib.util.spec_from_file_location("mf2_ramreadonly_transform_impl", path)
+    if spec is None or spec.loader is None:
+        raise SystemExit(f"cannot load MF2 transform implementation: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
-def read(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
-
-
-def write(path: Path, data: str) -> None:
-    path.write_text(data, encoding="utf-8")
-
-
-def replace_exact(text: str, old: str, new: str, label: str, count: int = 1) -> str:
-    got = text.count(old)
-    if got != count:
-        raise SystemExit(f"{label}: expected {count} exact matches, got {got}")
-    return text.replace(old, new, count)
-
-
-def replace_regex(text: str, pattern: str, new: str, label: str) -> str:
-    # Use a callable replacement so backslashes in generated C source are not
-    # interpreted a second time by re.sub (for example C "\\n" -> real LF).
-    out, count = re.subn(pattern, lambda _match: new, text, count=1, flags=re.S)
+def replace_regex(text: str, pattern: str, replacement: str, label: str) -> str:
+    out, count = re.subn(pattern, lambda _m: replacement, text, count=1, flags=re.S)
     if count != 1:
-        raise SystemExit(f"{label}: expected one regex match, got {count}")
+        raise SystemExit(f"{label}: expected one match, got {count}")
     return out
 
 
-def transform(root: Path) -> None:
-    web = root / "cmd/ursusweb.c"
-    web_ui = root / "cmd/ursusweb_ui.inc"
-    update = root / "cmd/ursusupdate.c"
-    ubi = root / "cmd/ursusubi.c"
-    led = root / "cmd/ursusled.c"
-    cmd_makefile = root / "cmd/Makefile"
-    gpio_makefile = root / "drivers/gpio/Makefile"
-    version_h = root / "include/ursus_version.h"
-    scm = root / ".scmversion"
+def harden_entrypoints(root: Path) -> None:
+    ubi_path = root / "cmd/ursusubi.c"
+    update_path = root / "cmd/ursusupdate.c"
+    web_path = root / "cmd/ursusweb.c"
+    dispatch_path = root / "cmd/ursusdispatch.c"
 
-    for path in (web, web_ui, update, ubi, led, cmd_makefile, gpio_makefile, version_h, scm):
-        if not path.is_file():
-            raise SystemExit(f"missing source file: {path}")
-
-    # Dedicated MF identity. Keep this board-specific rather than spreading
-    # runtime if(MF) branches through the shared UrsusBoot sources.
-    w = read(web)
-    w = w.replace("Nokia XG-040G-MD", "Nokia XG-040G-MF")
-    w = w.replace("Airoha AN7581", "Airoha AN7583")
-    w = w.replace("nokia,xg-040g-md-ubi", "nokia,xg-040g-mf-ubi")
-    w = w.replace("nokia,xg-040g-md", "nokia,xg-040g-mf")
-
-    old_ubi_probe = '''    if ((ret == 0 || ret == -EUCLEAN) && retlen == 4 && !memcmp(head, "UBI#", 4)) {\n        strcpy(ursus_current_layout, "OPENWRT_UBI");\n        printf("URSUS_BADBLOCK_SCAN source=UBI skip_full_mtd_scan=1\\n");\n        if (ursus_ubi_probe_diag(&ursus_ubi_diag)) {\n            printf("URSUS_UBI_DIAGNOSTIC_PROBE_FAILED\\n");\n        } else {\n            ursus_ubi_fip = ursus_ubi_diag.fip.present && ursus_ubi_diag.fip.valid;\n            ursus_ubi_fit = (ursus_ubi_diag.fit.present && ursus_ubi_diag.fit.valid) ||\n                            (ursus_ubi_diag.fit_old.present && ursus_ubi_diag.fit_old.valid);\n            ursus_bad_blocks = ursus_ubi_diag.bad_pebs;\n        }\n        ursus_boot_fip = ursus_ubi_fip;\n    } else {\n'''
-    new_ubi_probe = '''    if ((ret == 0 || ret == -EUCLEAN) && retlen == 4 && !memcmp(head, "UBI#", 4)) {\n        /* MF2 is a RAM-only bring-up image. Do not attach/detach UBI here:\n         * raw MTD reads and bad-block queries are sufficient to prove NAND\n         * geometry and the physical UBI signature without changing state. */\n        strcpy(ursus_current_layout, "OPENWRT_UBI");\n        printf("URSUS_MF2_READONLY_UBI_PROBE raw_mtd_only=1 attach=0\\n");\n        if (nand->erasesize) {\n            printf("URSUS_BADBLOCK_SCAN source=MTD full_scan=1 readonly=1\\n");\n            for (off = 0; off < nand->size; off += nand->erasesize) {\n                ret = mtd_block_isbad(nand, off);\n                if (ret > 0)\n                    ursus_bad_blocks++;\n            }\n        }\n        memset(&ursus_ubi_diag, 0, sizeof(ursus_ubi_diag));\n        ursus_ubi_fip = false;\n        ursus_ubi_fit = false;\n        ursus_boot_fip = false;\n    } else {\n'''
-    w = replace_exact(w, old_ubi_probe, new_ubi_probe, "web raw-only UBI probe")
-
-    post_anchor = '''    if (URSUS_REQ_MATCH(c->reqhdr, "GET /api/log ") ||\n        URSUS_REQ_MATCH(c->reqhdr, "GET /api/operation-log "))\n        return ursus_http_start_response(pcb, c, 200, "text/plain; charset=utf-8", ursus_web_log);\n'''
-    post_gate = post_anchor + '''    if (!strncmp(c->reqhdr, "POST ", 5)) {\n        ursus_logf("MF2 READONLY: rejected HTTP POST\\n");\n        return ursus_http_start_response(pcb, c, 403, "application/json",\n            "{\\\"result\\\":\\\"REJECTED\\\",\\\"reason_class\\\":\\\"READ_ONLY_BRINGUP\\\",\\\"reason\\\":\\\"MF2 RAM-only build: persistent operations disabled\\\"}\\n");\n    }\n'''
-    w = replace_exact(w, post_anchor, post_gate, "web POST gate")
-
-    settings_anchor = '''static int do_ursussettings(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])\n{\n    bool fip_ok = false, fit_ok = false;\n    int ret;\n\n'''
-    settings_gate = settings_anchor + '''    printf("URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET\\n");\n    return CMD_RET_FAILURE;\n\n'''
-    w = replace_exact(w, settings_anchor, settings_gate, "ursussettings gate")
-
-    status_old = '''             "\\\"soc\\\":\\\"Airoha AN7583\\\",\\\"boot_fdt_compatible\\\":\\\"%s\\\",\\\"dram_mib\\\":%u,"\n'''
-    status_new = '''             "\\\"soc\\\":\\\"Airoha AN7583\\\",\\\"ram_read_only\\\":true,\\\"persistent_write_enabled\\\":false,\\\"boot_fdt_compatible\\\":\\\"%s\\\",\\\"dram_mib\\\":%u,"\n'''
-    w = replace_exact(w, status_old, status_new, "status read-only capability")
-    write(web, w)
-
-    # The TEST61 web UI is a generated include and therefore was not covered by
-    # replacing strings in ursusweb.c itself.  Canonicalize all board-facing
-    # MD identity and payload labels in the MF2 RAM UI.  POST remains rejected,
-    # so these names are informational only during bring-up.
-    ui = read(web_ui)
-    ui_replacements = (
-        ("openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin",
-         "openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-preloader.bin"),
-        ("Nokia XG-040G-MD", "Nokia XG-040G-MF"),
-        ("Nokia_XG-040G-MD", "Nokia_XG-040G-MF"),
-        ("nokia_xg-040g-md", "nokia_xg-040g-mf"),
-        ("nokia,xg-040g-md", "nokia,xg-040g-mf"),
-        ("xg-040g-md", "xg-040g-mf"),
-        ("AN7581", "AN7583"),
-        ("an7581", "an7583"),
+    ubi = ubi_path.read_text(encoding="utf-8")
+    ubi = replace_regex(
+        ubi,
+        r'int ursus_ubi_update_step\(void\)\n\{.*?\n\}\n\n(?=int ursus_ubi_update_fit\()',
+        '''int ursus_ubi_update_step(void)\n{\n    printf("URSUS_MF2_READONLY_REJECT operation=UBI_UPDATE_STEP\\n");\n    return -EROFS;\n}\n\n''',
+        "UBI update step gate",
     )
-    for old, new in ui_replacements:
-        ui = ui.replace(old, new)
-    write(web_ui, ui)
-
-    u = read(update)
-    u = u.replace("Nokia XG-040G-MD / Airoha AN7581", "Nokia XG-040G-MF / Airoha AN7583")
-    u = u.replace("Nokia XG-040G-MD", "Nokia XG-040G-MF")
-    u = u.replace("nokia,xg-040g-md-ubi", "nokia,xg-040g-mf-ubi")
-    u = u.replace("nokia,xg-040g-md", "nokia,xg-040g-mf")
-    u = u.replace("nokia_xg-040g-md", "nokia_xg-040g-mf")
-    u = u.replace("URSUSBOOT_MD", "URSUSBOOT_MF")
-    u = u.replace("NOKIA_XG040GMD_STOCK", "MF2_STOCK_FIP_DISABLED")
-    # MF stock-FIP identity is deliberately not guessed during RAM bring-up.
-    # Make the old MD stock marker impossible to accept while retaining the
-    # read-only validator structure for later board-specific MF3 work.
-    u = u.replace("XG040GMC2P5G", "MF2_STOCK_FIP_VALIDATION_DISABLED")
-    u = u.replace("AN7581", "AN7583")
-    u = u.replace("an7581", "an7583")
-    start_anchor = '''int ursus_fip_update_start(ulong addr, size_t len)\n{\n    bool is_ubi = false;\n    int ret;\n    const u8 *buf;\n\n'''
-    start_gate = start_anchor + '''    printf("URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE\\n");\n    return -EROFS;\n\n'''
-    u = replace_exact(u, start_anchor, start_gate, "FIP update gate")
-    write(update, u)
-
-    q = read(ubi)
-    q = q.replace("Nokia XG-040G-MD", "Nokia XG-040G-MF")
-    upd_anchor = '''int ursus_ubi_update_start(ulong fit_addr, size_t fit_len, bool keep_settings)\n{\n'''
-    upd_gate = upd_anchor + '''    printf("URSUS_MF2_READONLY_REJECT operation=UBI_UPDATE\\n");\n    return -EROFS;\n\n'''
-    q = replace_exact(q, upd_anchor, upd_gate, "UBI update gate")
-    mig_anchor = '''int ursus_ubi_migration_start(ulong fit_addr, size_t fit_len,\n                              ulong preloader_addr, size_t preloader_len)\n{\n'''
-    mig_gate = mig_anchor + '''    printf("URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION\\n");\n    return -EROFS;\n\n'''
-    q = replace_exact(q, mig_anchor, mig_gate, "UBI migration gate")
-    q = replace_regex(
-        q,
-        r'int ursus_ubi_reset_settings\(void\)\n\{.*?\n\}\n\n(?=static const char \*ursus_upd_stage_name)',
-        '''int ursus_ubi_reset_settings(void)\n{\n    printf("URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET_BACKEND\\n");\n    return -EROFS;\n}\n\n''',
-        "settings reset backend gate",
+    ubi = replace_regex(
+        ubi,
+        r'int ursus_ubi_migration_step\(void\)\n\{.*?\n\}\n\n(?=int ursus_ubi_migrate_from_stock\()',
+        '''int ursus_ubi_migration_step(void)\n{\n    printf("URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION_STEP\\n");\n    return -EROFS;\n}\n\n''',
+        "UBI migration step gate",
     )
-    write(ubi, q)
+    ubi_path.write_text(ubi, encoding="utf-8")
 
-    # TEST61's LED module contains MD/AN7581 raw SCU + MT7531 register access.
-    # MF2 must not guess AN7583 register mappings. Use only native DM LED labels
-    # present in the MF DTS and make the LAN LED helper/command inert.
-    l = read(led)
-    l = replace_exact(l, '#define LED_STATUS_RED "status-red"', '#define LED_STATUS_RED "red:wan"', "MF red LED label")
-    l = replace_exact(l, '#define LED_USB1_GREEN "usb1-green"', '#define LED_USB1_GREEN "green:usb-1"', "MF USB1 LED label")
-    l = replace_exact(l, '#define LED_USB2_GREEN "usb2-green"', '#define LED_USB2_GREEN "green:usb-2"', "MF USB2 LED label")
-    l = replace_regex(
-        l,
-        r'/\* Nokia XG-040G-MD / AN7581 LAN2-LAN4 front-panel PHY LED0 routing\..*?\n}\n\n(?=struct ursus_led_step)',
-        '''/* MF2 / AN7583: LAN link LEDs are left entirely to the native AN7583\n * Ethernet/PCS/device-tree path.  The MD raw SCU/MT7531 MMIO sequence is not\n * applicable to MF and is deliberately absent from this RAM-only build. */\nvoid ursus_lan_led_enable(void)\n{\n    printf("URSUS_MF2_LAN_LED_SETUP raw_mmio=disabled native_an7583=1\\n");\n}\n\n''',
-        "remove AN7581 LAN LED MMIO",
+    update = update_path.read_text(encoding="utf-8")
+    update = replace_regex(
+        update,
+        r'int ursus_fip_update_step\(void\)\n\{.*?\n\}\n\n(?=static int ursus_update_run\()',
+        '''int ursus_fip_update_step(void)\n{\n    printf("URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE_STEP\\n");\n    return -EROFS;\n}\n\n''',
+        "FIP update step gate",
     )
-    l = replace_regex(
-        l,
-        r'static int do_ursuslanled\(struct cmd_tbl \*cmdtp, int flag, int argc,\n\s+char \*const argv\[\]\)\n\{.*?U_BOOT_CMD\(ursuslanled, 2, 0, do_ursuslanled,\n\s+"Nokia LAN2-LAN4 hardware PHY LED routing",\n\s+"<status\|enable>"\);',
-        '''static int do_ursuslanled(struct cmd_tbl *cmdtp, int flag, int argc,\n                           char *const argv[])\n{\n    if (argc != 2)\n        return CMD_RET_USAGE;\n    if (strcmp(argv[1], "status") && strcmp(argv[1], "enable"))\n        return CMD_RET_USAGE;\n    printf("URSUS_MF2_LAN_LED_STATUS raw_mmio=disabled native_an7583=1 action=%s\\n",\n           argv[1]);\n    return CMD_RET_SUCCESS;\n}\n\nU_BOOT_CMD(ursuslanled, 2, 0, do_ursuslanled,\n           "MF2 AN7583 LAN LED diagnostics; raw MMIO disabled",\n           "<status|enable>");''',
-        "replace AN7581 LAN LED command",
+    update_path.write_text(update, encoding="utf-8")
+
+    web = web_path.read_text(encoding="utf-8")
+    web = replace_regex(
+        web,
+        r'static int ursus_factory_install\(void\)\n\{.*?\n\}\n\n(?=static int ursus_factory_reset_settings\()',
+        '''static int ursus_factory_install(void)\n{\n    printf("URSUS_MF2_READONLY_REJECT operation=FACTORY_INSTALL\\n");\n    return -EROFS;\n}\n\n''',
+        "factory install gate",
     )
-    write(led, l)
-
-    # StockBridge is MD/tcboot-specific and has no role in MF2 RAM bring-up.
-    # Do not carry its board-specific ABI or command into the AN7583 binary.
-    cm = read(cmd_makefile)
-    cm = replace_exact(
-        cm,
-        "obj-y += ursusweb.o ursusubi.o ursusdispatch.o ursusupdate.o ursusstock.o ursusled.o",
-        "obj-y += ursusweb.o ursusubi.o ursusdispatch.o ursusupdate.o ursusled.o",
-        "remove MD StockBridge object",
+    web = replace_regex(
+        web,
+        r'static int ursus_factory_reset_settings\(void\)\n\{.*?\n\}\n\n(?=static const char \*ursus_ubi_vol_type_name\()',
+        '''static int ursus_factory_reset_settings(void)\n{\n    printf("URSUS_MF2_READONLY_REJECT operation=FACTORY_SETTINGS_RESET\\n");\n    return -EROFS;\n}\n\n''',
+        "factory settings reset gate",
     )
-    write(cmd_makefile, cm)
+    web_path.write_text(web, encoding="utf-8")
 
-    gm = read(gpio_makefile)
-    gm = replace_exact(
-        gm,
-        "obj-y += ursus_an7581_safe_gpio.o",
-        "# MF2 AN7583: do not link the MD-only ursus_an7581_safe_gpio driver",
-        "remove AN7581 safe GPIO object",
-    )
-    write(gpio_makefile, gm)
+    dispatch = dispatch_path.read_text(encoding="utf-8")
+    old = '''    printf("URSUS_STOCK_BOOT_SELECTED\\n");\n    ret = run_command("ursusstockboot", 0);\n    printf(ret ? "URSUS_STOCKBOOT_RETURNED ret=%d\\n" :\n                 "URSUS_STOCKBOOT_UNEXPECTED_RETURN ret=%d\\n", ret);\n    return ursus_enter_webfailsafe("STOCKBOOT_RETURN", 0);\n'''
+    new = '''    printf("URSUS_MF2_STOCKBRIDGE_DISABLED board=AN7583 mode=RAM_ONLY\\n");\n    return ursus_enter_webfailsafe("MF2_NO_STOCKBRIDGE", 0);\n'''
+    if dispatch.count(old) != 1:
+        raise SystemExit(f"StockBridge fallback gate: expected one exact match, got {dispatch.count(old)}")
+    dispatch = dispatch.replace(old, new, 1)
+    dispatch_path.write_text(dispatch, encoding="utf-8")
 
-    vh = read(version_h)
-    vh2, n = re.subn(r'#define URSUS_VERSION "[^"]+"', f'#define URSUS_VERSION "{VERSION}"', vh, count=1)
-    if n != 1:
-        raise SystemExit("version header: expected one URSUS_VERSION")
-    write(version_h, vh2)
-    write(scm, f"-UrsusBoot-{VERSION}\n")
-
-    final_web = read(web)
-    final_ui = read(web_ui)
-    final_update = read(update)
-    final_ubi = read(ubi)
-    final_led = read(led)
-    final_cmd_makefile = read(cmd_makefile)
-    final_gpio_makefile = read(gpio_makefile)
-    checks = {
-        "mf identity": "Nokia XG-040G-MF" in final_web,
-        "mf soc": "Airoha AN7583" in final_web,
-        "readonly status": "persistent_write_enabled\\\":false" in final_web,
-        "POST gate": "MF2 READONLY: rejected HTTP POST" in final_web,
-        "settings command gate": "URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET" in final_web,
-        "settings backend gate": "URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET_BACKEND" in final_ubi,
-        "FIP gate": "URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE" in final_update,
-        "UBI update gate": "URSUS_MF2_READONLY_REJECT operation=UBI_UPDATE" in final_ubi,
-        "migration gate": "URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION" in final_ubi,
-        "no MD compatible in web": "nokia,xg-040g-md" not in final_web,
-        "no MD compatible in update": "nokia,xg-040g-md" not in final_update,
-        "no MD UI identity": "Nokia XG-040G-MD" not in final_ui and "nokia_xg-040g-md" not in final_ui,
-        "MF UI identity": "Nokia XG-040G-MF" in final_ui,
-        "MF UI SoC": "AN7583" in final_ui,
-        "MD stock FIP marker disabled": "XG040GMC2P5G" not in final_update,
-        "MD StockBridge object removed": "ursusstock.o" not in final_cmd_makefile,
-        "native MF red LED": 'LED_STATUS_RED "red:wan"' in final_led,
-        "native MF USB1 LED": 'LED_USB1_GREEN "green:usb-1"' in final_led,
-        "native MF USB2 LED": 'LED_USB2_GREEN "green:usb-2"' in final_led,
-        "AN7581 SCU base removed": "0x1fa20000" not in final_led,
-        "MT7531 raw base removed": "0x1fb58000" not in final_led,
-        "AN7581 raw helpers removed": "ursus_scu_read" not in final_led and "ursus_lanphy_c45_write" not in final_led,
-        "AN7581 safe GPIO object removed": "obj-y += ursus_an7581_safe_gpio.o" not in final_gpio_makefile,
-        "MF2 LAN LED no-op marker": "URSUS_MF2_LAN_LED_SETUP raw_mmio=disabled" in final_led,
-        "no multiline C printf literal": re.search(r'printf\("[^"\\]*\n', final_led) is None,
+    required = {
+        ubi_path: (
+            "URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET_BACKEND",
+            "URSUS_MF2_READONLY_REJECT operation=UBI_UPDATE_STEP",
+            "URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION_STEP",
+        ),
+        update_path: (
+            "URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE_STEP",
+        ),
+        web_path: (
+            "URSUS_MF2_READONLY_REJECT operation=FACTORY_INSTALL",
+            "URSUS_MF2_READONLY_REJECT operation=FACTORY_SETTINGS_RESET",
+        ),
+        dispatch_path: (
+            "URSUS_MF2_STOCKBRIDGE_DISABLED board=AN7583 mode=RAM_ONLY",
+        ),
     }
-    failed = [name for name, ok in checks.items() if not ok]
-    if failed:
-        raise SystemExit("MF2 transform invariant failed: " + ", ".join(failed))
-    print("MF2_RAMREADONLY_TRANSFORM=PASS")
+    for path, markers in required.items():
+        data = path.read_text(encoding="utf-8")
+        for marker in markers:
+            if marker not in data:
+                raise SystemExit(f"MF2 hardening marker missing in {path}: {marker}")
+
+    board_identity_files = (
+        root / "cmd/ursusweb.c",
+        root / "cmd/ursusupdate.c",
+        root / "cmd/ursusubi.c",
+        root / "cmd/ursusdispatch.c",
+        root / "include/ursusweb_ui.inc",
+        root / "cmd/Makefile",
+    )
+    forbidden = (
+        "Nokia XG-040G-MD",
+        "Nokia_XG-040G-MD",
+        "nokia_xg-040g-md",
+        "nokia,xg-040g-md",
+        "NOKIA_XG040GMD",
+        "URSUSBOOT_MD",
+        "TCBOOT_MD",
+    )
+    leaks = []
+    for path in board_identity_files:
+        data = path.read_text(encoding="utf-8")
+        for token in forbidden:
+            if token in data:
+                leaks.append(f"{path.relative_to(root)}:{token}")
+    if leaks:
+        raise SystemExit("MF2 board identity leak after transform: " + ", ".join(leaks))
+
+    print("MF2_ENTRYPOINT_HARDENING=PASS")
+
+
+def transform(root: Path) -> None:
+    root = root.resolve()
+    ui_include = root / "include/ursusweb_ui.inc"
+    compat_ui = root / "cmd/ursusweb_ui.inc"
+    if not ui_include.is_file():
+        raise SystemExit(f"missing TEST61 UI include: {ui_include}")
+    if compat_ui.exists() or compat_ui.is_symlink():
+        raise SystemExit(f"unexpected pre-existing compatibility UI path: {compat_ui}")
+
+    # The preserved implementation expected cmd/ursusweb_ui.inc. TEST61 stores
+    # it under include/. A temporary relative symlink keeps the implementation
+    # immutable while all writes still land in the canonical include file.
+    compat_ui.symlink_to(Path("../include/ursusweb_ui.inc"))
+    try:
+        impl = load_impl()
+        impl.transform(root)
+    finally:
+        if compat_ui.is_symlink():
+            compat_ui.unlink()
+
+    harden_entrypoints(root)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("source_root", type=Path)
     args = ap.parse_args()
-    transform(args.source_root.resolve())
+    transform(args.source_root)
     return 0
 
 
