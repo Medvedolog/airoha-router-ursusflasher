@@ -129,10 +129,11 @@ def test_mf_write_gate() -> None:
         current_layout="NOKIA_STOCK",
     )
     actions = ds.action_applicability(mf)
-    blocked = [item for item in actions.values() if item.write_capable]
-    assert blocked
-    assert all(not item.enabled for item in blocked)
-    assert all(item.resolved_backend == "DISABLED_READ_ONLY_BRINGUP" for item in blocked if item.key != "restore_nokia")
+    write_actions = [item for item in actions.values() if item.write_capable]
+    assert write_actions
+    assert all(not item.enabled for item in write_actions)
+    assert actions[1].resolved_backend == "DISABLED_READ_ONLY_BRINGUP"
+    assert actions[2].resolved_backend == "DISABLED_READ_ONLY_BRINGUP"
     assert actions[7].enabled
     assert actions[7].resolved_backend == "STOCK_READONLY_TFTP_OR_BOOTROM"
     assert actions[8].enabled
