@@ -25,6 +25,8 @@ IDENTITY_BOARD = b"Nokia XG-040G-MF"
 IDENTITY_SOC = b"AN7583"
 READY_MARKERS = (b"URSUS_WEBFAILSAFE_READY", b"URSUS_HTTP_LISTEN_OK port=80")
 LED_MARKER = b"URSUS_MF2_LED_RECOVERY_PATTERN"
+SHELL_READY_MARKER = b"URSUS_UART_SHELL_READY=1"
+PHY_PROBE_END = b"URSUS_MF2_HWTEST7_PHY_PROBE_END"
 HTTP_HOST = "192.168.1.1"
 HTTP_PORT = 80
 
@@ -75,6 +77,25 @@ def wait_host_http(attempts: int = 10, delay: float = 0.5) -> tuple[bool, str]:
     return False, last_error
 
 
+def run_phy_probe(serial_port: proven.RecoverySerial, log) -> bool:
+    print("[PROBE] Running read-only UART command: ursusmfphy")
+    serial_port.write(b"ursusmfphy\r\n")
+    deadline = time.time() + 10
+    tail = b""
+    while time.time() < deadline:
+        data = serial_port.read(4096, 0.5)
+        if not data:
+            continue
+        log.write(data)
+        log.flush()
+        print(data.decode("utf-8", "replace"), end="", flush=True)
+        tail = (tail + data)[-32768:]
+        if _seen(tail, PHY_PROBE_END):
+            return b"result=OK" in tail
+    print("\n[CHECK REQUIRED] HWTEST7 PHY probe did not finish within 10 s.")
+    return False
+
+
 def main() -> int:
     print("UrsusBoot-MF MF2 HWTEST7 RAMBOOT / READ-ONLY PHY PROBE")
     print("Nokia XG-040G-MF / Airoha AN7583")
@@ -112,6 +133,7 @@ def main() -> int:
             led_seen = False
             web_ready = False
             http_ready = False
+            shell_ready = False
 
             while time.time() < deadline:
                 data = serial_port.read(4096, 0.5)
@@ -127,7 +149,8 @@ def main() -> int:
                 led_seen = led_seen or _seen(tail, LED_MARKER)
                 web_ready = web_ready or _seen(tail, READY_MARKERS[0])
                 http_ready = http_ready or _seen(tail, READY_MARKERS[1])
-                if web_ready and http_ready:
+                shell_ready = shell_ready or _seen(tail, SHELL_READY_MARKER)
+                if web_ready and http_ready and shell_ready:
                     break
 
             print("\n")
@@ -143,14 +166,22 @@ def main() -> int:
                 print("[INFO] Native-DM MF2 recovery LED marker was not observed in this build/log.")
 
             host_http_ok = False
+            probe_ok = False
             if web_ready and http_ready:
                 print("[PASS] UART reports WebFailsafe listen state at 192.168.1.1:80.")
                 print("[CHECK] Verifying TCP/80 reachability from this computer...")
                 host_http_ok, error = wait_host_http()
                 if host_http_ok:
                     print("[PASS] Host TCP connection to 192.168.1.1:80 succeeded.")
-                    print("HWTEST7 PHY snapshot command on UART: ursusmfphy")
-                    print("Run it with cable states changed on LAN2, LAN3 and LAN4; it only reads PHY/LED0 registers.")
+                    if shell_ready:
+                        probe_ok = run_phy_probe(serial_port, log)
+                        if probe_ok:
+                            print("\n[PASS] Initial LAN2/LAN3/LAN4 read-only PHY snapshot completed.")
+                        else:
+                            print("\n[CHECK REQUIRED] Initial PHY snapshot returned an error.")
+                    else:
+                        print("[CHECK REQUIRED] UART shell-ready marker was not observed; PHY probe was not sent.")
+                    print("For additional cable states, run 'ursusmfphy' again from UART; it only reads PHY/LED0 registers.")
                 else:
                     print(f"[CHECK REQUIRED] UART says HTTP is listening but host TCP/80 is unreachable: {error}")
                     print("This is a network-path failure; do not count UART listen markers alone as Web PASS.")
@@ -159,7 +190,7 @@ def main() -> int:
                 print("Do not write NAND. Keep the UART log for analysis.")
 
             print(f"UART log: {log_path}")
-            return 0 if identity_ok and web_ready and http_ready and host_http_ok else 2
+            return 0 if identity_ok and web_ready and http_ready and host_http_ok and probe_ok else 2
     finally:
         serial_port.close()
 
