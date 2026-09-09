@@ -1,5 +1,5 @@
 {
-  "version": 11,
+  "version": 12,
   "layouts": {
     "STOCK": {
       "ru": "Заводская прошивка Nokia",
@@ -233,8 +233,8 @@
       "en": "UrsusBoot responds, but the model was not confirmed"
     },
     "STOCK_MODEL_SOC_MISMATCH": {
-      "ru": "Заводской веб-интерфейс отвечает, но модель и SoC не совпали с XG-040G-MD / AN7581",
-      "en": "The factory web interface responds, but the model and SoC do not match XG-040G-MD / AN7581"
+      "ru": "Заводской веб-интерфейс отвечает, но пара модель/SoC не совпала с поддерживаемым профилем MD/AN7581 или MF/AN7583",
+      "en": "The factory web interface responds, but the model/SoC pair does not match the supported MD/AN7581 or MF/AN7583 profile"
     },
     "OPENWRT_BOARD_LAYOUT_UNCONFIRMED": {
       "ru": "OpenWrt отвечает по SSH, но модель платы и разметка не подтверждены",
@@ -252,13 +252,17 @@
       "ru": "Устройство отвечает по сети, но определить его точно не удалось",
       "en": "The device responds over the network, but it could not be identified unambiguously"
     },
-    "UNKNOWN": {
-      "ru": "Причина не определена",
-      "en": "Reason not determined"
-    },
     "EXECUTION_ENVIRONMENT_UNCONFIRMED": {
       "ru": "OpenWrt подтверждена, но не удалось определить, запущена она из flash-памяти или из оперативной памяти",
       "en": "OpenWrt was confirmed, but it was not possible to determine whether it is running from flash or RAM"
+    },
+    "BOARD_PROFILE_WRITE_DISABLED": {
+      "ru": "Профиль платы подключён только для чтения; persistent write ещё не разрешён аппаратной приёмкой",
+      "en": "The board profile is read-only; persistent writes are not yet authorized by hardware acceptance"
+    },
+    "UNKNOWN": {
+      "ru": "Причина не определена",
+      "en": "Reason not determined"
     }
   },
   "execution_environments": {
