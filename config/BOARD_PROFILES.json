@@ -64,7 +64,8 @@
       "write_policy": {
         "mf1_enabled": true,
         "persistent_write_enabled": false,
-        "backend": "DISABLED_READ_ONLY_BRINGUP",
+        "allowed_write_actions": ["restore_nokia"],
+        "backend": "DISABLED_READ_ONLY_BRINGUP_EXCEPT_PROVEN_STOCK_RESTORE",
         "bl2_last_required": true,
         "automatic_alternate_writer": false
       },
@@ -77,6 +78,8 @@
         "ubi_volume_write": "HW_PROVEN",
         "bootloader_replace_bl2_last": "HW_PROVEN",
         "permanent_install": "HW_PROVEN",
+        "stock_restore_uart": "HW_PROVEN_MEDVE_BACKEND",
+        "stock_restore_ram_recovery": "BACKEND_PRESENT_REQUIRES_URSUS_INTEGRATION_QA",
         "ursusboot_an7583": "NOT_YET_PROVEN"
       }
     }
