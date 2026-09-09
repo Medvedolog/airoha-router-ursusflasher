@@ -31,6 +31,30 @@ jobs:
           test -f "$S/arch/arm/dts/an7583-nokia-xg-040g-mf.dts"
           grep -q 'CONFIG_TARGET_AN7583=y' "$S/configs/an7583_nokia_xg-040g-mf_defconfig"
           grep -q 'compatible = "nokia,xg-040g-mf", "airoha,an7583"' "$S/arch/arm/dts/an7583-nokia-xg-040g-mf.dts"
+      - name: Trace generated Ursus web UI
+        run: |
+          set -euxo pipefail
+          S=work/mf2-source-probe/src
+          O=work/mf2-source-probe/out
+          {
+            echo '=== files matching ursus/web/ui/html ==='
+            find "$S" -type f \( -iname '*ursus*' -o -iname '*web*' -o -iname '*ui*' -o -iname '*.html' -o -iname '*.inc' \) | sort
+            echo '=== references to generated include ==='
+            grep -R -n -F 'ursusweb_ui.inc' "$S" --exclude='*.o' --exclude='*.bin' || true
+            echo '=== source of exact MD UI strings ==='
+            grep -R -n -E 'Nokia XG-040G-MD|openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin' "$S" --exclude='*.o' --exclude='*.bin' || true
+            echo '=== likely generators/rules ==='
+            grep -R -n -E 'ursusweb_ui|bin2c|xxd|filechk|html.*inc|web.*inc' "$S/Makefile" "$S/scripts" "$S/cmd" 2>/dev/null || true
+          } | tee "$O/WEB_UI_GENERATOR.txt"
+          while IFS= read -r f; do
+            case "$f" in
+              *.html|*.htm|*.js|*.css|*.py|*.sh|*.mk|*/Makefile|*.inc)
+                rel=${f#"$S/"}
+                mkdir -p "$O/generator/$(dirname "$rel")"
+                cp "$f" "$O/generator/$rel"
+                ;;
+            esac
+          done < <(grep -R -l -E 'Nokia XG-040G-MD|ursusweb_ui.inc|openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin' "$S" --exclude='*.o' --exclude='*.bin' || true)
       - name: Collect UrsusBoot writer API and board-specific entry points
         run: |
           set -euxo pipefail
@@ -52,7 +76,7 @@ jobs:
             echo '=== U_BOOT_CMD ==='
             grep -R -n 'U_BOOT_CMD' "$S/cmd" | grep -E 'ursus|ubi|mtd' || true
             echo '=== persistent APIs/commands in every Ursus source ==='
-            grep -R -n -E 'saveenv|env_save|mtd_(erase|write)|mtd erase|mtd write|ubi_(create|remove|write|update|detach|attach)|ubi (write|create|remove|rename|detach)|ursus_.*(start|update|migration)' "$S"/cmd/ursus*.c || true
+            grep -R -n -E 'saveenv|env_save|mtd_(erase|write)|mtd erase|mtd write|ubi_(create|remove|write|update|detach|attach)|ubi (write|create|remove|rename|detach)|ursus_.*(start|step|update|migration)' "$S"/cmd/ursus*.c || true
             echo '=== API routes ==='
             grep -n -E 'GET /api/|POST /api/' "$S/cmd/ursusweb.c" || true
             echo '=== AN7581 safe GPIO references ==='
