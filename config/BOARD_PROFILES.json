@@ -79,8 +79,8 @@
         "bootloader_replace_bl2_last": "HW_PROVEN",
         "permanent_install": "HW_PROVEN",
         "stock_restore_uart": "HW_PROVEN_MEDVE_BACKEND",
-        "stock_restore_ram_recovery": "BACKEND_PRESENT_REQUIRES_URSUS_INTEGRATION_QA",
-        "ursusboot_an7583": "NOT_YET_PROVEN"
+        "stock_restore_ram_recovery": "URSUS_STATIC_QA_PASS_HW_ACCEPTANCE_REQUIRED",
+        "ursusboot_an7583": "MF2_HWTEST4_STATIC_QA_PASS_HW_TEST_CANDIDATE"
       }
     }
   }
