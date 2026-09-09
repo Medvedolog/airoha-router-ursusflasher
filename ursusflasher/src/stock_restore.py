@@ -4,6 +4,7 @@ from __future__ import annotations
 import builtins
 import os
 import re
+import shlex
 import threading
 from contextlib import contextmanager
 from pathlib import Path
@@ -37,6 +38,67 @@ def _require_family(value: str) -> str:
     return family
 
 
+def _verify_exact(path: Path, size: int, digest: str, label: str) -> None:
+    if not path.is_file():
+        raise proven.Error(tr(f"отсутствует {label}: {path}", f"missing {label}: {path}"))
+    actual_size = path.stat().st_size
+    if actual_size != int(size):
+        raise proven.Error(tr(
+            f"неверный размер {label}: {actual_size} != {size}",
+            f"wrong {label} size: {actual_size} != {size}",
+        ))
+    actual_sha = proven.sha_file(path).lower()
+    if actual_sha != str(digest).lower():
+        raise proven.Error(tr(
+            f"SHA256 {label} не совпадает: {actual_sha} != {digest}",
+            f"{label} SHA256 mismatch: {actual_sha} != {digest}",
+        ))
+
+
+def _verify_stock_restore_runtime() -> None:
+    """Verify the narrow payload set actually used by EXPERT item 6.
+
+    Do not call the inherited MedveFlasher ``verify_kit()`` here: that verifier
+    also requires its installer bundles and Medve release identity, neither of
+    which is part of the UrsusFlasher stock-restore contract.
+    """
+    _verify_exact(
+        proven.RECOVERY_PRELOADER,
+        proven.BACKUP_RECOVERY_PRELOADER_SIZE,
+        proven.RECOVERY_PRELOADER_SHA,
+        "MD BootROM recovery preloader",
+    )
+    _verify_exact(proven.RECOVERY_FIP, proven.RECOVERY_FIP_SIZE, proven.RECOVERY_FIP_SHA, "MD RECOVERY_SAFE FIP")
+    _verify_exact(
+        proven.RECOVERY_INITRAMFS,
+        proven.RECOVERY_INITRAMFS_SIZE,
+        proven.RECOVERY_INITRAMFS_SHA,
+        "MD stock recovery initramfs",
+    )
+    _verify_exact(
+        proven.RECOVERY_TFTP_CLIENT, 7792, proven.RECOVERY_TFTP_CLIENT_SHA,
+        "AArch64 nokia-tftp",
+    )
+    _verify_exact(
+        proven.RECOVERY_SCP_CLIENT, 6072, proven.RECOVERY_SCP_CLIENT_SHA,
+        "AArch64 nokia-scp",
+    )
+    proven._load_mf_snapshot_metadata()
+    _verify_exact(
+        proven.MF_RECOVERY_PRELOADER, proven.MF_RECOVERY_PRELOADER_SIZE,
+        proven.MF_RECOVERY_PRELOADER_SHA, "MF BootROM recovery preloader",
+    )
+    _verify_exact(
+        proven.MF_RECOVERY_FIP, proven.MF_RECOVERY_FIP_SIZE,
+        proven.MF_RECOVERY_FIP_SHA, "MF RECOVERY_SAFE FIP",
+    )
+    _verify_exact(
+        proven.MF_STOCK_RECOVERY_INITRAMFS, proven.MF_STOCK_RECOVERY_INITRAMFS_SIZE,
+        proven.MF_STOCK_RECOVERY_INITRAMFS_SHA, "MF stock recovery initramfs",
+    )
+    proven._write_session_only("[RESTORE] narrow runtime payload verification PASS md=1 mf=1")
+
+
 def _recovery_initramfs(family: str) -> tuple[Path, str]:
     family = _require_family(family)
     profile = proven.recovery_profile_for_family(family)
@@ -58,14 +120,7 @@ def _recovery_initramfs(family: str) -> tuple[Path, str]:
 
 @contextmanager
 def _legacy_restore_confirmation_adapter(*, already_confirmed: bool = False):
-    """Translate the retained Medve backend codeword into UrsusFlasher's one y/N.
-
-    The proven backend intentionally remains byte/logic compatible with its
-    MedveFlasher lineage.  UrsusFlasher owns operator ceremony: exactly one
-    ordinary confirmation for a destructive stock-restore operation.  This
-    adapter intercepts only the legacy RESTORE STOCK BACKUP prompt; every other
-    input is delegated unchanged.
-    """
+    """Translate the retained Medve backend codeword into UrsusFlasher's one y/N."""
     original = getattr(proven, "input", builtins.input)
     had_override = "input" in proven.__dict__
     seen = False
@@ -121,13 +176,43 @@ def _one_yn_before_recovery_handoff(*, family: str, backup_sha: str, image: Path
     return answer in ("y", "yes", "д", "да")
 
 
-def _boot_family_recovery_once(host: str, local_ip: str, router_ip: str, family: str, image: Path) -> None:
-    """One verified production-OpenWrt -> U-Boot -> RAM recovery handoff.
+def _arm_one_shot_recovery_boot_once(host: str, expected_bootcmd: str, local_ip: str, router_ip: str, bootfile: str) -> None:
+    """Perform exactly one persistent bootcmd write and verify it.
 
-    Unlike the retained Medve convenience loop this Ursus path never performs an
-    automatic second persistent bootcmd write after a failed handoff.  The normal
-    bootcmd is embedded into the one-shot command and restored before TFTP.
+    A transport/status failure after ``fw_setenv`` is WRITE_STATE_UNKNOWN and
+    must never trigger another automatic writer. U-Boot restores the ordinary
+    bootcmd before attempting TFTP, so network retries do not rewrite flash.
     """
+    retry_numbers = " ".join(str(i) for i in range(1, 21))
+    temporary = (
+        f"setenv bootcmd '{expected_bootcmd}'; saveenv; "
+        "setenv ethaddr 02:00:00:04:0d:10; setenv eth1addr 02:00:00:04:0d:11; "
+        f"setenv ipaddr {router_ip}; setenv serverip {local_ip}; setenv netmask 255.255.255.0; "
+        "setenv autoload no; "
+        f"for n in {retry_numbers}; do echo NOKIA_RECOVERY_TFTP_ATTEMPT_$n; "
+        f"tftpboot 0x90000000 {bootfile} && bootm 0x90000000#config-1; sleep 2; done; "
+        "run boot_ubi"
+    )
+    command = (
+        f"fw_setenv bootcmd {shlex.quote(temporary)} && sync && "
+        "printf 'ARMED_BOOTCMD='; fw_printenv -n bootcmd"
+    )
+    rc, output = proven.ssh_run(host, command, timeout=120, allow_disconnect=True, quiet=True)
+    values = proven.parse_shell_assignments(output, ("ARMED_BOOTCMD",))
+    if rc == 0 and values.get("ARMED_BOOTCMD") == temporary:
+        proven._write_session_only("[RESTORE] one-shot bootcmd persistent write COMPLETION_PROVEN")
+        return
+    proven._write_session_only(
+        f"[RESTORE] one-shot bootcmd WRITE_STATE_UNKNOWN rc={rc} verified={values.get('ARMED_BOOTCMD') == temporary}"
+    )
+    raise proven.Error(tr(
+        "не удалось доказать запись одноразового bootcmd; состояние записи неизвестно. Автоматический повтор запрещён",
+        "the one-shot bootcmd write could not be proven; write state is unknown. Automatic retry is forbidden",
+    ))
+
+
+def _boot_family_recovery_once(host: str, local_ip: str, router_ip: str, family: str, image: Path) -> None:
+    """One verified production-OpenWrt -> U-Boot -> RAM recovery handoff."""
     family = _require_family(family)
     if proven.wait_for_stable_openwrt(host, 120, expected_mode="production") != "production":
         raise proven.Error(tr(
@@ -162,8 +247,7 @@ def _boot_family_recovery_once(host: str, local_ip: str, router_ip: str, family:
     thread = threading.Thread(
         target=proven.serve_tftp_get,
         args=(local_ip, 69, image, bootfile, router_ip, ready, result),
-        kwargs={"timeout": 360, "maximum_block_size": 1468},
-        daemon=True,
+        kwargs={"timeout": 360, "maximum_block_size": 1468}, daemon=True,
     )
     thread.start()
     if not ready.wait(10):
@@ -174,11 +258,10 @@ def _boot_family_recovery_once(host: str, local_ip: str, router_ip: str, family:
     proven._write_session_only(
         f"[RESTORE] one-shot family={family} recovery={image.name} bootfile={bootfile} server={local_ip} router={router_ip}"
     )
-    proven.arm_one_shot_recovery_boot(host, expected_normal_bootcmd, local_ip, router_ip, bootfile)
+    _arm_one_shot_recovery_boot_once(host, expected_normal_bootcmd, local_ip, router_ip, bootfile)
     try:
         proven.ssh_run(host, "sync; reboot -f", timeout=30, allow_disconnect=True, quiet=True)
     except proven.Error:
-        # A verified reboot command commonly tears down SSH before status return.
         pass
 
     while thread.is_alive() and not result.error:
@@ -213,7 +296,7 @@ def _boot_family_recovery_once(host: str, local_ip: str, router_ip: str, family:
 
 def restore_from_running(state) -> None:
     """Restore stock without UART from verified production OpenWrt/recovery."""
-    proven.verify_kit()
+    _verify_stock_restore_runtime()
     state_family = _require_family(_family_from_state(state) or "")
     host = str(getattr(state, "host", "") or "192.168.1.1")
     proven.transition_lan_policy_notice()
@@ -238,27 +321,18 @@ def restore_from_running(state) -> None:
 
     if mode == "production":
         image, image_sha = _recovery_initramfs(state_family)
-        if not _one_yn_before_recovery_handoff(
-            family=state_family,
-            backup_sha=backup_sha,
-            image=image,
-            image_sha=image_sha,
-        ):
+        if not _one_yn_before_recovery_handoff(family=state_family, backup_sha=backup_sha, image=image, image_sha=image_sha):
             ui.status(tr("СТОП", "STOP"), tr("Восстановление отменено; persistent write не начинался.", "Restore cancelled; no persistent write was started."))
             return
         try:
             _boot_family_recovery_once(host, local_ip, host, state_family, image)
         except PermissionError as exc:
             raise proven.Error(tr("нет прав на UDP/69; в Linux запустите UrsusFlasher через sudo", "permission denied for UDP/69; on Linux run UrsusFlasher with sudo")) from exc
-        # The single y/N above authorized this exact backup/family operation.
-        # The backend repeats live recovery/family/layout preflight before NAND.
         with _legacy_restore_confirmation_adapter(already_confirmed=True):
             proven.perform_stock_restore_over_ssh(host, local_ip, restore_port, backup_dir, payload_dir, manifest)
         return
 
     if mode == "recovery":
-        # No persistent handoff write is needed. Let the backend finish its live
-        # recovery preflight, then translate its single old codeword prompt to y/N.
         with _legacy_restore_confirmation_adapter(already_confirmed=False):
             proven.perform_stock_restore_over_ssh(host, local_ip, restore_port, backup_dir, payload_dir, manifest)
         return
@@ -268,8 +342,14 @@ def restore_from_running(state) -> None:
 
 def restore_over_uart() -> None:
     """BootROM/XMODEM restore using the family-aware proven backend."""
-    with _legacy_restore_confirmation_adapter(already_confirmed=False):
-        proven.stock_recovery_wizard()
+    _verify_stock_restore_runtime()
+    original_verify = proven.verify_kit
+    proven.verify_kit = _verify_stock_restore_runtime
+    try:
+        with _legacy_restore_confirmation_adapter(already_confirmed=False):
+            proven.stock_recovery_wizard()
+    finally:
+        proven.verify_kit = original_verify
 
 
 def restore_nokia(state) -> None:
