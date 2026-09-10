@@ -16,17 +16,18 @@ PRELOADER = PAYLOAD_DIR / "ursusboot-mf-0.1.0-mf2-ram1-uart-preloader.bin"
 FIP = PAYLOAD_DIR / "ursusboot-mf-0.1.0-mf2-ram1-ram.fip"
 PRELOADER_SIZE = 118322
 PRELOADER_SHA256 = "c2ac1c183b18bc34632c958dfe0bd1dfdfb607f090e39c41126956641893362f"
-# HWTEST7: HWTEST4/HWTEST6 network baseline + LAN4 pinmux + read-only switch-MDIO probe.
-FIP_SIZE = 294690
-FIP_SHA256 = "0aa931677f9e84b9130e660f44f4e62a190409a7e4294b19cb32d1d8ceef62c5"
+# HWTEST8: HWTEST4/HWTEST6 network baseline + LAN2-4 native C45 LED0 fix.
+FIP_SIZE = 295277
+FIP_SHA256 = "9c7100ade13ac87be1a9a45b40174bba8ecf6c7f4987c0b20e7493f4659c2191"
 
-IDENTITY_VERSION = b"0.1.0-mf2-ram1+gcf25eeba"
+IDENTITY_VERSION = b"0.1.0-mf2-ram1+geac846e2"
 IDENTITY_BOARD = b"Nokia XG-040G-MF"
 IDENTITY_SOC = b"AN7583"
 READY_MARKERS = (b"URSUS_WEBFAILSAFE_READY", b"URSUS_HTTP_LISTEN_OK port=80")
 LED_MARKER = b"URSUS_MF2_LED_RECOVERY_PATTERN"
 SHELL_READY_MARKER = b"URSUS_UART_SHELL_READY=1"
 PHY_PROBE_END = b"URSUS_MF2_HWTEST7_PHY_PROBE_END"
+LED_FIX_END = b"URSUS_MF2_HWTEST8_LED_END result=OK"
 HTTP_HOST = "192.168.1.1"
 HTTP_PORT = 80
 
@@ -92,16 +93,16 @@ def run_phy_probe(serial_port: proven.RecoverySerial, log) -> bool:
         tail = (tail + data)[-32768:]
         if _seen(tail, PHY_PROBE_END):
             return b"result=OK" in tail
-    print("\n[CHECK REQUIRED] HWTEST7 PHY probe did not finish within 10 s.")
+    print("\n[CHECK REQUIRED] HWTEST8 post-fix PHY readback probe did not finish within 10 s.")
     return False
 
 
 def main() -> int:
-    print("UrsusBoot-MF MF2 HWTEST7 RAMBOOT / READ-ONLY PHY PROBE")
+    print("UrsusBoot-MF MF2 HWTEST8 RAMBOOT / LAN2-4 LED FIX")
     print("Nokia XG-040G-MF / Airoha AN7583")
-    print("No erase/write/saveenv or PHY configuration write is issued by this launcher.\n")
+    print("Persistent storage writes remain disabled. HWTEST8 changes only volatile PHY LED0 registers.\n")
     verify(PRELOADER, PRELOADER_SIZE, PRELOADER_SHA256, "AN7583 UART preloader")
-    verify(FIP, FIP_SIZE, FIP_SHA256, "UrsusBoot-MF MF2 HWTEST7 RAM FIP")
+    verify(FIP, FIP_SIZE, FIP_SHA256, "UrsusBoot-MF MF2 HWTEST8 RAM FIP")
     print(f"[OK] preloader SHA256 {PRELOADER_SHA256}")
     print(f"[OK] MF2 FIP SHA256   {FIP_SHA256}")
 
@@ -123,7 +124,7 @@ def main() -> int:
             proven.wait_bootrom_xmodem(serial_port, log, "UrsusBoot-MF MF2 FIP")
             proven.xmodem_send(serial_port, FIP, "UrsusBoot-MF MF2 BL31+U-Boot FIP (RAM)", log)
 
-            print("\n[TRANSFER COMPLETE] MF2 HWTEST7 was delivered to RAM.")
+            print("\n[TRANSFER COMPLETE] MF2 HWTEST8 was delivered to RAM.")
             print("Monitoring UART through WebFailsafe startup; UART listen markers alone are not treated as network PASS.")
             deadline = time.time() + 120
             tail = b""
@@ -134,6 +135,7 @@ def main() -> int:
             web_ready = False
             http_ready = False
             shell_ready = False
+            led_fix_seen = False
 
             while time.time() < deadline:
                 data = serial_port.read(4096, 0.5)
@@ -150,20 +152,26 @@ def main() -> int:
                 web_ready = web_ready or _seen(tail, READY_MARKERS[0])
                 http_ready = http_ready or _seen(tail, READY_MARKERS[1])
                 shell_ready = shell_ready or _seen(tail, SHELL_READY_MARKER)
+                led_fix_seen = led_fix_seen or _seen(tail, LED_FIX_END)
                 if web_ready and http_ready and shell_ready:
                     break
 
             print("\n")
             identity_ok = version_seen and (board_seen or soc_seen)
             if identity_ok:
-                print("[PASS] UrsusBoot-MF HWTEST7 identity observed on UART.")
+                print("[PASS] UrsusBoot-MF HWTEST8 identity observed on UART.")
             else:
-                print("[CHECK REQUIRED] HWTEST7 identity was not fully observed on UART.")
+                print("[CHECK REQUIRED] HWTEST8 identity was not fully observed on UART.")
 
             if led_seen:
                 print("[PASS] Native-DM MF2 recovery LED sequence was started.")
             else:
                 print("[INFO] Native-DM MF2 recovery LED marker was not observed in this build/log.")
+
+            if led_fix_seen:
+                print("[PASS] HWTEST8 LAN2/LAN3/LAN4 LED0 write+readback completed on UART.")
+            else:
+                print("[INFO] Exact HWTEST8 LED_END marker was not observed (UART corruption can hide it); network/visual checks still decide hardware acceptance.")
 
             host_http_ok = False
             probe_ok = False
@@ -176,12 +184,12 @@ def main() -> int:
                     if shell_ready:
                         probe_ok = run_phy_probe(serial_port, log)
                         if probe_ok:
-                            print("\n[PASS] Initial LAN2/LAN3/LAN4 read-only PHY snapshot completed.")
+                            print("\n[PASS] Post-fix LAN2/LAN3/LAN4 PHY snapshot completed; expect led0_on=0xc007 and led0_blink=0x003f.")
                         else:
                             print("\n[CHECK REQUIRED] Initial PHY snapshot returned an error.")
                     else:
                         print("[CHECK REQUIRED] UART shell-ready marker was not observed; PHY probe was not sent.")
-                    print("For additional cable states, run 'ursusmfphy' again from UART; it only reads PHY/LED0 registers.")
+                    print("For LAN2/LAN3/LAN4 cable tests, run 'ursusmfphy' again; it remains read-only and link state should follow the moved cable.")
                 else:
                     print(f"[CHECK REQUIRED] UART says HTTP is listening but host TCP/80 is unreachable: {error}")
                     print("This is a network-path failure; do not count UART listen markers alone as Web PASS.")
