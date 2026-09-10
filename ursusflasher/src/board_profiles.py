@@ -27,8 +27,17 @@ def load_catalog() -> dict[str, Any]:
     return data
 
 
+def load_profiles() -> dict[str, Any]:
+    """Return the validated board-profile mapping.
+
+    Keep callers on the same catalog validation path instead of having package
+    QA or host dispatchers parse BOARD_PROFILES.json independently.
+    """
+    return load_catalog()["profiles"]
+
+
 def get_profile(key: str) -> dict[str, Any]:
-    profiles = load_catalog()["profiles"]
+    profiles = load_profiles()
     try:
         profile = profiles[key]
     except KeyError as exc:
@@ -50,7 +59,7 @@ def match_profile(*, model: str = "", soc: str = "", board: str = "") -> tuple[s
     it must match the same profile.  This is deliberately read-only identity
     classification; write authorization belongs to the selected backend.
     """
-    profiles = load_catalog()["profiles"]
+    profiles = load_profiles()
     for key, profile in profiles.items():
         model_tokens = list(profile.get("model_tokens") or [])
         board_tokens = list(profile.get("openwrt_board_tokens") or [])
