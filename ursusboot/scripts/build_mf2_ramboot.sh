@@ -5,6 +5,8 @@ WORK=${URSUS_BUILD_DIR:-"$ROOT/work/mf-ramboot"}
 SDK_BUNDLE="$ROOT/toolchains/openwrt-sdk-r35906/openwrt-sdk-r35906.tar.zst"
 SOURCE_BUNDLE="$ROOT/ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst"
 CONFIG="$ROOT/ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig"
+COMMON_CONFIG="$ROOT/ursusboot/configs/ursusboot-common.cfg"
+CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
 ENVFILE="$ROOT/ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_env"
 TRANSFORM="$ROOT/ursusboot/scripts/mf2_ramreadonly_transform.py"
 REPACK="$ROOT/ursusboot/scripts/mf2_repack_from_medve.py"
@@ -22,6 +24,7 @@ EXPECTED_DONOR_SIZE=339010
 EXPECTED_DONOR_SHA=8bfe8870e44923a463a3ed66c8b1906214f5c820fd8c15865c63430185de8bb2
 
 for x in tar make gcc perl python3 sha256sum strings patch stat sed; do command -v "$x" >/dev/null; done
+for f in "$COMMON_CONFIG" "$CONFIG_MERGER"; do [ -f "$f" ] || { echo "shared UrsusBoot config input missing: $f" >&2; exit 1; }; done
 [ -f "$SOURCE_BUNDLE" ] || { echo "TEST61 source snapshot missing" >&2; exit 1; }
 [ -f "$CONFIG" ] || { echo "MF config missing" >&2; exit 1; }
 [ -f "$ENVFILE" ] || { echo "MF env missing" >&2; exit 1; }
@@ -55,6 +58,7 @@ printf '%s\n' "-UrsusBoot-${VERSION}" > "$WORK/u-boot/.scmversion"
 sed -E -i "s/^#define URSUS_VERSION \"[^\"]+\"/#define URSUS_VERSION \"${VERSION}\"/" "$WORK/u-boot/include/ursus_version.h"
 cp "$ENVFILE" "$WORK/u-boot/defenvs/an7583_nokia_xg-040g-mf_env"
 cp "$CONFIG" "$WORK/u-boot/.config"
+python3 "$CONFIG_MERGER" --config "$WORK/u-boot/.config" "$COMMON_CONFIG"
 
 # Source-level board separation before compiler/linker can hide dead MD code.
 ! grep -q '0x1fa20000' "$WORK/u-boot/cmd/ursusled.c" || { echo "AN7581 SCU raw MMIO survived MF transform" >&2; exit 1; }
@@ -75,6 +79,7 @@ export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$RELEASE_EPO
 
 cd "$WORK/u-boot"
 make olddefconfig
+python3 "$CONFIG_MERGER" --check-only --config .config "$COMMON_CONFIG"
 
 # Recovery contract: MTD/SPI-NAND drivers, XMODEM receive and the generic raw
 # MTD command are intentionally available from the UART shell. Destructive
@@ -85,7 +90,7 @@ for sym in CONFIG_CMD_MTD_MARKBAD CONFIG_CMD_MTD_NAND_WRITE_TEST CONFIG_CMD_UBI 
         exit 1
     fi
 done
-for sym in CONFIG_TARGET_AN7583 CONFIG_MTD CONFIG_DM_MTD CONFIG_MTD_SPI_NAND CONFIG_CMD_MTD CONFIG_CMD_LOADB CONFIG_NET_LWIP CONFIG_AIROHA_ETH CONFIG_PCS_AIROHA_AN7583 CONFIG_PINCTRL_AIROHA_AN7583 CONFIG_ENV_IS_NOWHERE CONFIG_CONSOLE_RECORD; do
+for sym in CONFIG_TARGET_AN7583 CONFIG_MTD CONFIG_DM_MTD CONFIG_MTD_SPI_NAND CONFIG_CMD_MTD CONFIG_CMD_LOADB CONFIG_CMD_TFTPBOOT CONFIG_NET_LWIP CONFIG_AIROHA_ETH CONFIG_PCS_AIROHA_AN7583 CONFIG_PINCTRL_AIROHA_AN7583 CONFIG_ENV_IS_NOWHERE CONFIG_CONSOLE_RECORD; do
     grep -q "^${sym}=y" .config || { echo "Required MF recovery symbol missing: ${sym}" >&2; exit 1; }
 done
 
@@ -152,8 +157,10 @@ printf '%s\n' \
   "MEDVE_FIP_COMPRESSOR=lzma_encode+lzma1ext_noeopm.c" \
   "UART_PRELOADER_SHA256=${EXPECTED_PRELOADER_SHA}" \
   "DONOR_SAFE_FIP_SHA256=${EXPECTED_DONOR_SHA}" \
+  "COMMON_KCONFIG=PASS" \
   "RAW_MTD_CLI=ENABLED" \
   "SERIAL_XMODEM_LOAD=ENABLED" \
+  "TFTP_CLIENT=ENABLED" \
   "HIGH_LEVEL_FIP_UBI_WRITERS=REJECTED" \
   "HTTP_POST=REJECTED" \
   "ENV=NOWHERE" \
