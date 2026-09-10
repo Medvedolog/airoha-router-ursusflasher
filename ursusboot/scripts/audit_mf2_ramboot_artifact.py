@@ -26,12 +26,12 @@ FORBIDDEN_BOARD_TOKENS = (
     b"Airoha EN8811H",
 )
 
+# The recovery RAM image deliberately exposes only generic UART/XMODEM + raw
+# MTD tools. High-level FIP/UBI/settings writers remain blocked.
 REQUIRED_BINARY_MARKERS = (
-    b"0.1.0-mf2-ram1",
+    b"0.1.0-TEST61",
     b"Nokia XG-040G-MF",
     b"Airoha AN7583",
-    b"MF2 RAM-only build: persistent operations disabled",
-    b"MF2 READONLY: rejected HTTP POST",
     b"URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE",
     b"URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE_STEP",
     b"URSUS_MF2_READONLY_REJECT operation=UBI_UPDATE",
@@ -58,7 +58,6 @@ FORBIDDEN_SYMBOL_TOKENS = (
 )
 
 FORBIDDEN_CONFIG_Y = (
-    "CONFIG_CMD_MTD",
     "CONFIG_CMD_MTD_MARKBAD",
     "CONFIG_CMD_MTD_NAND_WRITE_TEST",
     "CONFIG_CMD_UBI",
@@ -77,6 +76,8 @@ REQUIRED_CONFIG_Y = (
     "CONFIG_MTD",
     "CONFIG_DM_MTD",
     "CONFIG_MTD_SPI_NAND",
+    "CONFIG_CMD_MTD",
+    "CONFIG_CMD_LOADB",
     "CONFIG_NET_LWIP",
     "CONFIG_AIROHA_ETH",
     "CONFIG_PCS_AIROHA_AN7583",
@@ -127,18 +128,16 @@ def audit(outdir: Path) -> dict:
     fip = one(list(outdir.glob("*ram.fip")), "RAM FIP")
     uboot = outdir / "u-boot.bin"
     sym = outdir / "u-boot.sym"
-    config = outdir / "u-boot.MF2_RAM.full.config"
-    env = outdir / "MF2_RAM.env"
-    report_path = outdir / "MF2-FIP-REPACK.json"
+    config = outdir / "u-boot.MF_RAM.full.config"
+    env = outdir / "MF_RAM.env"
+    report_path = outdir / "MF-FIP-REPACK.json"
     for path in (uboot, sym, config, env, report_path):
         if not path.is_file():
             raise SystemExit(f"artifact file missing: {path.name}")
 
     pre = preloader.read_bytes()
     if len(pre) != EXPECTED_PRELOADER_SIZE or sha256(pre) != EXPECTED_PRELOADER_SHA256:
-        raise SystemExit(
-            f"preloader mismatch size={len(pre)} sha256={sha256(pre)}"
-        )
+        raise SystemExit(f"preloader mismatch size={len(pre)} sha256={sha256(pre)}")
 
     raw = uboot.read_bytes()
     for token in FORBIDDEN_BOARD_TOKENS:
@@ -146,14 +145,11 @@ def audit(outdir: Path) -> dict:
             raise SystemExit(f"forbidden board/LAN1 token leaked into u-boot.bin: {token!r}")
     for marker in REQUIRED_BINARY_MARKERS:
         if marker not in raw:
-            raise SystemExit(f"required MF2 binary marker missing: {marker!r}")
+            raise SystemExit(f"required MF binary marker missing: {marker!r}")
 
     hwtest8 = b"URSUS_MF2_HWTEST8_LED_BEGIN" in raw
     if hwtest8:
-        for marker in (
-            b"URSUS_MF2_HWTEST8_LED_END result=OK",
-            b"URSUS_MF2_HWTEST7_PHY_PROBE_BEGIN",
-        ):
+        for marker in (b"URSUS_MF2_HWTEST8_LED_END result=OK", b"URSUS_MF2_HWTEST7_PHY_PROBE_BEGIN"):
             if marker not in raw:
                 raise SystemExit(f"HWTEST8 binary marker missing: {marker!r}")
 
@@ -165,23 +161,23 @@ def audit(outdir: Path) -> dict:
     cfg = config.read_text(encoding="utf-8")
     for name in FORBIDDEN_CONFIG_Y:
         if re.search(rf"^{re.escape(name)}=y$", cfg, re.M):
-            raise SystemExit(f"forbidden/writer config enabled: {name}=y")
+            raise SystemExit(f"forbidden config enabled: {name}=y")
     for name in REQUIRED_CONFIG_Y:
         if not re.search(rf"^{re.escape(name)}=y$", cfg, re.M):
-            raise SystemExit(f"required MF2 config missing: {name}=y")
+            raise SystemExit(f"required MF recovery config missing: {name}=y")
     if 'CONFIG_DEFAULT_DEVICE_TREE="an7583-nokia-xg-040g-mf"' not in cfg:
-        raise SystemExit("wrong MF2 default device tree")
+        raise SystemExit("wrong MF default device tree")
 
     env_text = env.read_text(encoding="utf-8")
     if not re.search(r"^bootcmd=ursusweb$", env_text, re.M):
-        raise SystemExit("MF2 bootcmd is not ursusweb")
+        raise SystemExit("MF bootcmd is not ursusweb")
     if re.search(r"saveenv|mtd\s+(?:erase|write)|ubi\s+(?:write|create|remove|rename|detach)", env_text):
-        raise SystemExit("persistent command leaked into MF2 environment")
+        raise SystemExit("persistent command leaked into MF default environment")
 
     fip_data = fip.read_bytes()
     _serial, _flags, entries = parse_fip(fip_data)
     if len(entries) != 2:
-        raise SystemExit(f"MF2 FIP must contain BL31+BL33 only, got {len(entries)} entries")
+        raise SystemExit(f"MF RAM FIP must contain recovery BL31+BL33 only, got {len(entries)} entries")
     payloads = [fip_data[o:o + s] for _uuid, o, s, _eflags in entries]
     bl31, bl33 = payloads
     if sha256(bl31) != EXPECTED_BL31_COMPRESSED_SHA256:
@@ -191,9 +187,7 @@ def audit(outdir: Path) -> dict:
     except lzma.LZMAError as exc:
         raise SystemExit(f"BL33 LZMA decode failed: {exc}") from exc
     if decoded != raw:
-        raise SystemExit(
-            f"BL33 does not round-trip to u-boot.bin decoded={sha256(decoded)} raw={sha256(raw)}"
-        )
+        raise SystemExit(f"BL33 does not round-trip to u-boot.bin decoded={sha256(decoded)} raw={sha256(raw)}")
     if len(bl33) < 13 or struct.unpack_from("<Q", bl33, 5)[0] != len(raw):
         raise SystemExit("BL33 LZMA known-size header mismatch")
 
@@ -222,8 +216,9 @@ def audit(outdir: Path) -> dict:
 
     result = {
         "result": "PASS",
-        "mode": "RAM_ONLY_READONLY_BRINGUP",
+        "mode": "RAM_RECOVERY",
         "target": "Nokia XG-040G-MF / Airoha AN7583",
+        "version": "0.1.0-TEST61",
         "preloader_size": len(pre),
         "preloader_sha256": sha256(pre),
         "fip_size": len(fip_data),
@@ -235,20 +230,17 @@ def audit(outdir: Path) -> dict:
         "fip_entries": 2,
         "bl31_byte_exact": True,
         "bl33_roundtrip": True,
-        "generic_writer_commands": "DISABLED_BY_KCONFIG",
-        "ursus_persistent_entrypoints": "HARD_REJECT_EROFS",
+        "serial_xmodem_receive": "ENABLED_CONFIG_CMD_LOADB",
+        "raw_mtd_cli": "ENABLED_CONFIG_CMD_MTD",
+        "ursus_high_level_persistent_entrypoints": "HARD_REJECT_EROFS",
+        "persistent_env": "NOWHERE",
         "md_board_identity": "ABSENT",
         "md_stockbridge": "NOT_LINKED",
         "recovery_ports": "LAN2_LAN3_LAN4_AN7583_INTERNAL_GPHY" if hwtest8 else "LAN2_LAN3_AN7583_INTERNAL_GPHY",
-        "lan23_led_pinmux": "GPIO2_PHY2_LED0_GPIO3_PHY3_LED0_GPIO4_PHY4_LED0" if hwtest8 else "GPIO2_PHY2_LED0_GPIO3_PHY3_LED0",
         "lan1_en8811": "NOT_LINKED_OUT_OF_SCOPE",
-        "lan4_led": "HWTEST8_VOLATILE_NATIVE_C45_LED0" if hwtest8 else "DEFERRED",
-        "led_backend": "MT7531_MDIO_MMIO_NATIVE_C45_VEND2" if hwtest8 else "PINMUX_ONLY_OR_DIAGNOSTIC",
     }
-    (outdir / "MF2-INDEPENDENT-AUDIT.json").write_text(
-        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="ascii"
-    )
-    print("MF2_INDEPENDENT_ARTIFACT_AUDIT=PASS")
+    (outdir / "MF-INDEPENDENT-AUDIT.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="ascii")
+    print("MF_RAM_RECOVERY_ARTIFACT_AUDIT=PASS")
     for key, value in result.items():
         print(f"{key}={value}")
     return result
