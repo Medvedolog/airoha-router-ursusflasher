@@ -28,7 +28,12 @@ def export_tree(dest: Path) -> Path:
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
 
-    for name in ('START_ONECLICK.cmd', 'START_ONECLICK.sh', 'START_EXPERT.cmd', 'START_EXPERT.sh', 'VERSION'):
+    for name in (
+        'START_ONECLICK.cmd', 'START_ONECLICK.sh',
+        'START_EXPERT.cmd', 'START_EXPERT.sh',
+        'START_UART_RESTORE.cmd', 'START_UART_RESTORE.sh',
+        'VERSION',
+    ):
         shutil.copy2(ROOT / name, dest / name)
     # Preserve the README that actually shipped in the current release.
     # The repository README is deliberately richer than the exported package README.
