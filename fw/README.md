@@ -1,12 +1,25 @@
-# Pinned OpenWrt firmware bundle
+# Canonical OpenWrt firmware bundle
 
-Committed runtime firmware for Nokia XG-040G-MD from the UnameOne build dated **2026-09-06**: OpenWrt SNAPSHOT `r36009+75-6c315233aa`, kernel `6.18.44`, kernel ABI/vermagic `bed7e2dec73efb4c3050bc8a8373af30`. The two production sysupgrade files are retained byte-for-byte as supplied by the build author.
+`fw/` contains the paired UnameOne OpenWrt snapshot set used by UrsusFlasher 0.2.62 hardware testing for both Nokia XG-040G families.
 
-- `*-squashfs-sysupgrade.bin` — `OPENWRT_NONUBI_SYSUPGRADE`, used only for `OPENWRT_STOCK_LAYOUT -> OPENWRT_STOCK_LAYOUT`.
-- `*-ubi-squashfs-sysupgrade.itb` — `OPENWRT_UBI_SYSUPGRADE`, used for `STOCK -> OPENWRT_UBI` and `OPENWRT_UBI -> OPENWRT_UBI`.
-- Author network defaults are retained: **LAN4 becomes WAN after OpenWrt boot**. UrsusFlasher therefore recommends LAN2/LAN3 for flashing and continuous management access. LAN1/2.5G uses the separate EN8811H PHY and remains excluded from transition/recovery guidance.
-- OpenWrt firmware files are kept byte-identical to the 2026-09-06 payload refresh; UrsusBoot is versioned independently and is alpha5-UBIUX1 in 0.2.56.
+Exactly eight firmware files are canonical:
 
-ONE-CLICK does not download mutable snapshots at runtime. Hash/size authority is `data/FIRMWARE_BUNDLE.json`.
+```text
+MD / AN7581
+openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin
+openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb
+openwrt-airoha-an7581-nokia_xg-040g-md-initramfs-uImage.itb
+openwrt-airoha-an7581-nokia_xg-040g-md-ubi-initramfs-recovery.itb
 
-Factory kernel/rootfs images are intentionally not part of the release runtime bundle.
+MF / AN7583
+openwrt-airoha-an7583-nokia_xg-040g-mf-squashfs-sysupgrade.bin
+openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb
+openwrt-airoha-an7583-nokia_xg-040g-mf-initramfs-uImage.itb
+openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-initramfs-recovery.itb
+```
+
+Roles and authoritative size/SHA256 values are in `config/FIRMWARE_BUNDLES.json`.
+
+ONE-CLICK selects firmware only after positive MD/MF identification. The normal STOCK/Factory -> UBI path uses the matching `*-ubi-squashfs-sysupgrade.itb`; the non-UBI `*-squashfs-sysupgrade.bin` is retained for factory-layout OpenWrt operations. The two initramfs images per board are bundled for recovery/manual use and are not a mandatory ONE-CLICK dependency.
+
+No mutable OpenWrt snapshot is downloaded at runtime and CI must not replace these files with older MedveFlasher firmware.
