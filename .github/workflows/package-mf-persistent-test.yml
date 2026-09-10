@@ -48,6 +48,13 @@ jobs:
           ref: 342cac4cb99a924f3d83eb8e4b5259490377704e
           path: work/medveflasher-rc35
 
+      - name: Checkout frozen MedveFlasher MD transition lineage
+        uses: actions/checkout@v4
+        with:
+          repository: Medvedolog/nokia-router-medveflasher
+          ref: bb9db0904ea49000ccf5ecdc4bdefcc4d5946eca
+          path: work/medveflasher-md-frozen
+
       - name: Install build dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends liblzma-dev
 
@@ -114,13 +121,19 @@ jobs:
         run: |
           set -e
           MEDVE=work/medveflasher-rc35/data
+          MD_FROZEN=work/medveflasher-md-frozen/data
           cp "$MEDVE/backup-agent.sh" ursusflasher/src/backup-agent.sh
           cp "$MEDVE/nokia-stock-tftp-backup-safe.sh" ursusflasher/src/nokia-stock-tftp-backup-safe.sh
           cp "$MEDVE/env_patcher.py" ursusflasher/src/env_patcher.py
           if [ -f "$MEDVE/stock-launcher.sh.in" ]; then cp "$MEDVE/stock-launcher.sh.in" ursusflasher/src/stock-launcher.sh.in; fi
 
-          cp "$MEDVE/payloads/nokia-xg-040g-md-an7581-transition-auto.bin" ursusflasher/src/transition-bundle.bin
-          cp "$MEDVE/payloads/nokia-xg-040g-md-an7581-transition-manual.bin" ursusflasher/src/transition-manual-bundle.bin
+          test "$(stat -c %s "$MD_FROZEN/transition-bundle.bin")" = 21626880
+          test "$(sha256sum "$MD_FROZEN/transition-bundle.bin" | awk '{print $1}')" = bb421ef151a5ea118f10780042461f594b84925cdc92381dcc4de19f8ac35fb1
+          test "$(stat -c %s "$MD_FROZEN/transition-manual-bundle.bin")" = 8388608
+          test "$(sha256sum "$MD_FROZEN/transition-manual-bundle.bin" | awk '{print $1}')" = 394461e5cb65eddef7615967603c08b14811c07168293bdc93a630f823aaf85f
+          cp "$MD_FROZEN/transition-bundle.bin" ursusflasher/src/transition-bundle.bin
+          cp "$MD_FROZEN/transition-manual-bundle.bin" ursusflasher/src/transition-manual-bundle.bin
+          echo MD_FROZEN_TRANSITION=PASS
           cp "$MEDVE/payloads/nokia-xg-040g-mf-an7583-transition-auto.bin" ursusflasher/src/mf-transition-bundle.bin
           cp "$MEDVE/payloads/nokia-xg-040g-mf-an7583-transition-manual.bin" ursusflasher/src/mf-transition-manual-bundle.bin
 
