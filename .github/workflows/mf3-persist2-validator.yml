@@ -39,6 +39,68 @@ jobs:
           JOBS: '2'
         run: bash ursusboot/scripts/build_mf3_persist2_ci.sh
 
+      - name: Regression check emitted FIP against embedded parser geometry
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct
+
+          root = Path('work/mf2-ramboot')
+          source = (root / 'u-boot/cmd/ursusupdate.c').read_text(encoding='utf-8')
+          p0 = source.index('static int ursus_fip_parse(')
+          p1 = source.index('static int ursus_fip_validate_current(', p0)
+          parser = source[p0:p1]
+          assert 'URSUS_MF3_FIP_PARSE_OK' in parser
+          assert 'toc_end = (size_t)((const u8 *)(ent + 1) - buf)' in parser
+          assert 'off < toc_end' in parser
+          assert 'URSUS_FIP_TOC_MIN' not in parser
+
+          NT_FW = bytes.fromhex('d6d0eea7fcead54b97829934f234b6e4')
+
+          def check(path: Path) -> None:
+              b = path.read_bytes()
+              if len(b) < 16 + 80:
+                  raise SystemExit(f'{path}: too short')
+              magic, serial, _flags = struct.unpack_from('<IIQ', b, 0)
+              if magic != 0xAA640001 or serial != 0x12345678:
+                  raise SystemExit(f'{path}: bad FIP header')
+              entries = []
+              term = None
+              pos = 16
+              for _ in range(32):
+                  if pos + 40 > len(b):
+                      raise SystemExit(f'{path}: TOC runs past file')
+                  uuid = b[pos:pos + 16]
+                  off, size, _eflags = struct.unpack_from('<QQQ', b, pos + 16)
+                  pos += 40
+                  if uuid == b'\0' * 16:
+                      if size != 0 or off > len(b):
+                          raise SystemExit(f'{path}: invalid terminator')
+                      term = off
+                      toc_end = pos
+                      break
+                  if size == 0 or off > len(b) or size > len(b) - off:
+                      raise SystemExit(f'{path}: entry out of file range')
+                  entries.append((uuid, off, size))
+              else:
+                  raise SystemExit(f'{path}: terminator missing')
+
+              if term != len(b):
+                  raise SystemExit(f'{path}: declared end {term} != file size {len(b)}')
+              if not any(uuid == NT_FW for uuid, _off, _size in entries):
+                  raise SystemExit(f'{path}: NT FW entry missing')
+              for uuid, off, size in entries:
+                  if off < toc_end or off > term or size > term - off:
+                      raise SystemExit(f'{path}: payload overlaps TOC or declared end')
+              print(f'MF3_FIP_GEOMETRY=PASS file={path.name} entries={len(entries)} toc_end=0x{toc_end:x} first_payload=0x{entries[0][1]:x} end=0x{term:x}')
+
+          out = root / 'out'
+          check(next(out.glob('*-ram.fip')))
+          check(next(out.glob('*-persistent.fip')))
+          PY
+
       - name: Upload MF3 PERSIST2 artifact
         if: always()
         uses: actions/upload-artifact@v4
