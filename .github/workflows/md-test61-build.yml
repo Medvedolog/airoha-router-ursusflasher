@@ -1,0 +1,46 @@
+name: MD AN7581 TEST61 build
+
+on:
+  push:
+    branches:
+      - feature/mf3-an7583-persistent
+    paths:
+      - 'ursusboot/configs/u-boot.TEST61.full.config'
+      - 'ursusboot/configs/ursusboot-common.cfg'
+      - 'ursusboot/configs/ursusboot-board-md.cfg'
+      - 'ursusboot/scripts/apply_kconfig_fragment.py'
+      - 'ursusboot/scripts/build_alpha5_test61.sh'
+      - 'ursusboot/patches/130-webfailsafe-webreboot1.patch'
+      - 'ursusboot/patches/140-test57-diagcap-resetnet1.patch'
+      - 'ursusboot/patches/150-test58-buildid.patch'
+      - 'ursusboot/patches/160-test59-corrective.patch'
+      - 'ursusboot/patches/170-test60-configtrim1.patch'
+      - 'ursusboot/patches/180-test61-safetyreg1.patch'
+      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-source.tar.zst'
+      - 'toolchains/**'
+      - '.github/workflows/md-test61-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout UrsusFlasher branch
+        uses: actions/checkout@v4
+      - name: Install host FIP repack dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends liblzma-dev
+      - name: Build MD TEST61 UrsusBoot
+        env:
+          JOBS: '2'
+        run: bash ursusboot/scripts/build_alpha5_test61.sh
+      - name: Upload MD TEST61 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-md-0.1.0-TEST61-build
+          path: work/alpha5-test61-rebuild/out
+          if-no-files-found: warn
+          retention-days: 14
