@@ -31,7 +31,13 @@
       "soc_tokens": ["AN7583", "7583"],
       "openwrt_board_tokens": ["xg-040g-mf"],
       "stock": {
-        "web_supported": true
+        "web_supported": true,
+        "boot_area_size": 524288,
+        "fip_offset": 2048,
+        "environment_offset": 507904,
+        "environment_size": 16384,
+        "observed_fip_entries": 9,
+        "geometry_status": "SINGLE_DEVICE_HW_EVIDENCE"
       },
       "flash": {
         "nand_size": 268435456,
@@ -65,7 +71,9 @@
         "mf1_enabled": true,
         "persistent_write_enabled": false,
         "allowed_write_actions": ["restore_nokia"],
-        "backend": "PERSISTENT_CANARY_NOT_YET_ENABLED",
+        "backend": "DEVICE_DERIVED_MTD0_PATCH_PENDING_HW_ACCEPTANCE",
+        "persistent_install_contract": "HOST_DEVICE_DERIVED_STOCK_FIP_BL33_PATCH",
+        "rejected_backends": ["MF3_PERSIST1", "MF3_PERSIST2"],
         "bl2_last_required": true,
         "automatic_alternate_writer": false
       },
@@ -76,12 +84,17 @@
         "ram_openwrt": "HW_PROVEN",
         "ubi_format": "HW_PROVEN",
         "ubi_volume_write": "HW_PROVEN",
-        "bootloader_replace_bl2_last": "HW_PROVEN",
-        "permanent_install": "HW_PROVEN",
+        "bootloader_replace_bl2_last": "HW_PROVEN_MEDVE_BACKEND",
+        "permanent_install": "HW_PROVEN_MEDVE_BACKEND_ONLY",
         "stock_restore_uart": "HW_PROVEN_MEDVE_BACKEND",
         "stock_restore_ram_recovery": "URSUS_STATIC_QA_PASS_HW_ACCEPTANCE_REQUIRED",
-        "ursusboot_an7583": "MF2_HWTEST8_HW_PASS",
-        "ursusboot_an7583_network_led": "LAN2_LAN3_LAN4_HW_PASS"
+        "ursusboot_an7583": "RAM_HWTEST8_HW_PASS",
+        "ursusboot_an7583_network_led": "LAN2_LAN3_LAN4_HW_PASS",
+        "ursusboot_persist1": "REJECTED_VALIDATOR_ARCHITECTURE",
+        "ursusboot_persist2_write_readback": "HW_PASS",
+        "ursusboot_persist2_cold_boot": "HW_FAIL_NORMAL_NAND_BOOT_UART_SILENT_BOOTROM_RECOVERY_ALIVE",
+        "ursusboot_persist2": "HW_REJECTED_DO_NOT_FLASH",
+        "stock_boot_area_sample_sha256": "144d63272049eeb7122a01f2f3a0192b874ca4c68c10a5b4726fa4c2e84ac1bf"
       }
     }
   }
