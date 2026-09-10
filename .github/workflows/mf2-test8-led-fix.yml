@@ -1,0 +1,175 @@
+name: MF2 AN7583 TEST8 LED FIX
+
+on:
+  push:
+    branches: [ feature/mf-an7583 ]
+    paths:
+      - 'ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_*'
+      - 'ursusboot/scripts/mf2_ramreadonly_transform.py'
+      - 'ursusboot/scripts/mf2_ramreadonly_transform_impl.py'
+      - 'ursusboot/scripts/mf2_lan23_led_pinmux.py'
+      - 'ursusboot/scripts/mf2_hwtest7_phy_probe.py'
+      - 'ursusboot/scripts/mf2_hwtest8_led_fix.py'
+      - 'ursusboot/scripts/mf2_hwtest5_web_quiet.py'
+      - 'ursusboot/scripts/mf2_hwtest5_build_identity.py'
+      - 'ursusboot/scripts/mf2_repack_from_medve.py'
+      - 'ursusboot/scripts/audit_mf2_ramboot_artifact.py'
+      - 'ursusboot/scripts/build_mf2_ramboot.sh'
+      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
+      - 'toolchains/**'
+      - '.github/workflows/mf2-test8-led-fix.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout UrsusFlasher branch
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned MedveFlasher rc35 evidence/payloads
+        uses: actions/checkout@v4
+        with:
+          repository: Medvedolog/nokia-router-medveflasher
+          ref: 342cac4cb99a924f3d83eb8e4b5259490377704e
+          path: work/medveflasher-rc35
+
+      - name: Install host FIP repack dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends liblzma-dev
+
+      - name: Bind TEST8 deltas into isolated MF2 build
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('ursusboot/scripts/build_mf2_ramboot.sh')
+          s = p.read_text(encoding='utf-8')
+          old = 'python3 "$TRANSFORM" "$WORK/u-boot"\n'
+          new = old + (
+              'python3 "$ROOT/ursusboot/scripts/mf2_lan23_led_pinmux.py" "$WORK/u-boot"\n'
+              'python3 "$ROOT/ursusboot/scripts/mf2_hwtest7_phy_probe.py" "$WORK/u-boot"\n'
+              'python3 "$ROOT/ursusboot/scripts/mf2_hwtest8_led_fix.py" "$WORK/u-boot"\n'
+              'python3 "$ROOT/ursusboot/scripts/mf2_hwtest5_web_quiet.py" "$WORK/u-boot"\n'
+              'python3 "$ROOT/ursusboot/scripts/mf2_hwtest5_build_identity.py" "$WORK/u-boot" "${GITHUB_SHA}"\n'
+          )
+          if s.count(old) != 1:
+              raise SystemExit(f'build transform anchor count={s.count(old)}')
+          s = s.replace(old, new, 1)
+
+          old_epoch = 'export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$RELEASE_EPOCH"\n'
+          new_epoch = (
+              'BUILD_EPOCH=$(git show -s --format=%ct "${GITHUB_SHA}")\n'
+              'export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$BUILD_EPOCH"\n'
+          )
+          if s.count(old_epoch) != 1:
+              raise SystemExit(f'SOURCE_DATE_EPOCH anchor count={s.count(old_epoch)}')
+          s = s.replace(old_epoch, new_epoch, 1)
+
+          old_check = 'grep -Fq "#define URSUS_VERSION \\\"${VERSION}\\\"" include/ursus_version.h || { echo "MF2 version header mismatch" >&2; exit 1; }\n'
+          new_check = "grep -Eq '^#define URSUS_VERSION \\\"0\\.1\\.0-mf2-ram1\\+g[0-9a-f]{8}\\\"$' include/ursus_version.h || { echo \"MF2 HWTEST8 version header mismatch\" >&2; exit 1; }\n"
+          if s.count(old_check) != 1:
+              raise SystemExit(f'version-check anchor count={s.count(old_check)}')
+          s = s.replace(old_check, new_check, 1)
+          p.write_text(s, encoding='utf-8')
+
+          cfg = Path('ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig')
+          c = cfg.read_text(encoding='utf-8')
+          if c.count('CONFIG_LOGLEVEL=9') != 1:
+              raise SystemExit('CONFIG_LOGLEVEL=9 anchor missing')
+          cfg.write_text(c.replace('CONFIG_LOGLEVEL=9', 'CONFIG_LOGLEVEL=7', 1), encoding='utf-8')
+          print('MF2_TEST8_BUILD_BINDING=PASS pinmux234=1 phy-probe=1 led-fix=native-c45-rmw web-quiet=1 identity=git loglevel=7')
+          PY
+
+      - name: Build MF2 TEST8 RAM-only UrsusBoot
+        env:
+          MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
+          JOBS: '2'
+        run: bash ursusboot/scripts/build_mf2_ramboot.sh
+
+      - name: Record TEST8 exact build identity
+        run: |
+          set -euxo pipefail
+          SHORT_SHA="${GITHUB_SHA:0:8}"
+          BUILD_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")
+          BUILD_UTC=$(date -u -d "@$BUILD_EPOCH" '+%Y-%m-%dT%H:%M:%SZ')
+          {
+            echo "HWTEST=8"
+            echo "GIT_SHA=$GITHUB_SHA"
+            echo "DISPLAY_VERSION=0.1.0-mf2-ram1+g$SHORT_SHA"
+            echo "SOURCE_DATE_EPOCH=$BUILD_EPOCH"
+            echo "BUILD_UTC=$BUILD_UTC"
+            echo "NETWORK_BASELINE=HWTEST4/HWTEST6; failed HWTEST5 PBUS/MMD LED path absent"
+            echo "PINMUX=LAN2 gpio2->phy2_led0; LAN3 gpio3->phy3_led0; LAN4 gpio4->phy4_led0"
+            echo "PHY_MAP=LAN2=0x0a LAN3=0x0b LAN4=0x0c; proved by HWTEST7"
+            echo "LED_BACKEND=mt7531-mdio-mmio native Clause45 VEND2"
+            echo "LED0_ON=mask 0xc07f set 0xc007 (enable+active-low+link10/100/1000)"
+            echo "LED0_BLINK=mask 0x03ff set 0x003f (TX/RX 10/100/1000)"
+            echo "LED_WRITE=volatile PHY registers only; readback required; persistent writes remain disabled"
+            echo "UART_LOGLEVEL=7"
+          } | tee work/mf2-ramboot/out/HWTEST8-BUILD-ID.txt
+          cat work/mf2-ramboot/out/HWTEST8-BUILD-ID.txt >> work/mf2-ramboot/out/MF2-BUILD_INFO.txt
+
+      - name: Verify TEST8 LED-fix scope
+        run: |
+          set -euxo pipefail
+          DTS=work/mf2-ramboot/u-boot/arch/arm/dts/an7583-nokia-xg-040g-mf.dts
+          CFG=work/mf2-ramboot/out/u-boot.MF2_RAM.full.config
+          BIN=work/mf2-ramboot/out/u-boot.bin
+          CMD=work/mf2-ramboot/u-boot/cmd/ursusmfphy.c
+          ETH=work/mf2-ramboot/u-boot/drivers/net/airoha_eth.c
+          WEB=work/mf2-ramboot/u-boot/cmd/ursusweb.c
+
+          grep -Fq 'URSUS_MF2_HWTEST7_LAN234_LED_PINMUX' "$DTS"
+          grep -Fq 'function = "phy2_led0";' "$DTS"
+          grep -Fq 'function = "phy3_led0";' "$DTS"
+          grep -Fq 'function = "phy4_led0";' "$DTS"
+          grep -Fq 'pins = "gpio2";' "$DTS"
+          grep -Fq 'pins = "gpio3";' "$DTS"
+          grep -Fq 'pins = "gpio4";' "$DTS"
+
+          grep -Fq 'URSUS_MF2_HWTEST7_PHY_PROBE' "$CMD"
+          ! grep -Fq 'dm_mdio_write' "$CMD"
+
+          grep -Fq 'URSUS_MF2_HWTEST8_LED_FIX' "$ETH"
+          grep -Fq 'static const u8 phys[] = { 0x0a, 0x0b, 0x0c };' "$ETH"
+          grep -Fq '#define URSUS_MF2_HWTEST8_MMD_VEND2       0x1f' "$ETH"
+          grep -Fq '#define URSUS_MF2_HWTEST8_LED0_ON_CTRL    0x24' "$ETH"
+          grep -Fq '#define URSUS_MF2_HWTEST8_LED0_BLINK_CTRL 0x25' "$ETH"
+          grep -Fq '#define URSUS_MF2_HWTEST8_ON_MASK          0xc07f' "$ETH"
+          grep -Fq '#define URSUS_MF2_HWTEST8_ON_SET           0xc007' "$ETH"
+          grep -Fq '#define URSUS_MF2_HWTEST8_BLINK_MASK       0x03ff' "$ETH"
+          grep -Fq '#define URSUS_MF2_HWTEST8_BLINK_SET        0x003f' "$ETH"
+          grep -Fq 'dm_mdio_write(eth->switch_mdio_dev' "$ETH"
+          grep -Fq 'dm_mdio_read(eth->switch_mdio_dev' "$ETH"
+          grep -Fq 'ursus_mf2_hwtest8_led_fix(qdma->eth)' "$ETH"
+          ! grep -Fq 'MDIO_DEVAD_NONE + URSUS_MF2_HWTEST8_MMD_VEND2' "$ETH"
+          ! grep -Fq 'URSUS_MF2_HWTEST5_PHY_LED0' "$ETH"
+          ! grep -Fq 'ursus_mf2_setup_phy_led0' "$ETH"
+
+          grep -Fq 'URSUS_MF2_HWTEST5_QUIET_CHUNKS' "$WEB"
+          grep -Eq '^CONFIG_LOGLEVEL=7$' "$CFG"
+          grep -Eq '^CONFIG_MDIO_MT7531_MMIO=y$' "$CFG"
+          ! grep -Eq '^CONFIG_PHY_AIROHA_EN8811=y$' "$CFG"
+
+          strings "$BIN" | grep -Fq 'URSUS_MF2_HWTEST8_LED_BEGIN'
+          strings "$BIN" | grep -Fq 'URSUS_MF2_HWTEST8_LED_END result=OK'
+          strings "$BIN" | grep -Fq 'URSUS_MF2_HWTEST7_PHY_PROBE_BEGIN'
+          strings "$BIN" | grep -Eq '0\.1\.0-mf2-ram1\+g[0-9a-f]{8}'
+          ! strings "$BIN" | grep -Fq 'URSUS_MF2_HWTEST5_PHY_LED0'
+
+          echo 'MF2_TEST8_SCOPE=PASS lan234=pinmux+native-c45-led0-rmw readback=required hwtest5-pbus-led=absent persistent=none'
+
+      - name: Independent MF2 TEST8 artifact audit
+        run: python3 ursusboot/scripts/audit_mf2_ramboot_artifact.py work/mf2-ramboot/out
+
+      - name: Upload MF2 TEST8 RAMBOOT artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-mf2-ram1-an7583-hwtest8-led-fix
+          path: work/mf2-ramboot/out
+          if-no-files-found: warn
+          retention-days: 14
