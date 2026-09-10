@@ -2,7 +2,9 @@
 chcp 65001 >nul 2>nul
 setlocal
 cd /d "%~dp0"
-set "entry=data\expert.py"
+set "entry=data\expert_mf_acceptance.py"
+if not exist "%entry%" set "entry=ursusflasher\src\expert_mf_acceptance.py"
+if not exist "%entry%" set "entry=data\expert.py"
 if not exist "%entry%" set "entry=ursusflasher\src\expert.py"
 where py >nul 2>nul
 if not errorlevel 1 goto use_py
