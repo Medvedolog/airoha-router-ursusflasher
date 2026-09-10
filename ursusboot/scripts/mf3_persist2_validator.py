@@ -37,6 +37,81 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
     return text.replace(old, new, 1)
 
 
+# MF donor FIPs are valid TF-A FIP containers but may place the first payload
+# immediately after the actual TOC (for BL31+BL33 this is 0x88), while the MD
+# implementation historically required an arbitrary 0x400 payload floor.
+# Keep the MD structural model, but derive the real TOC end from the terminator.
+# This accepts both compact MF FIPs and padded MD/stock FIPs without a build hash
+# or file-size whitelist, while still rejecting payloads that overlap the TOC.
+FIP_PARSE = r'''static int ursus_fip_parse(const u8 *buf, size_t len, size_t *nt_off,
+                           size_t *nt_size, size_t *declared_end)
+{
+    const struct ursus_fip_header *hdr;
+    const struct ursus_fip_entry *ent;
+    unsigned int i, j;
+    bool nt = false, term = false;
+    size_t noff = 0, nsize = 0, dend = 0, toc_end = 0;
+
+    if (!buf || len < sizeof(*hdr) + 2 * sizeof(*ent))
+        return -EINVAL;
+    hdr = (const struct ursus_fip_header *)buf;
+    if (le32_to_cpu(hdr->name) != URSUS_FIP_MAGIC ||
+        le32_to_cpu(hdr->serial_number) != URSUS_FIP_SERIAL)
+        return -EINVAL;
+
+    ent = (const void *)(buf + sizeof(*hdr));
+    for (i = 0; i < URSUS_FIP_MAX_ENTRIES; i++, ent++) {
+        u64 off, size;
+
+        if ((const u8 *)(ent + 1) > buf + len)
+            return -EINVAL;
+        off = le64_to_cpu(ent->offset_address);
+        size = le64_to_cpu(ent->size);
+        if (ursus_uuid_zero(ent->uuid)) {
+            if (size || off > len)
+                return -EINVAL;
+            term = true;
+            dend = (size_t)off;
+            toc_end = (size_t)((const u8 *)(ent + 1) - buf);
+            if (dend < toc_end)
+                return -EINVAL;
+            break;
+        }
+        if (!size || off > len || size > len - off)
+            return -ERANGE;
+        if (!memcmp(ent->uuid, ursus_nt_fw_uuid, sizeof(ursus_nt_fw_uuid))) {
+            nt = true;
+            noff = (size_t)off;
+            nsize = (size_t)size;
+        }
+    }
+    if (!nt || !term)
+        return -EINVAL;
+
+    /* Second pass: every payload must start after the actual complete TOC and
+     * must end no later than the terminator-declared FIP end. */
+    ent = (const void *)(buf + sizeof(*hdr));
+    for (j = 0; j < i; j++, ent++) {
+        u64 off = le64_to_cpu(ent->offset_address);
+        u64 size = le64_to_cpu(ent->size);
+
+        if (off < toc_end || off > dend || size > dend - off)
+            return -ERANGE;
+    }
+
+    if (nt_off)
+        *nt_off = noff;
+    if (nt_size)
+        *nt_size = nsize;
+    if (declared_end)
+        *declared_end = dend;
+    printf("URSUS_MF3_FIP_PARSE_OK toc_end=0x%x declared_end=0x%x nt_off=0x%x nt_size=0x%x\n",
+           (unsigned int)toc_end, (unsigned int)dend,
+           (unsigned int)noff, (unsigned int)nsize);
+    return 0;
+}'''
+
+
 VALIDATE_CURRENT = r'''static int ursus_fip_validate_current(const u8 *buf, size_t available_len, size_t *declared_end)
 {
     size_t nt_off, nt_size, end;
@@ -70,7 +145,7 @@ VALIDATE_CURRENT = r'''static int ursus_fip_validate_current(const u8 *buf, size
     }
 
     /* Same validator model as production MD: classify only after the NT FW
-     * entry has been structurally parsed and LZMA-decompressed.  Never scan
+     * entry has been structurally parsed and LZMA-decompressed. Never scan
      * the compressed FIP blob for board strings. */
     ursus_id = ursus_mem_has(raw, raw_cap, "U-Boot 2026.07-UrsusBoot-") &&
                ursus_mem_has(raw, raw_cap, "nokia,xg-040g-mf") &&
@@ -183,6 +258,7 @@ VALIDATE = r'''int ursus_fip_validate(ulong addr, size_t len, bool stock_limit)
 def patch_update(root: Path) -> None:
     path = root / "cmd/ursusupdate.c"
     text = path.read_text(encoding="utf-8")
+    text = replace_func(text, "ursus_fip_parse", FIP_PARSE)
     text = replace_func(text, "ursus_fip_validate_current", VALIDATE_CURRENT)
     text = replace_func(text, "ursus_fip_validate_buf", VALIDATE_BUF)
     text = replace_func(text, "ursus_fip_validate", VALIDATE)
@@ -216,6 +292,19 @@ def patch_update(root: Path) -> None:
     for token in forbidden:
         if token in text:
             raise SystemExit(f"obsolete validator/canary token survived: {token}")
+
+    parse_start = text.index("static int ursus_fip_parse(")
+    parse_end = text.index("static int ursus_fip_validate_current(", parse_start)
+    parse_body = text[parse_start:parse_end]
+    if "URSUS_FIP_TOC_MIN" in parse_body:
+        raise SystemExit("MF parser still contains fixed 0x400 TOC floor")
+    for required in (
+        "toc_end = (size_t)((const u8 *)(ent + 1) - buf)",
+        "off < toc_end",
+        "URSUS_MF3_FIP_PARSE_OK",
+    ):
+        if required not in parse_body:
+            raise SystemExit(f"dynamic TOC parser invariant missing: {required}")
 
     for required in (
         "URSUSBOOT_MF",
@@ -256,7 +345,7 @@ def patch(root: Path) -> None:
     root = root.resolve()
     patch_update(root)
     patch_web(root)
-    print("MF3_PERSIST2_VALIDATOR=PASS model=MD_STYLE_GENERAL accepted=URSUSBOOT_MF,NOKIA_XG040GMF_STOCK write_scope=FIP_UPDATE_ROLLBACK")
+    print("MF3_PERSIST2_VALIDATOR=PASS model=MD_STYLE_GENERAL_DYNAMIC_TOC accepted=URSUSBOOT_MF,NOKIA_XG040GMF_STOCK write_scope=FIP_UPDATE_ROLLBACK")
 
 
 def main() -> int:
