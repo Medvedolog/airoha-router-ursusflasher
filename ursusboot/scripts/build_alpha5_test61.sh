@@ -6,6 +6,7 @@ SDK_BUNDLE="$ROOT/toolchains/openwrt-sdk-r35906/openwrt-sdk-r35906.tar.zst"
 SOURCE_BUNDLE="$ROOT/ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-source.tar.zst"
 CONFIG="$ROOT/ursusboot/configs/u-boot.TEST61.full.config"
 COMMON_CONFIG="$ROOT/ursusboot/configs/ursusboot-common.cfg"
+BOARD_CONFIG="$ROOT/ursusboot/configs/ursusboot-board-md.cfg"
 CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
 DONOR="$ROOT/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip"
 PATCH1="$ROOT/ursusboot/patches/130-webfailsafe-webreboot1.patch"
@@ -17,7 +18,7 @@ PATCH6="$ROOT/ursusboot/patches/180-test61-safetyreg1.patch"
 OUT="$WORK/out"
 RELEASE_EPOCH=1788888600  # 2026-09-08 17:30:00 UTC
 for x in tar make gcc perl python3 sha256sum patch; do command -v "$x" >/dev/null; done
-for f in "$COMMON_CONFIG" "$CONFIG_MERGER"; do [ -f "$f" ] || { echo "shared UrsusBoot config input missing: $f" >&2; exit 1; }; done
+for f in "$COMMON_CONFIG" "$BOARD_CONFIG" "$CONFIG_MERGER"; do [ -f "$f" ] || { echo "shared UrsusBoot config input missing: $f" >&2; exit 1; }; done
 if [ ! -f "$SDK_BUNDLE" ]; then bash "$ROOT/toolchains/openwrt-sdk-r35906/reassemble-sdk.sh" >/dev/null; fi
 EXPECTED_SDK=$(awk '{print $1}' "$ROOT/toolchains/openwrt-sdk-r35906/SDK_SHA256SUMS")
 ACTUAL_SDK=$(sha256sum "$SDK_BUNDLE" | awk '{print $1}')
@@ -40,10 +41,10 @@ export URSUS_SDK_ROOT="$SDK_ROOT" STAGING_DIR="$SDK_ROOT/staging_dir" STAGING_DI
 export PATH="$ROOT/toolchains/hostshim:$TC:$HOST/bin:/usr/bin:/bin"
 export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$RELEASE_EPOCH"
 cp "$CONFIG" "$WORK/u-boot/.config"
-python3 "$CONFIG_MERGER" --config "$WORK/u-boot/.config" "$COMMON_CONFIG"
+python3 "$CONFIG_MERGER" --config "$WORK/u-boot/.config" "$COMMON_CONFIG" "$BOARD_CONFIG"
 cd "$WORK/u-boot"
 make olddefconfig
-python3 "$CONFIG_MERGER" --check-only --config .config "$COMMON_CONFIG"
+python3 "$CONFIG_MERGER" --check-only --config .config "$COMMON_CONFIG" "$BOARD_CONFIG"
 for sym in CONFIG_CMD_UBIFS CONFIG_CMD_PXE CONFIG_BOOTMETH_EXTLINUX CONFIG_BOOTMETH_EXTLINUX_PXE CONFIG_PXE_UTILS; do
     if grep -q "^${sym}=y" .config; then
         echo "CONFIGTRIM1 failed: ${sym}=y" >&2
@@ -78,6 +79,6 @@ assert nt and nt[0]+nt[1] <= 0x77800, nt
 print(f'FIP_BOUNDARY_QA=PASS size={len(d)} nt_end=0x{nt[0]+nt[1]:x} margin={0x77800-(nt[0]+nt[1])}')
 PYQA
 sha256sum u-boot.bin u-boot.lzma ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip | tee "$OUT/SHA256SUMS"
-printf 'UrsusBoot 0.1.0-alpha5-UBIUX1-TEST61\nSOURCE_DATE_EPOCH=%s\nBUILD_UTC=2026-09-08 17:30:00 UTC\nIDENTITY1=PASS\nCOMMON_KCONFIG=PASS\nNOAUTOFIP1=HOST\nUBIATTACH2=NO_DETACH_ON_ACTIVE_EXPECTED_UBI\nSESSIONRECOVERY1=PASS_SOURCE\nDIAGSTATE1=PASS\n' "$RELEASE_EPOCH" > "$OUT/TEST61-BUILD_INFO.txt"
+printf 'UrsusBoot 0.1.0-alpha5-UBIUX1-TEST61\nSOURCE_DATE_EPOCH=%s\nBUILD_UTC=2026-09-08 17:30:00 UTC\nIDENTITY1=PASS\nCOMMON_KCONFIG=PASS\nBOARD_KCONFIG=MD\nNOAUTOFIP1=HOST\nUBIATTACH2=NO_DETACH_ON_ACTIVE_EXPECTED_UBI\nSESSIONRECOVERY1=PASS_SOURCE\nDIAGSTATE1=PASS\n' "$RELEASE_EPOCH" > "$OUT/TEST61-BUILD_INFO.txt"
 echo "ALPHA5_TEST61_BUILD=PASS"
 echo "Artifacts: $OUT"
