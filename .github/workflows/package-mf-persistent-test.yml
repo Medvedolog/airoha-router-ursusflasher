@@ -237,7 +237,7 @@ jobs:
           release = manifest.setdefault('release', {})
           release['version'] = version
           release['build_tag'] = build_tag
-          release['archive_root'] = f'UrsusFlasher-{version}'
+          release['archive_root'] = f'Nokia-Router-MedveFlasher-{version}'
           manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
           caps_path = Path('config/FIRMWARE_CAPABILITIES.json')
