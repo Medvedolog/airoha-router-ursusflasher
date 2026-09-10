@@ -50,9 +50,9 @@ jobs:
           cp "$SRC/arch/arm/dts/an7583-nokia-xg-040g-mf.dts" "$OUT/TEST61-mf.dts"
           cp "$SRC/arch/arm/dts/an7583.dtsi" "$OUT/TEST61-an7583.dtsi"
           cp "$MEDVE/data/recovery/transition-control-source/shipped-mf-nokia-ubi-installer.sh" "$OUT/MEDVE-mf-nokia-ubi-installer.sh"
-          cp "$MEDVE/data/recovery/transition-control-source/shipped-mf-nokia-ubi-finish.sh" "$OUT/MEDVE-mf-nokia-ubi-finish.sh"
           cp "$MEDVE/data/recovery/transition-control-source/shipped-mf-manual-nokia-ubi-installer.sh" "$OUT/MEDVE-mf-manual-nokia-ubi-installer.sh"
           cp "$MEDVE/data/recovery/transition-control-source/shipped-mf-manual-nokia-ubi-finish.sh" "$OUT/MEDVE-mf-manual-nokia-ubi-finish.sh"
+          cp "$MEDVE/data/recovery/transition-control-source/shipped-mf-nokia-ubi-autoflash.sh" "$OUT/MEDVE-mf-nokia-ubi-autoflash.sh"
           sha256sum "$OUT"/* | sort > "$OUT/SHA256SUMS"
 
           {
