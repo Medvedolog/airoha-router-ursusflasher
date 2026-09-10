@@ -114,15 +114,11 @@ jobs:
         run: |
           set -e
           MEDVE=work/medveflasher-rc35/data
-          # The repository keeps large/reproducible Medve assets out of source;
-          # the test kit binds them at package time from the pinned commit.
           cp "$MEDVE/backup-agent.sh" ursusflasher/src/backup-agent.sh
           cp "$MEDVE/nokia-stock-tftp-backup-safe.sh" ursusflasher/src/nokia-stock-tftp-backup-safe.sh
           cp "$MEDVE/env_patcher.py" ursusflasher/src/env_patcher.py
           if [ -f "$MEDVE/stock-launcher.sh.in" ]; then cp "$MEDVE/stock-launcher.sh.in" ursusflasher/src/stock-launcher.sh.in; fi
 
-          # Published Medve payload names are the canonical built transition
-          # bundles. Keep the legacy backend filenames only inside package data.
           cp "$MEDVE/payloads/nokia-xg-040g-md-an7581-transition-auto.bin" ursusflasher/src/transition-bundle.bin
           cp "$MEDVE/payloads/nokia-xg-040g-md-an7581-transition-manual.bin" ursusflasher/src/transition-manual-bundle.bin
           cp "$MEDVE/payloads/nokia-xg-040g-mf-an7583-transition-auto.bin" ursusflasher/src/mf-transition-bundle.bin
@@ -133,9 +129,6 @@ jobs:
           cp -a "$MEDVE/diagnostics" ursusflasher/src/diagnostics
           cp -a "$MEDVE/vendor" ursusflasher/src/vendor
 
-          # Active recovery binaries are intentionally pinned independently of
-          # the production OpenWrt payloads. These exact bytes are the HW-proven
-          # BootROM/RAM rescue baseline used by the host backend.
           mkdir -p ursusflasher/src/recovery/mf
           cp "$MEDVE/payloads/nokia-xg-040g-mf-an7583-uart-preloader.bin" \
             ursusflasher/src/recovery/mf/openwrt-airoha-an7583-airoha_an7583-evb-preloader.bin
@@ -162,7 +155,6 @@ jobs:
           }
           JSON
 
-          # MD backend recovery files remain the frozen existing references.
           cp payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin \
             ursusflasher/src/recovery/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin
           cp payloads/md/bootrom-backup/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip \
@@ -170,7 +162,57 @@ jobs:
           cp payloads/md/bootrom-backup/nokia-xg040gmd-stock-recovery-initramfs.itb \
             ursusflasher/src/recovery/nokia-xg040gmd-stock-recovery-initramfs.itb
 
+      - name: Stamp unified test-kit metadata and MF stock adapter
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          version = Path('VERSION').read_text(encoding='utf-8').strip()
+          assert version == '0.2.62'
+          build_tag = 'ursusflasher-0.2.62-md-mf-test61'
+
+          backend = Path('ursusflasher/src/proven_backend.py')
+          text = backend.read_text(encoding='utf-8')
+          old_version = 'APP_VERSION = "0.1.0-md-lab1"'
+          old_tag = 'BUILD_TAG = "ursusflasher-0.1.0-md-lab1-proven-port"'
+          assert text.count(old_version) == 1
+          assert text.count(old_tag) == 1
+          text = text.replace(old_version, f'APP_VERSION = "{version}"')
+          text = text.replace(old_tag, f'BUILD_TAG = "{build_tag}"')
+          backend.write_text(text, encoding='utf-8', newline='\n')
+
+          # MF must never enter the legacy MD-only require_model gate. Keep the
+          # normal single y/N by changing only stock access acquisition, not the
+          # unattended/destructive policy.
+          mf = Path('ursusflasher/src/mf_runtime_install.py')
+          text = mf.read_text(encoding='utf-8')
+          old = 'access = _open_stock_access_auto(host) if unattended else pb.ask_credentials(require_model_gate=True, offer_interactive_plain_retry=True)'
+          new = 'access = _open_stock_access_auto(host)'
+          assert text.count(old) == 1
+          text = text.replace(old, new)
+          mf.write_text(text, encoding='utf-8', newline='\n')
+
+          manifest_path = Path('config/MANIFEST.json')
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          manifest['version'] = version
+          manifest['build_tag'] = build_tag
+          release = manifest.setdefault('release', {})
+          release['version'] = version
+          release['build_tag'] = build_tag
+          release['archive_root'] = f'Nokia-Router-MedveFlasher-{version}'
+          manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          caps_path = Path('config/FIRMWARE_CAPABILITIES.json')
+          caps = json.loads(caps_path.read_text(encoding='utf-8'))
+          caps['version'] = version
+          caps_path.write_text(json.dumps(caps, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print('TESTKIT_METADATA_AND_MF_STOCK_ADAPTER=PASS')
+          PY
+
       - name: Static host QA and board-aware smoke tests
+        env:
+          NOKIA_LANG: en
         run: |
           python3 -m py_compile ursusflasher/src/*.py ursusflasher/src/diagnostics/*.py
           python3 ursusflasher/src/stock_web.py --selftest
@@ -193,6 +235,9 @@ jobs:
               p=bp.load_profiles()[fam]
               assert p['model'].endswith('-'+fam.upper())
           assert mf_runtime_install.require_bl33().name == 'u-boot.runtime.lzma'
+          src=(root/'ursusflasher/src/mf_runtime_install.py').read_text()
+          assert 'pb.ask_credentials(require_model_gate=True' not in src
+          assert 'access = _open_stock_access_auto(host)' in src
           for fam in ('md','mf'):
               ur.verify_profile(ur.family_profile(fam))
           assert one_key_multi.require_role('mf','OPENWRT_UBI_SYSUPGRADE').stat().st_size == 9191705
@@ -201,9 +246,9 @@ jobs:
           PY
 
       - name: Verify proven backend package resource contract
+        env:
+          NOKIA_LANG: en
         run: |
-          # Mirror config JSON into repo-mode DATA only for this verification;
-          # build_release performs the same copy into exported package data.
           cp config/*.json ursusflasher/src/
           cp VERSION ursusflasher/src/VERSION
           python3 - <<'PY'
@@ -222,7 +267,7 @@ jobs:
       - name: Audit final ZIP
         run: |
           python3 - <<'PY'
-          import hashlib, json, zipfile
+          import hashlib, zipfile
           from pathlib import Path
           zpath=Path('dist/UrsusFlasher-0.2.62.zip')
           assert zpath.is_file(), zpath
@@ -254,6 +299,9 @@ jobs:
               mf=z.read(r+'fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb')
               assert len(mf)==9191705
               assert hashlib.sha256(mf).hexdigest()=='db881b8053cdfbdf49dd6c2336dee3ddfa489966456a3e75556c5a0f6cc7663b'
+              runtime=z.read(r+'data/mf_runtime_install.py').decode()
+              assert 'pb.ask_credentials(require_model_gate=True' not in runtime
+              assert 'access = _open_stock_access_auto(host)' in runtime
               sums=z.read(r+'SHA256SUMS').decode().splitlines()
               assert any('data/one_key_multi.py' in x for x in sums)
               assert any('data/payloads/mf/ursusboot/u-boot.runtime.lzma' in x for x in sums)
@@ -264,7 +312,7 @@ jobs:
         run: |
           mkdir -p upload
           cp dist/UrsusFlasher-0.2.62.zip upload/
-          cp dist/UrsusFlasher-0.2.62.zip.sha256 upload/
+          cp dist/UrsusFlasher-0.2.62.zip.sha256.txt upload/
           sha256sum upload/UrsusFlasher-0.2.62.zip > upload/SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
