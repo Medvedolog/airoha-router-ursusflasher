@@ -1,4 +1,4 @@
-name: Package MF persistent HW acceptance test
+name: Package UrsusFlasher 0.2.62 MD+MF test kit
 
 on:
   push:
@@ -9,12 +9,17 @@ on:
       - 'scripts/build_release.py'
       - 'scripts/repo_common.py'
       - 'ursusflasher/src/**'
+      - 'ursusflasher/release/**'
       - 'ursusboot/configs/**'
       - 'ursusboot/scripts/**'
       - 'ursusboot/source/**'
       - 'toolchains/**'
       - 'config/**'
       - 'payloads/**'
+      - 'fw/**'
+      - 'VERSION'
+      - 'START_ONECLICK.cmd'
+      - 'START_ONECLICK.sh'
       - 'START_EXPERT.cmd'
       - 'START_EXPERT.sh'
       - 'START_UART_RESTORE.cmd'
@@ -33,17 +38,30 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Checkout pinned MedveFlasher rc35 evidence/payloads
+      - name: Assert package version
+        run: test "$(cat VERSION)" = "0.2.62"
+
+      - name: Checkout pinned MedveFlasher hardware-proven MF lineage
         uses: actions/checkout@v4
         with:
           repository: Medvedolog/nokia-router-medveflasher
           ref: 342cac4cb99a924f3d83eb8e4b5259490377704e
           path: work/medveflasher-rc35
 
-      - name: Install MF RAM recovery build dependency
+      - name: Install build dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends liblzma-dev
 
-      - name: Build and audit MF RAM recovery helper
+      - name: Rebuild frozen MD TEST61 reference
+        env:
+          JOBS: '2'
+        run: |
+          bash ursusboot/scripts/build_alpha5_test61.sh
+          test "$(stat -c %s work/alpha5-test61-rebuild/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip)" = 503808
+          test "$(sha256sum work/alpha5-test61-rebuild/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip | awk '{print $1}')" = 3c922e4256b6047376a7d445006e6cb2a4485bb412747033a77defd15e42fcea
+          cmp work/alpha5-test61-rebuild/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip
+          echo MD_TEST61_FROZEN_REGRESSION=PASS
+
+      - name: Build and audit MF RAM Recovery
         env:
           MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
           JOBS: '2'
@@ -54,60 +72,203 @@ jobs:
           cp work/mf-ramboot/out/ursusboot-mf-0.1.0-TEST61-uart-preloader.bin payloads/mf/recovery/
           cp work/mf-ramboot/out/ursusboot-mf-0.1.0-TEST61-ram.fip payloads/mf/recovery/
 
-      - name: Compile MF acceptance and unified UART recovery code
+      - name: Build MF persistent runtime BL33
+        env:
+          MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
+          JOBS: '2'
         run: |
-          python3 -m py_compile \
-            ursusflasher/src/mf_persistent.py \
-            ursusflasher/src/mf_persistent_install.py \
-            ursusflasher/src/expert_mf_acceptance.py \
-            ursusflasher/src/uart_bootarea_restore.py
+          bash ursusboot/scripts/build_mf_runtime.sh
+          mkdir -p payloads/mf/ursusboot
+          cp work/mf-runtime/out/u-boot.runtime.lzma payloads/mf/ursusboot/u-boot.runtime.lzma
+          cp work/mf-runtime/out/ursusboot-mf-0.1.0-TEST61-runtime-ram.fip payloads/mf/ursusboot/
+          grep -Fxq 'bootcmd=ursusdispatch' work/mf-runtime/out/MF_RUNTIME.env
+          grep -q '^CONFIG_ENV_IS_IN_UBI=y$' work/mf-runtime/out/u-boot.MF_RUNTIME.full.config
+          ! grep -q '^CONFIG_ENV_IS_NOWHERE=y$' work/mf-runtime/out/u-boot.MF_RUNTIME.full.config
+          echo MF_RUNTIME_BUILD_PACKAGE_BINDING=PASS
 
-      - name: Verify packaged UART recovery profiles before export
+      - name: Stage pinned hardware-proven MF payloads
         run: |
+          set -e
+          SRC=work/medveflasher-rc35/data/payloads
+          mkdir -p payloads/mf/proven fw
+          for f in \
+            nokia-xg-040g-mf-an7583-production-preloader.bin \
+            nokia-xg-040g-mf-an7583-production-bl31-uboot.fip \
+            nokia-xg-040g-mf-an7583-production-sysupgrade.itb \
+            nokia-xg-040g-mf-an7583-stock-recovery-initramfs.itb \
+            nokia-xg-040g-mf-an7583-transition-auto.bin \
+            nokia-xg-040g-mf-an7583-transition-manual.bin \
+            nokia-xg-040g-mf-an7583-uart-preloader.bin \
+            nokia-xg-040g-mf-an7583-uart-recovery-safe-bl31-uboot.fip; do
+              cp "$SRC/$f" payloads/mf/proven/
+          done
+          cp "$SRC/nokia-xg-040g-mf-an7583-production-sysupgrade.itb" \
+            fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb
+          test "$(stat -c %s fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb)" = 9191705
+          test "$(sha256sum fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb | awk '{print $1}')" = db881b8053cdfbdf49dd6c2336dee3ddfa489966456a3e75556c5a0f6cc7663b
+          test "$(stat -c %s payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin)" = 118333
+          test "$(sha256sum payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin | awk '{print $1}')" = 778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e
+          echo MF_PROVEN_PAYLOADS=PASS
+
+      - name: Stage proven host backend resources
+        run: |
+          set -e
+          MEDVE=work/medveflasher-rc35/data
+          # The repository keeps large/reproducible Medve assets out of source;
+          # the test kit binds them at package time from the pinned commit.
+          cp "$MEDVE/backup-agent.sh" ursusflasher/src/backup-agent.sh
+          cp "$MEDVE/nokia-stock-tftp-backup-safe.sh" ursusflasher/src/nokia-stock-tftp-backup-safe.sh
+          cp "$MEDVE/env_patcher.py" ursusflasher/src/env_patcher.py
+          if [ -f "$MEDVE/stock-launcher.sh.in" ]; then cp "$MEDVE/stock-launcher.sh.in" ursusflasher/src/stock-launcher.sh.in; fi
+
+          # Published Medve payload names are the canonical built transition
+          # bundles. Keep the legacy backend filenames only inside package data.
+          cp "$MEDVE/payloads/nokia-xg-040g-md-an7581-transition-auto.bin" ursusflasher/src/transition-bundle.bin
+          cp "$MEDVE/payloads/nokia-xg-040g-md-an7581-transition-manual.bin" ursusflasher/src/transition-manual-bundle.bin
+          cp "$MEDVE/payloads/nokia-xg-040g-mf-an7583-transition-auto.bin" ursusflasher/src/mf-transition-bundle.bin
+          cp "$MEDVE/payloads/nokia-xg-040g-mf-an7583-transition-manual.bin" ursusflasher/src/mf-transition-manual-bundle.bin
+
+          rm -rf ursusflasher/src/recovery ursusflasher/src/diagnostics ursusflasher/src/vendor
+          cp -a "$MEDVE/recovery" ursusflasher/src/recovery
+          cp -a "$MEDVE/diagnostics" ursusflasher/src/diagnostics
+          cp -a "$MEDVE/vendor" ursusflasher/src/vendor
+
+          # Active recovery binaries are intentionally pinned independently of
+          # the production OpenWrt payloads. These exact bytes are the HW-proven
+          # BootROM/RAM rescue baseline used by the host backend.
+          mkdir -p ursusflasher/src/recovery/mf
+          cp "$MEDVE/payloads/nokia-xg-040g-mf-an7583-uart-preloader.bin" \
+            ursusflasher/src/recovery/mf/openwrt-airoha-an7583-airoha_an7583-evb-preloader.bin
+          cp "$MEDVE/payloads/nokia-xg-040g-mf-an7583-uart-recovery-safe-bl31-uboot.fip" \
+            ursusflasher/src/recovery/mf/openwrt-airoha-an7583-airoha_an7583-evb-bl31-uboot.fip
+          cp "$MEDVE/payloads/nokia-xg-040g-mf-an7583-stock-recovery-initramfs.itb" \
+            ursusflasher/src/recovery/mf/nokia-xg040gmf-stock-recovery-initramfs.itb
+          cat > ursusflasher/src/recovery/mf/OPENWRT_SNAPSHOT.json <<'JSON'
+          {
+            "target": "airoha/an7583",
+            "source": "https://downloads.openwrt.org/snapshots/targets/airoha/an7583/",
+            "artifacts": {
+              "preloader": {
+                "file": "openwrt-airoha-an7583-airoha_an7583-evb-preloader.bin",
+                "size": 118322,
+                "sha256": "c2ac1c183b18bc34632c958dfe0bd1dfdfb607f090e39c41126956641893362f"
+              },
+              "fip": {
+                "file": "openwrt-airoha-an7583-airoha_an7583-evb-bl31-uboot.fip",
+                "size": 339010,
+                "sha256": "8bfe8870e44923a463a3ed66c8b1906214f5c820fd8c15865c63430185de8bb2"
+              }
+            }
+          }
+          JSON
+
+          # MD backend recovery files remain the frozen existing references.
+          cp payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin \
+            ursusflasher/src/recovery/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin
+          cp payloads/md/bootrom-backup/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip \
+            ursusflasher/src/recovery/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip
+          cp payloads/md/bootrom-backup/nokia-xg040gmd-stock-recovery-initramfs.itb \
+            ursusflasher/src/recovery/nokia-xg040gmd-stock-recovery-initramfs.itb
+
+      - name: Static host QA and board-aware smoke tests
+        run: |
+          python3 -m py_compile ursusflasher/src/*.py ursusflasher/src/diagnostics/*.py
+          python3 ursusflasher/src/stock_web.py --selftest
+          python3 - <<'PY'
+          import json, sys
+          from pathlib import Path
+          root=Path('.').resolve()
+          sys.path.insert(0, str(root/'ursusflasher/src'))
+          import board_profiles as bp
+          import mf_persistent
+          import mf_runtime_install
+          import one_key_multi
+          import expert_multi
+          import uart_bootarea_restore as ur
+
+          assert (root/'VERSION').read_text().strip() == '0.2.62'
+          bundles=json.loads((root/'config/FIRMWARE_BUNDLES.json').read_text())
+          assert set(bundles['profiles']) == {'md','mf'}
+          for fam in ('md','mf'):
+              p=bp.load_profiles()[fam]
+              assert p['model'].endswith('-'+fam.upper())
+          assert mf_runtime_install.require_bl33().name == 'u-boot.runtime.lzma'
+          for fam in ('md','mf'):
+              ur.verify_profile(ur.family_profile(fam))
+          assert one_key_multi.require_role('mf','OPENWRT_UBI_SYSUPGRADE').stat().st_size == 9191705
+          assert one_key_multi.require_role('mf','STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE').stat().st_size == 118333
+          print('HOST_MULTI_BOARD_QA=PASS')
+          PY
+
+      - name: Verify proven backend package resource contract
+        run: |
+          # Mirror config JSON into repo-mode DATA only for this verification;
+          # build_release performs the same copy into exported package data.
+          cp config/*.json ursusflasher/src/
+          cp VERSION ursusflasher/src/VERSION
           python3 - <<'PY'
           import sys
           from pathlib import Path
           sys.path.insert(0, str(Path('ursusflasher/src').resolve()))
-          import uart_bootarea_restore as r
-          for family in ('md', 'mf'):
-              p = r.family_profile(family)
-              r.verify_profile(p)
-              print(f"{family.upper()} UART recovery profile PASS")
+          import proven_backend as p
+          p.verify_kit()
+          print('PROVEN_BACKEND_VERIFY_KIT=PASS')
           PY
+          rm ursusflasher/src/BOARD_PROFILES.json ursusflasher/src/FIRMWARE_BUNDLE.json ursusflasher/src/FIRMWARE_BUNDLES.json ursusflasher/src/FIRMWARE_CAPABILITIES.json ursusflasher/src/MANIFEST.json ursusflasher/src/UI_TERMS.json ursusflasher/src/VERSION
 
-      - name: Build release tree
+      - name: Build 0.2.62 release tree
         run: python3 scripts/build_release.py --out-dir dist
 
-      - name: Verify UART restore launchers are exported
+      - name: Audit final ZIP
         run: |
           python3 - <<'PY'
-          import zipfile
+          import hashlib, json, zipfile
           from pathlib import Path
-          zpath = next(Path('dist').glob('UrsusFlasher-*.zip'))
+          zpath=Path('dist/UrsusFlasher-0.2.62.zip')
+          assert zpath.is_file(), zpath
           with zipfile.ZipFile(zpath) as z:
-              names = z.namelist()
-              root = names[0].split('/', 1)[0]
-              required = [
-                  f'{root}/START_UART_RESTORE.cmd',
-                  f'{root}/START_UART_RESTORE.sh',
-                  f'{root}/data/uart_bootarea_restore.py',
-                  f'{root}/data/payloads/mf/recovery/ursusboot-mf-0.1.0-TEST61-uart-preloader.bin',
-                  f'{root}/data/payloads/mf/recovery/ursusboot-mf-0.1.0-TEST61-ram.fip',
+              names=z.namelist()
+              roots={n.split('/',1)[0] for n in names if n}
+              assert roots == {'UrsusFlasher-0.2.62'}, roots
+              r='UrsusFlasher-0.2.62/'
+              required=[
+                  'START_ONECLICK.cmd','START_ONECLICK.sh','START_EXPERT.cmd','START_EXPERT.sh',
+                  'START_UART_RESTORE.cmd','START_UART_RESTORE.sh',
+                  'data/one_key_multi.py','data/expert_multi.py','data/mf_runtime_install.py',
+                  'data/FIRMWARE_BUNDLES.json','data/BOARD_PROFILES.json',
+                  'data/payloads/mf/ursusboot/u-boot.runtime.lzma',
+                  'data/payloads/mf/recovery/ursusboot-mf-0.1.0-TEST61-uart-preloader.bin',
+                  'data/payloads/mf/recovery/ursusboot-mf-0.1.0-TEST61-ram.fip',
+                  'data/payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin',
+                  'data/payloads/mf/proven/nokia-xg-040g-mf-an7583-production-sysupgrade.itb',
+                  'data/recovery/mf/OPENWRT_SNAPSHOT.json',
+                  'data/recovery/mf/openwrt-airoha-an7583-airoha_an7583-evb-preloader.bin',
+                  'data/recovery/mf/openwrt-airoha-an7583-airoha_an7583-evb-bl31-uboot.fip',
+                  'fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb',
+                  'data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip',
+                  'SHA256SUMS','PAYLOAD_SHA256SUMS.txt','VERSION'
               ]
-              missing = [x for x in required if x not in names]
-              if missing:
-                  raise SystemExit('missing packaged UART recovery files: ' + ', '.join(missing))
-              print('packaged UART recovery files PASS')
+              missing=[x for x in required if r+x not in names]
+              assert not missing, missing
+              assert z.read(r+'VERSION').decode().strip() == '0.2.62'
+              mf=z.read(r+'fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb')
+              assert len(mf)==9191705
+              assert hashlib.sha256(mf).hexdigest()=='db881b8053cdfbdf49dd6c2336dee3ddfa489966456a3e75556c5a0f6cc7663b'
+              sums=z.read(r+'SHA256SUMS').decode().splitlines()
+              assert any('data/one_key_multi.py' in x for x in sums)
+              assert any('data/payloads/mf/ursusboot/u-boot.runtime.lzma' in x for x in sums)
+          print('FINAL_ZIP_AUDIT=PASS', zpath, zpath.stat().st_size)
           PY
 
       - name: Stage package artifact
         run: |
-          mkdir upload
-          cp dist/UrsusFlasher-*.zip upload/
-          sha256sum upload/*.zip > upload/SHA256SUMS.txt
+          mkdir -p upload
+          cp dist/UrsusFlasher-0.2.62.zip upload/
+          cp dist/UrsusFlasher-0.2.62.zip.sha256 upload/
+          sha256sum upload/UrsusFlasher-0.2.62.zip > upload/SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ursusflasher-mf-persistent-hw-acceptance
+          name: ursusflasher-0.2.62-md-mf-test61
           path: upload/
           if-no-files-found: error
