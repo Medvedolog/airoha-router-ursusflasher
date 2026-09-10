@@ -167,7 +167,7 @@ jobs:
           cat > ursusflasher/src/recovery/mf/OPENWRT_SNAPSHOT.json <<'JSON'
           {
             "target": "airoha/an7583",
-            "source": "pinned MedveFlasher BootROM/RAM recovery baseline",
+            "source": "https://downloads.openwrt.org/snapshots/targets/airoha/an7583/",
             "artifacts": {
               "preloader": {
                 "file": "openwrt-airoha-an7583-airoha_an7583-evb-preloader.bin",
@@ -210,8 +210,6 @@ jobs:
           text = text.replace(old_tag, f'BUILD_TAG = "{build_tag}"')
           backend.write_text(text, encoding='utf-8', newline='\n')
 
-          # MF stock uses the MF-aware stock identity adapter and must not enter
-          # the legacy MD-only require_model gate.
           mf = Path('ursusflasher/src/mf_runtime_install.py')
           text = mf.read_text(encoding='utf-8')
           old = 'access = _open_stock_access_auto(host) if unattended else pb.ask_credentials(require_model_gate=True, offer_interactive_plain_retry=True)'
