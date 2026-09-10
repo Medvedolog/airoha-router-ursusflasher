@@ -1,8 +1,10 @@
-name: MF2 AN7583 RAMBOOT
+name: MF AN7583 RAM recovery
 
 on:
   push:
-    branches: [ feature/mf-an7583 ]
+    branches:
+      - feature/mf-an7583
+      - feature/mf3-an7583-persistent
     paths:
       - 'ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_*'
       - 'ursusboot/scripts/mf2_ramreadonly_transform.py'
@@ -32,18 +34,18 @@ jobs:
           path: work/medveflasher-rc35
       - name: Install host FIP repack dependency
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends liblzma-dev
-      - name: Build MF2 RAM-only UrsusBoot
+      - name: Build MF RAM recovery UrsusBoot
         env:
           MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
           JOBS: '2'
         run: bash ursusboot/scripts/build_mf2_ramboot.sh
-      - name: Independent MF2 artifact audit
-        run: python3 ursusboot/scripts/audit_mf2_ramboot_artifact.py work/mf2-ramboot/out
-      - name: Upload MF2 RAMBOOT audit artifact
+      - name: Independent MF RAM recovery artifact audit
+        run: python3 ursusboot/scripts/audit_mf2_ramboot_artifact.py work/mf-ramboot/out
+      - name: Upload MF RAM recovery artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ursusboot-mf2-ram1-an7583-hwtest
-          path: work/mf2-ramboot/out
+          name: ursusboot-mf-0.1.0-TEST61-ram-recovery
+          path: work/mf-ramboot/out
           if-no-files-found: warn
           retention-days: 14
