@@ -18,8 +18,7 @@ def patch(root: Path) -> None:
     helper = r'''
 /* URSUS_MF2_HWTEST8_LED_FIX
  * HWTEST7 proved LAN2/3/4 as PHY 0x0a/0x0b/0x0c and native C45 reads
- * through mt7531-mdio-mmio.  Configure only volatile VEND2 LED0 state.
- * No HWTEST5 PBUS pseudo-MMD path and no persistent write is used.
+ * through mt7531-mdio-mmio. Configure only volatile VEND2 LED0 state.
  */
 #define URSUS_MF2_HWTEST8_MMD_VEND2       0x1f
 #define URSUS_MF2_HWTEST8_LED0_ON_CTRL    0x24
@@ -108,19 +107,25 @@ static int ursus_mf2_hwtest8_led_fix(struct airoha_eth *eth)
 
 '''
 
-    anchor = "static int airoha_eth_init(struct udevice *dev)\n"
-    if text.count(anchor) != 1:
-        raise SystemExit(f"airoha_eth_init anchor count={text.count(anchor)}")
-    text = text.replace(anchor, helper + anchor, 1)
+    func_anchor = "static int airoha_eth_init(struct udevice *dev)\n"
+    if text.count(func_anchor) != 1:
+        raise SystemExit(f"airoha_eth_init anchor count={text.count(func_anchor)}")
+    func_pos = text.index(func_anchor)
+    text = text[:func_pos] + helper + text[func_pos:]
 
+    # Only modify the body of airoha_eth_init; the same qid/q sequence also
+    # exists in another helper in this source snapshot.
+    body_pos = text.index(func_anchor) + len(func_anchor)
+    prefix, body = text[:body_pos], text[body_pos:]
     start_anchor = '''\tqid = 0;\n\tq = &qdma->q_rx[qid];\n\n'''
-    if text.count(start_anchor) != 1:
-        raise SystemExit(f"airoha_eth_init start anchor count={text.count(start_anchor)}")
-    text = text.replace(
+    if start_anchor not in body:
+        raise SystemExit("airoha_eth_init body anchor missing")
+    body = body.replace(
         start_anchor,
         start_anchor + '''\t/* Program only internal GPHY LED0 state before RX DMA starts. */\n\tif (port->id == 1) {\n\t\tint led_ret = ursus_mf2_hwtest8_led_fix(qdma->eth);\n\n\t\tif (led_ret)\n\t\t\treturn led_ret;\n\t}\n\n''',
         1,
     )
+    text = prefix + body
     eth.write_text(text, encoding="utf-8")
 
     out = eth.read_text(encoding="utf-8")
