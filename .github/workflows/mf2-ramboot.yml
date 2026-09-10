@@ -7,6 +7,9 @@ on:
       - feature/mf3-an7583-persistent
     paths:
       - 'ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_*'
+      - 'ursusboot/configs/ursusboot-common.cfg'
+      - 'ursusboot/configs/ursusboot-board-mf.cfg'
+      - 'ursusboot/scripts/apply_kconfig_fragment.py'
       - 'ursusboot/scripts/mf2_ramreadonly_transform.py'
       - 'ursusboot/scripts/mf2_ramreadonly_transform_impl.py'
       - 'ursusboot/scripts/mf2_repack_from_medve.py'
