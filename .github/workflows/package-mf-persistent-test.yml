@@ -1,0 +1,46 @@
+name: Package MF persistent HW acceptance test
+
+on:
+  push:
+    branches:
+      - feature/mf3-an7583-persistent
+    paths:
+      - '.github/workflows/package-mf-persistent-test.yml'
+      - 'scripts/build_release.py'
+      - 'scripts/repo_common.py'
+      - 'ursusflasher/src/**'
+      - 'config/**'
+      - 'payloads/**'
+      - 'START_EXPERT.cmd'
+      - 'START_EXPERT.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Compile MF acceptance code
+        run: |
+          python3 -m py_compile \
+            ursusflasher/src/mf_persistent.py \
+            ursusflasher/src/mf_persistent_install.py \
+            ursusflasher/src/expert_mf_acceptance.py
+      - name: Build release tree
+        run: python3 scripts/build_release.py --out-dir dist
+      - name: Stage package artifact
+        run: |
+          mkdir upload
+          cp dist/UrsusFlasher-*.zip upload/
+          sha256sum upload/*.zip > upload/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ursusflasher-mf-persistent-hw-acceptance
+          path: upload/
+          if-no-files-found: error
