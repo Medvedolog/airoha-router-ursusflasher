@@ -5,6 +5,8 @@ import argparse
 import re
 from pathlib import Path
 
+# PERSIST1 intentionally identifies the first NAND-resident canary separately
+# from the accepted MF2/HWTEST8 RAM build.
 BASE_VERSION = "0.1.0-mf3-persist1"
 
 
