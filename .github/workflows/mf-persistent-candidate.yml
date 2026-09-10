@@ -1,12 +1,17 @@
-name: MF persistent candidate / MD freeze guard
+name: MF persistent candidate / EXPERT integration / MD freeze guard
 
 on:
   push:
     branches:
       - feature/mf3-an7583-persistent
     paths:
+      - 'START_EXPERT.cmd'
+      - 'START_EXPERT.sh'
       - 'ursusflasher/src/mf_persistent.py'
+      - 'ursusflasher/src/mf_persistent_install.py'
+      - 'ursusflasher/src/expert_mf_acceptance.py'
       - 'ursusflasher/tools/selftest_mf_persistent_candidate.py'
+      - 'ursusflasher/tools/selftest_mf_persistent_expert_integration.py'
       - 'config/BOARD_PROFILES.json'
       - 'docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.38_MF_PERSISTENT_CORRECTION.md'
       - 'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-*'
@@ -26,14 +31,30 @@ jobs:
         with:
           python-version: '3.13'
 
-      - name: Compile MF persistent host code
+      - name: Compile MF persistent host and EXPERT integration code
         run: |
           python3 -m py_compile \
             ursusflasher/src/mf_persistent.py \
-            ursusflasher/tools/selftest_mf_persistent_candidate.py
+            ursusflasher/src/mf_persistent_install.py \
+            ursusflasher/src/expert_mf_acceptance.py \
+            ursusflasher/tools/selftest_mf_persistent_candidate.py \
+            ursusflasher/tools/selftest_mf_persistent_expert_integration.py
 
       - name: Synthetic 9-entry stock FIP candidate test
         run: python3 ursusflasher/tools/selftest_mf_persistent_candidate.py
+
+      - name: EXPERT item 2 integration and fail-closed routing test
+        run: python3 ursusflasher/tools/selftest_mf_persistent_expert_integration.py
+
+      - name: EXPERT launchers must use branch acceptance wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fq 'data/expert_mf_acceptance.py' START_EXPERT.sh
+          grep -Fq 'ursusflasher/src/expert_mf_acceptance.py' START_EXPERT.sh
+          grep -Fq 'data\expert_mf_acceptance.py' START_EXPERT.cmd
+          grep -Fq 'ursusflasher\src\expert_mf_acceptance.py' START_EXPERT.cmd
+          echo 'MF_EXPERT_LAUNCHER=PASS'
 
       - name: Freeze proven MD TEST61 payload identity
         shell: bash
@@ -55,7 +76,7 @@ jobs:
           check payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-u-boot.bin 43296d98686ada9e4e13c5a5a49430372abf45e9bd0fc8eae837920e8ba5224d
           check payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-u-boot.lzma bec245ab0b10e3fffcc2f0a482c2c3b97b03577b4a03c436857243cd68ff9d29
 
-      - name: Board profile must keep MF write disabled before HW acceptance
+      - name: Board profile must keep broad MF writes disabled before HW acceptance
         run: |
           python3 - <<'PY'
           import json
@@ -63,7 +84,8 @@ jobs:
           assert p['md']['write_policy']['persistent_write_enabled'] is True
           assert p['md']['write_policy']['backend'] == 'MD_EXISTING'
           assert p['mf']['write_policy']['persistent_write_enabled'] is False
+          assert p['mf']['write_policy']['allowed_write_actions'] == ['restore_nokia']
           assert p['mf']['write_policy']['backend'] == 'DEVICE_DERIVED_MTD0_PATCH_PENDING_HW_ACCEPTANCE'
           assert p['mf']['evidence']['ursusboot_persist2'] == 'HW_REJECTED_DO_NOT_FLASH'
-          print('BOARD_POLICY_CORRECTION=PASS')
+          print('BOARD_POLICY_CORRECTION=PASS broad_mf_writes=disabled acceptance_wrapper=item2-stock-only')
           PY
