@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "profiles": {
+    "md": {
+      "target": "Nokia XG-040G-MD / Airoha AN7581",
+      "files": [
+        {
+          "path": "fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin",
+          "role": "OPENWRT_NONUBI_SYSUPGRADE",
+          "sha256": "23ad06174184f71c9a845734571752f62930ba1cfac45f4ad8deadd9d8965820",
+          "size": 8714513,
+          "required": true
+        },
+        {
+          "path": "fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb",
+          "role": "OPENWRT_UBI_SYSUPGRADE",
+          "sha256": "47ea7c6f1e22a4aae9482e653a4fc6e87524f7e27847aaaed7fb75349cae7f3d",
+          "size": 10408217,
+          "required": true
+        },
+        {
+          "path": "data/payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin",
+          "repo_path": "payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin",
+          "role": "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE",
+          "sha256": "6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808",
+          "size": 113447,
+          "required": true
+        }
+      ]
+    },
+    "mf": {
+      "target": "Nokia XG-040G-MF / Airoha AN7583",
+      "openwrt_source": "pinned MedveFlasher 342cac4cb99a924f3d83eb8e4b5259490377704e hardware-proven production payload",
+      "files": [
+        {
+          "path": "fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb",
+          "role": "OPENWRT_UBI_SYSUPGRADE",
+          "sha256": "db881b8053cdfbdf49dd6c2336dee3ddfa489966456a3e75556c5a0f6cc7663b",
+          "size": 9191705,
+          "required": true
+        },
+        {
+          "path": "data/payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin",
+          "repo_path": "payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin",
+          "role": "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE",
+          "sha256": "778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e",
+          "size": 118333,
+          "required": true
+        }
+      ],
+      "not_bundled": [
+        {
+          "role": "OPENWRT_NONUBI_SYSUPGRADE",
+          "reason": "not required for the normal MF one-click STOCK/OPENWRT_STOCK_LAYOUT -> OPENWRT_UBI path; may be added when the matching factory-layout image is supplied"
+        }
+      ]
+    }
+  }
+}
