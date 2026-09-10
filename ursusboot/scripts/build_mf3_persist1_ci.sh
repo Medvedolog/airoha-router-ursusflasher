@@ -201,6 +201,6 @@ PERSIST_SHA=$(sha256sum "$OUT/ursusboot-mf-0.1.0-mf3-persist1-persistent.fip" | 
   echo 'GENERIC_WRITER_COMMANDS=DISABLED'
   echo "PERSISTENT_FIP_SIZE=$PERSIST_SIZE"
   echo "PERSISTENT_FIP_SHA256=$PERSIST_SHA"
-done | tee "$OUT/MF3-PERSIST1-BUILD-ID.txt"
+} | tee "$OUT/MF3-PERSIST1-BUILD-ID.txt"
 
 echo "MF3_PERSIST1_CI=PASS out=$OUT"
