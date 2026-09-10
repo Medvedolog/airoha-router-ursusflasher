@@ -1,0 +1,57 @@
+name: MF3 validator source dump
+
+on:
+  push:
+    branches:
+      - feature/mf3-an7583-persistent
+    paths:
+      - '.github/workflows/mf3-validator-dump.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract TEST61 source and print FIP validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/src
+          tar --use-compress-program=unzstd -xf ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst -C work/src
+          python3 - <<'PY'
+          from pathlib import Path
+
+          files=list(Path('work/src').rglob('cmd/ursusupdate.c'))
+          if len(files) != 1:
+              raise SystemExit(f'ursusupdate.c matches={files}')
+          p=files[0]
+          s=p.read_text(encoding='utf-8')
+          print('SOURCE=' + str(p))
+
+          def dump_func(name):
+              needles=(f'static int {name}(', f'int {name}(')
+              starts=[s.find(n) for n in needles if s.find(n) >= 0]
+              if not starts:
+                  print(f'=== {name}: NOT FOUND ===')
+                  return
+              start=min(starts)
+              brace=s.find('{', start)
+              depth=0
+              end=None
+              for i in range(brace, len(s)):
+                  if s[i]=='{': depth += 1
+                  elif s[i]=='}':
+                      depth -= 1
+                      if depth==0:
+                          end=i+1
+                          break
+              print(f'=== BEGIN {name} ===')
+              print(s[start:end])
+              print(f'=== END {name} ===')
+
+          for name in ('ursus_fip_validate','ursus_fip_validate_current','ursus_mem_has','ursus_fip_update_start'):
+              dump_func(name)
+          PY
