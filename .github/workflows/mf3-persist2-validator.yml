@@ -1,26 +1,20 @@
-name: MF3 AN7583 PERSIST2 validator rollback
+name: LEGACY REJECTED - MF PERSIST2 forensic rebuild
 
+# PERSIST2 completed erase/write/readback on hardware but failed the following
+# cold NAND boot. It is retained only to reproduce the rejected artifact/parser
+# history. It MUST NOT run automatically on branch pushes and its artifacts are
+# NOT FOR FLASH. See TZ v5.38.
 on:
-  push:
-    branches:
-      - feature/mf3-an7583-persistent
-    paths:
-      - 'ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_*'
-      - 'ursusboot/scripts/mf2_*'
-      - 'ursusboot/scripts/mf3_*'
-      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
-      - 'toolchains/**'
-      - '.github/workflows/mf3-persist2-validator.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build:
+  forensic-rebuild-only:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout UrsusFlasher persistent branch
+      - name: REJECTED PATH - checkout for forensic rebuild only
         uses: actions/checkout@v4
 
       - name: Checkout pinned MedveFlasher rc35 evidence and payloads
@@ -33,13 +27,15 @@ jobs:
       - name: Install host FIP repack dependency
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends liblzma-dev
 
-      - name: Build and audit MF3 PERSIST2
+      - name: Forensic rebuild of HW-REJECTED PERSIST2
         env:
           MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
           JOBS: '2'
-        run: bash ursusboot/scripts/build_mf3_persist2_ci.sh
+        run: |
+          echo 'WARNING: MF PERSIST2 IS HARDWARE-REJECTED. OUTPUT IS NOT FOR FLASH.'
+          bash ursusboot/scripts/build_mf3_persist2_ci.sh
 
-      - name: Regression check emitted FIP against embedded parser geometry
+      - name: Reproduce historical compact-FIP parser geometry
         shell: bash
         run: |
           set -euo pipefail
@@ -94,18 +90,19 @@ jobs:
               for uuid, off, size in entries:
                   if off < toc_end or off > term or size > term - off:
                       raise SystemExit(f'{path}: payload overlaps TOC or declared end')
-              print(f'MF3_FIP_GEOMETRY=PASS file={path.name} entries={len(entries)} toc_end=0x{toc_end:x} first_payload=0x{entries[0][1]:x} end=0x{term:x}')
+              print(f'LEGACY_MF3_FIP_GEOMETRY=PASS file={path.name} entries={len(entries)} toc_end=0x{toc_end:x} end=0x{term:x}')
 
           out = root / 'out'
           check(next(out.glob('*-ram.fip')))
           check(next(out.glob('*-persistent.fip')))
+          print('PERSIST2_STATUS=HW_REJECTED_NOT_FOR_FLASH')
           PY
 
-      - name: Upload MF3 PERSIST2 artifact
+      - name: Upload rejected forensic artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: ursusboot-mf3-an7583-persist2-validator-rollback
+          name: REJECTED-NOT-FOR-FLASH-mf-persist2-forensic
           path: work/mf2-ramboot/out
           if-no-files-found: warn
-          retention-days: 14
+          retention-days: 7
