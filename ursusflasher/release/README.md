@@ -1,15 +1,13 @@
 # UrsusFlasher 0.2.62 TEST — Nokia XG-040G-MD + XG-040G-MF
 
-Готовый тестовый комплект UrsusFlasher для двух аппаратных семейств:
+Hardware-test комплект для:
 
 ```text
 Nokia XG-040G-MD -> Airoha AN7581 -> UrsusBoot-MD TEST61
 Nokia XG-040G-MF -> Airoha AN7583 -> UrsusBoot-MF TEST61
 ```
 
-Для запуска нужен Python 3.12+; сторонние Python-пакеты не требуются.
-
-Это **hardware-test kit**, а не релиз. Ветка разработки и main не объединяются автоматически, tag/release этим комплектом не создаются.
+Python 3.12+; сторонние Python-пакеты не требуются. Это тестовый комплект, не release: `main`, tag и GitHub Release автоматически не изменяются.
 
 ## Запуск
 
@@ -18,6 +16,7 @@ Windows:
 ```text
 START_ONECLICK.cmd
 START_EXPERT.cmd
+START_UART_RESTORE.cmd
 ```
 
 Linux/macOS:
@@ -25,131 +24,79 @@ Linux/macOS:
 ```text
 ./START_ONECLICK.sh
 ./START_EXPERT.sh
+./START_UART_RESTORE.sh
 ```
 
-Аварийное восстановление через UART/BootROM:
+## 0.2.62
+
+- ONE-CLICK и EXPERT определяют MD/MF по model/SoC и выбирают board-specific path.
+- MD остаётся frozen `0.1.0-alpha5-UBIUX1-TEST61`; CI пересобирает FIP и сравнивает его byte-for-byte с эталоном.
+- MF persistent runtime основан на TEST61, использует `bootcmd=ursusdispatch` и persistent redundant UBI environment.
+- MF bootloader устанавливается device-derived способом: читается фактический FIP/boot-area конкретного устройства, сохраняются native ранние FIP entries и factory environment, заменяется NT_FW/BL33, затем выполняется полный readback.
+- MF RAM Recovery остаётся отдельным BootROM/UART образом.
+- MF LAN2/LAN3/LAN4 используют аппаратно проверенный HWTEST8 native Clause-45 LED path.
+- Factory identity для MF читается из RI; runtime `eth0` MAC не считается factory MAC.
+- Перед destructive write остаётся одно обычное `y/N`. EXPERT позволяет пропустить полный restore-grade backup; локальная копия изменяемого boot-object и readback остаются обязательными.
+- После начала записи автоматического fallback на другой writer нет.
+
+## Canonical OpenWrt firmware
+
+`fw/` содержит ровно восемь актуальных UnameOne images: четыре для MD и четыре для MF. Старый MF production sysupgrade из MedveFlasher больше не подменяет firmware во время CI.
+
+MD / AN7581:
 
 ```text
-START_UART_RESTORE.cmd
-START_UART_RESTORE.sh
+openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin
+openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb
+openwrt-airoha-an7581-nokia_xg-040g-md-initramfs-uImage.itb
+openwrt-airoha-an7581-nokia_xg-040g-md-ubi-initramfs-recovery.itb
 ```
 
-## Что изменилось в 0.2.62
-
-- ONE-CLICK и EXPERT определяют MD/MF по model/SoC и используют board-specific профиль.
-- MD остаётся на frozen `0.1.0-alpha5-UBIUX1-TEST61`; его FIP при сборке 0.2.62 пересобирается и byte-for-byte сравнивается с эталоном.
-- MF получил отдельный persistent runtime на базе TEST61: `bootcmd=ursusdispatch`, redundant environment в UBI `ubootenv`/`ubootenv2`, normal WebFailsafe/UBI install/update path.
-- MF RAM Recovery остаётся отдельным образом с `ENV_IS_NOWHERE`; его нельзя путать с persistent runtime.
-- MF persistent bootloader не прошивается универсальным FIP. Host читает фактический FIP/boot-area данного устройства, заменяет только NT_FW/BL33, сохраняет native ранние FIP-компоненты и factory environment, затем делает полный SHA256 readback.
-- Для MF LAN2/LAN3/LAN4 используется аппаратно проверенный HWTEST8 native Clause-45 LED path; AN7581 raw-MMIO LED backend в MF не используется.
-- Общий RI parser использует factory identity из RI, а не временный runtime `eth0` MAC.
-- После destructive preflight остаётся одно обычное `y/N`. EXPERT позволяет явно пропустить полный restore-grade backup для stock bootloader-install; readback целевого boot-object всё равно обязателен.
-- Автоматический alternate writer после начала записи запрещён: ошибка/неоднозначный readback останавливает дальнейший переход.
-
-## ONE-CLICK: MD
-
-Путь MD сохраняет TEST61 behavior:
+MF / AN7583:
 
 ```text
-Nokia STOCK / установленная OpenWrt
-        -> определить MD / AN7581
-        -> проверить нужные payload
-        -> установить/использовать UrsusBoot-MD TEST61
-        -> полная проверка boot-object после записи
-        -> UrsusBoot Recovery
-        -> проверить OpenWrt
-        -> STOCK/Factory -> UBI или UBI -> UBI
-        -> readback / operation complete
-        -> reboot OpenWrt
+openwrt-airoha-an7583-nokia_xg-040g-mf-squashfs-sysupgrade.bin
+openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb
+openwrt-airoha-an7583-nokia_xg-040g-mf-initramfs-uImage.itb
+openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-initramfs-recovery.itb
 ```
 
-Уже установленный UrsusBoot не перепрошивается вторым автоматическим writer только из-за отличия отображаемой версии.
+ONE-CLICK uses the matching `*-ubi-squashfs-sysupgrade.itb` for the normal STOCK/Factory -> UBI transition. The non-UBI sysupgrade remains available for factory-layout OpenWrt operations. Initramfs images are included for recovery/manual use.
 
-## ONE-CLICK: MF
+Authoritative size/SHA256 values are in `data/FIRMWARE_BUNDLES.json` and every package file is covered by root `SHA256SUMS`.
 
-Основной MF путь:
+## ONE-CLICK MF path
 
 ```text
-Nokia STOCK / установленная OpenWrt
-        -> доказать Nokia XG-040G-MF / AN7583
-        -> проверить board-specific payload по size + SHA256
-        -> прочитать фактический MF FIP/boot-area
-        -> построить device-derived candidate
-             native ранние FIP entries сохранены
-             stock prefix сохранён
-             stock environment сохранён
-             заменён только NT_FW/BL33 UrsusBoot-MF
-        -> одно y/N перед destructive write
-        -> один выбранный writer
-        -> полный SHA256 readback
+Nokia STOCK / installed OpenWrt
+        -> prove XG-040G-MF / AN7583
+        -> validate board-specific payload and firmware
+        -> build device-derived UrsusBoot candidate
+        -> one y/N
+        -> one selected writer
+        -> full readback
         -> reboot + Reset -> UrsusBoot Recovery
-        -> проверить MF identity заново
-        -> загрузить UBI sysupgrade
-        -> при stock/factory layout проверить MF BL2/preloader candidate
-        -> UBI migration / update
-        -> BL2 LAST там, где этого требует migration transaction
+        -> verify MF identity again
+        -> install canonical UnameOne UBI sysupgrade
+        -> board-specific BL2/preloader committed last where migration requires it
         -> operation complete
         -> reboot OpenWrt
 ```
 
-MF bootloader self-update через универсальный Web FIP endpoint намеренно не используется: обновление загрузчика остаётся **device-derived host operation** из Nokia STOCK или работающей OpenWrt.
+## Payload cleanup
 
-## MF OpenWrt payload
+The test ZIP does not carry historical HWFIX/UIFIX/TEST57-TEST60 engineering payloads, build-only donors, source-only helper files, developer selftests, or duplicate large recovery-source payloads. It contains only runtime payloads required by MD/MF ONE-CLICK, EXPERT and UART recovery. Pinned transition/recovery resources remain under `data/` because the proven backend uses them directly.
 
-0.2.62 уже содержит hardware-proven MF UBI production payload из pinned MedveFlasher lineage:
+## Recovery
 
-```text
-source commit
-342cac4cb99a924f3d83eb8e4b5259490377704e
+MF Recovery keeps two separate concepts:
 
-MF UBI sysupgrade
-size    9191705
-SHA256  db881b8053cdfbdf49dd6c2336dee3ddfa489966456a3e75556c5a0f6cc7663b
+1. current UrsusBoot-MF TEST61 RAM Recovery for diagnostics/debrick;
+2. pinned BootROM/XMODEM rescue baseline used by the host backend.
 
-MF production preloader
-size    118333
-SHA256  778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e
-```
+Reset held before power-on enters Airoha BootROM. Normal UrsusBoot Recovery is requested after ordinary boot/reboot by holding Reset through the configured red LED sequence.
 
-Поэтому **для обычного MF ONE-CLICK отдельный OpenWrt-файл от пользователя не нужен**.
-
-Отдельный MF non-UBI/factory-layout sysupgrade в 0.2.62 не включён. Он нужен только если требуется симметричный MD режим «установить/обновить OpenWrt, оставаясь в заводской физической разметке». Основной MF путь переводит stock/factory layout в UBI.
-
-## MF Recovery / BootROM
-
-В комплекте сохранены две разные сущности:
-
-1. UrsusBoot-MF RAM Recovery `0.1.0-TEST61` — современный read-only/debrick runtime для диагностики, backup и RAM-операций.
-2. Pinned BootROM/XMODEM rescue baseline — доказанные preloader/FIP bytes для аварийного входа и восстановления.
-
-Reset до подачи питания относится к Airoha BootROM. Обычный UrsusBoot Recovery вызывается после старта/reboot удержанием Reset до последовательности 2 коротких + 3 длинных красных миганий и постоянного красного света.
-
-## Проверки перед записью
-
-Применимые проверки выполняются автоматически: family/model/SoC, текущая система, layout, MTD/UBI target, размер и SHA256 payload, доступность writer, сохранность device-derived FIP structure, transfer SHA256. Для миграции проверяется board-specific preloader/BL2 candidate.
-
-После записи bootloader/boot-area/FIP считывается обратно. Несовпадение означает STOP: второй writer автоматически не запускается.
-
-## Резервные копии
-
-ONE-CLICK с Nokia STOCK по умолчанию снимает restore-grade backup перед первичной destructive операцией. EXPERT позволяет осознанно отказаться от полного backup для текущего запуска; это не отменяет локальную копию изменяемого boot-object и обязательный readback после записи.
-
-Полный backup и восстановление остаются family-aware. MD и MF не используют backup другого семейства как штатный автоматический источник.
-
-## Ethernet
-
-Для Recovery предпочтительны:
-
-```text
-MD: LAN2 / LAN3
-MF: LAN2 / LAN3 / LAN4
-```
-
-MF LAN1 — отдельный EN8811H 2.5G PHY и не является обязательным recovery port.
-
-## Контроль целостности
-
-В корне распакованного комплекта:
+## Integrity
 
 ```text
 SHA256SUMS
@@ -157,4 +104,4 @@ PAYLOAD_SHA256SUMS.txt
 VERSION
 ```
 
-Сборочный CI дополнительно проверяет frozen MD TEST61, MF RAM Recovery, MF persistent runtime, pinned Medve payload hashes, host Python compilation, board-aware manifest и окончательное содержимое ZIP.
+CI verifies frozen MD TEST61, MF RAM Recovery, MF persistent runtime, canonical eight-file UnameOne firmware set, pinned transition/recovery resources, host Python compilation, package payload allowlist and final ZIP contents.
