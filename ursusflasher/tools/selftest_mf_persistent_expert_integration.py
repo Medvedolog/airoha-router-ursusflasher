@@ -22,7 +22,7 @@ def state(model: str, soc: str, system: str, probe: str = ds.PROBE_COMPLETE) -> 
     )
 
 
-# MD behavior must remain byte/code-path independent from the feature wrapper.
+# MD behavior must remain independent from the feature wrapper.
 md = state("Nokia XG-040G-MD", "Airoha AN7581", "NOKIA_STOCK")
 assert acc.acceptance_action_applicability(md)[2] == acc._original_action_applicability(md)[2]
 
@@ -43,8 +43,8 @@ for blocked in (
     assert action.enabled is False
     assert action.resolved_backend == "BOARD_PROFILE_WRITE_DISABLED"
 
-# Exercise dispatch without hardware: MF must use the dedicated acceptance installer,
-# never the captured MD dispatcher. Repeated family proof and root bootstrap are mandatory.
+# Exercise dispatch without hardware: MF must reuse the proven MF install-access gate,
+# then the dedicated acceptance installer, never the captured MD dispatcher.
 events: list[str] = []
 
 
@@ -60,12 +60,17 @@ class Telnet:
         events.append("close_telnet")
 
 
-old_ask = acc.proven.ask_credentials
+old_install_access = acc.proven._install_access
 old_login = acc.proven.login_root_family
 old_require = acc.proven.require_supported_model_over_telnet
 old_run = acc.mf_persistent_install.run_stock_acceptance
 try:
-    acc.proven.ask_credentials = lambda **kwargs: (events.append("ask_credentials") or Access())
+    def fake_install_access(profile):
+        assert profile is acc.proven.MF_INSTALL_PROFILE
+        events.append("mf_install_access")
+        return Access()
+
+    acc.proven._install_access = fake_install_access
 
     def fake_login(access, family, allow_service_provisioning=False):
         assert family == "mf"
@@ -78,13 +83,13 @@ try:
     acc.mf_persistent_install.run_stock_acceptance = lambda access: (events.append("mf_installer") or 0)
     acc.acceptance_bootloader_dispatch("192.168.1.1", mf_stock)
 finally:
-    acc.proven.ask_credentials = old_ask
+    acc.proven._install_access = old_install_access
     acc.proven.login_root_family = old_login
     acc.proven.require_supported_model_over_telnet = old_require
     acc.mf_persistent_install.run_stock_acceptance = old_run
 
 assert events == [
-    "ask_credentials",
+    "mf_install_access",
     "login_root_mf",
     "model_gate",
     "close_telnet",
@@ -94,5 +99,6 @@ assert events == [
 
 print("MF_PERSISTENT_EXPERT_INTEGRATION=PASS")
 print("MF_STOCK_ITEM2_BACKEND=" + acc.MF_ACCEPTANCE_BACKEND)
+print("MF_INSTALL_ACCESS_GATE=PROVEN_BACKEND")
 print("MD_EXPERT_POLICY=UNCHANGED")
 print("MF_NON_STOCK_WRITES=BLOCKED")
