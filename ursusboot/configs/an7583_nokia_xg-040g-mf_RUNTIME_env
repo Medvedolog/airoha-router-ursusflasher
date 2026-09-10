@@ -1,0 +1,8 @@
+ipaddr=192.168.1.1
+serverip=192.168.1.254
+loadaddr=0x90000000
+console=earlycon=uart8250,mmio32,0x11002000 console=ttyS0
+bootdelay=0
+bootcmd=ursusdispatch
+preboot=
+bootled_status=green:power
