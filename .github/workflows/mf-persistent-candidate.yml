@@ -1,0 +1,69 @@
+name: MF persistent candidate / MD freeze guard
+
+on:
+  push:
+    branches:
+      - feature/mf3-an7583-persistent
+    paths:
+      - 'ursusflasher/src/mf_persistent.py'
+      - 'ursusflasher/tools/selftest_mf_persistent_candidate.py'
+      - 'config/BOARD_PROFILES.json'
+      - 'docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.38_MF_PERSISTENT_CORRECTION.md'
+      - 'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-*'
+      - '.github/workflows/mf-persistent-candidate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Compile MF persistent host code
+        run: |
+          python3 -m py_compile \
+            ursusflasher/src/mf_persistent.py \
+            ursusflasher/tools/selftest_mf_persistent_candidate.py
+
+      - name: Synthetic 9-entry stock FIP candidate test
+        run: python3 ursusflasher/tools/selftest_mf_persistent_candidate.py
+
+      - name: Freeze proven MD TEST61 payload identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          check() {
+            local path="$1" expected="$2"
+            local actual
+            actual=$(sha256sum "$path" | awk '{print $1}')
+            if [ "$actual" != "$expected" ]; then
+              echo "MD TEST61 FROZEN PAYLOAD CHANGED: $path" >&2
+              echo "expected=$expected" >&2
+              echo "actual=$actual" >&2
+              exit 1
+            fi
+            echo "MD_TEST61_FROZEN=PASS path=$path sha256=$actual"
+          }
+          check payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip 3c922e4256b6047376a7d445006e6cb2a4485bb412747033a77defd15e42fcea
+          check payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-u-boot.bin 43296d98686ada9e4e13c5a5a49430372abf45e9bd0fc8eae837920e8ba5224d
+          check payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-u-boot.lzma bec245ab0b10e3fffcc2f0a482c2c3b97b03577b4a03c436857243cd68ff9d29
+
+      - name: Board profile must keep MF write disabled before HW acceptance
+        run: |
+          python3 - <<'PY'
+          import json
+          p=json.load(open('config/BOARD_PROFILES.json', encoding='utf-8'))['profiles']
+          assert p['md']['write_policy']['persistent_write_enabled'] is True
+          assert p['md']['write_policy']['backend'] == 'MD_EXISTING'
+          assert p['mf']['write_policy']['persistent_write_enabled'] is False
+          assert p['mf']['write_policy']['backend'] == 'DEVICE_DERIVED_MTD0_PATCH_PENDING_HW_ACCEPTANCE'
+          assert p['mf']['evidence']['ursusboot_persist2'] == 'HW_REJECTED_DO_NOT_FLASH'
+          print('BOARD_POLICY_CORRECTION=PASS')
+          PY
