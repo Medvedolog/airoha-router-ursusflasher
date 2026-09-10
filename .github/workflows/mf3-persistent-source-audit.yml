@@ -1,0 +1,71 @@
+name: MF3 AN7583 persistent source audit
+
+on:
+  push:
+    branches:
+      - feature/mf3-an7583-persistent
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout UrsusFlasher persistent branch
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned MedveFlasher rc35 evidence
+        uses: actions/checkout@v4
+        with:
+          repository: Medvedolog/nokia-router-medveflasher
+          ref: 342cac4cb99a924f3d83eb8e4b5259490377704e
+          path: work/medveflasher-rc35
+
+      - name: Extract exact TEST61 source
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p work/mf3-source
+          tar --zstd -xf ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst -C work/mf3-source
+          test -f work/mf3-source/cmd/ursusweb.c
+          test -f work/mf3-source/cmd/ursusubi.c
+          test -f work/mf3-source/cmd/ursusupdate.c
+
+      - name: Collect persistent-path source evidence
+        shell: bash
+        run: |
+          set -euxo pipefail
+          OUT=work/mf3-audit
+          SRC=work/mf3-source
+          MEDVE=work/medveflasher-rc35
+          mkdir -p "$OUT"
+          cp "$SRC/cmd/ursusweb.c" "$OUT/TEST61-ursusweb.c"
+          cp "$SRC/cmd/ursusubi.c" "$OUT/TEST61-ursusubi.c"
+          cp "$SRC/cmd/ursusupdate.c" "$OUT/TEST61-ursusupdate.c"
+          cp "$SRC/cmd/ursusled.c" "$OUT/TEST61-ursusled.c"
+          cp "$SRC/cmd/Makefile" "$OUT/TEST61-cmd-Makefile"
+          cp "$SRC/drivers/gpio/Makefile" "$OUT/TEST61-gpio-Makefile"
+          cp "$SRC/arch/arm/dts/an7583-nokia-xg-040g-mf.dts" "$OUT/TEST61-mf.dts"
+          cp "$SRC/arch/arm/dts/an7583.dtsi" "$OUT/TEST61-an7583.dtsi"
+          cp "$MEDVE/data/recovery/transition-control-source/shipped-mf-nokia-ubi-installer.sh" "$OUT/MEDVE-mf-nokia-ubi-installer.sh"
+          cp "$MEDVE/data/recovery/transition-control-source/shipped-mf-nokia-ubi-finish.sh" "$OUT/MEDVE-mf-nokia-ubi-finish.sh"
+          cp "$MEDVE/data/recovery/transition-control-source/shipped-mf-manual-nokia-ubi-installer.sh" "$OUT/MEDVE-mf-manual-nokia-ubi-installer.sh"
+          cp "$MEDVE/data/recovery/transition-control-source/shipped-mf-manual-nokia-ubi-finish.sh" "$OUT/MEDVE-mf-manual-nokia-ubi-finish.sh"
+          sha256sum "$OUT"/* | sort > "$OUT/SHA256SUMS"
+
+          {
+            echo '=== TEST61 persistent entrypoints ==='
+            grep -nE 'ursus_ubi_(update|migration|reset)|ursus_fip_update|POST /api|ubi(updatevol|mkvol|format)|mtd_(erase|write)|mtd (erase|write)' "$SRC/cmd/ursusweb.c" "$SRC/cmd/ursusubi.c" "$SRC/cmd/ursusupdate.c" || true
+            echo
+            echo '=== board/layout literals ==='
+            grep -nE 'XG-040G-MD|AN7581|0x51c0000|0x5200000|ubootenv|ubootenv2|bosa|ri|fip|fit' "$SRC/cmd/ursusubi.c" "$SRC/cmd/ursusupdate.c" | head -n 300 || true
+          } | tee "$OUT/PERSISTENT-SOURCE-AUDIT.txt"
+
+      - name: Upload audit source bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: mf3-persistent-source-audit
+          path: work/mf3-audit
+          retention-days: 14
