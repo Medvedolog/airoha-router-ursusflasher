@@ -1,0 +1,206 @@
+#!/bin/bash
+set -euo pipefail
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+cd "$ROOT"
+GITHUB_SHA=${GITHUB_SHA:-$(git rev-parse HEAD)}
+export GITHUB_SHA
+MEDVE_DIR=${MF2_MEDVE_DIR:-"$ROOT/work/medveflasher-rc35"}
+export MF2_MEDVE_DIR="$MEDVE_DIR"
+
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path('ursusboot/scripts/build_mf2_ramboot.sh')
+s = p.read_text(encoding='utf-8')
+
+old = 'VERSION="0.1.0-mf2-ram1"\n'
+if s.count(old) != 1:
+    raise SystemExit(f'VERSION anchor count={s.count(old)}')
+s = s.replace(old, 'VERSION="0.1.0-mf3-persist1"\n', 1)
+
+anchor = 'python3 "$TRANSFORM" "$WORK/u-boot"\n'
+extra = anchor + (
+    'python3 "$ROOT/ursusboot/scripts/mf2_lan23_led_pinmux.py" "$WORK/u-boot"\n'
+    'python3 "$ROOT/ursusboot/scripts/mf2_hwtest7_phy_probe.py" "$WORK/u-boot"\n'
+    'python3 "$ROOT/ursusboot/scripts/mf2_hwtest8_led_fix.py" "$WORK/u-boot"\n'
+    'python3 "$ROOT/ursusboot/scripts/mf2_hwtest5_web_quiet.py" "$WORK/u-boot"\n'
+    'python3 "$ROOT/ursusboot/scripts/mf3_persist1_enable.py" "$WORK/u-boot"\n'
+    'python3 "$ROOT/ursusboot/scripts/mf3_persist_identity.py" "$WORK/u-boot" "${GITHUB_SHA}"\n'
+)
+if s.count(anchor) != 1:
+    raise SystemExit(f'transform anchor count={s.count(anchor)}')
+s = s.replace(anchor, extra, 1)
+
+epoch = 'export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$RELEASE_EPOCH"\n'
+dyn_epoch = (
+    'BUILD_EPOCH=$(git show -s --format=%ct "${GITHUB_SHA}")\n'
+    'export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$BUILD_EPOCH"\n'
+)
+if s.count(epoch) != 1:
+    raise SystemExit(f'SOURCE_DATE_EPOCH anchor count={s.count(epoch)}')
+s = s.replace(epoch, dyn_epoch, 1)
+
+scm_check = '[ "$(cat .scmversion)" = "-UrsusBoot-${VERSION}" ] || { echo "MF2 .scmversion mismatch" >&2; exit 1; }\n'
+scm_new = "grep -Eq '^-UrsusBoot-0\\.1\\.0-mf3-persist1\\+g[0-9a-f]{8}$' .scmversion || { echo \"MF3 PERSIST1 .scmversion mismatch\" >&2; exit 1; }\n"
+if s.count(scm_check) != 1:
+    raise SystemExit('scmversion check anchor missing')
+s = s.replace(scm_check, scm_new, 1)
+
+hdr_check = 'grep -Fq "#define URSUS_VERSION \\\"${VERSION}\\\"" include/ursus_version.h || { echo "MF2 version header mismatch" >&2; exit 1; }\n'
+hdr_new = "grep -Eq '^#define URSUS_VERSION \\\"0\\.1\\.0-mf3-persist1\\+g[0-9a-f]{8}\\\"$' include/ursus_version.h || { echo \"MF3 PERSIST1 version header mismatch\" >&2; exit 1; }\n"
+if s.count(hdr_check) != 1:
+    raise SystemExit('version header check anchor missing')
+s = s.replace(hdr_check, hdr_new, 1)
+
+start = s.index('for marker in "$VERSION"')
+end = s.index("if grep -Fq 'Nokia XG-040G-MD'", start)
+marker_loop = '''for marker in '0.1.0-mf3-persist1' 'Nokia XG-040G-MF' 'Airoha AN7583' 'URSUS_MF3_PERSIST1_PRECHECK' 'URSUS_MF3_PERSIST1_COMMIT_OK' 'URSUS_MF3_PERSIST1_POST_ALLOW' 'URSUS_MF3_PERSIST1_POST_REJECT' 'FIP_ONLY_CANARY' 'URSUS_MF2_READONLY_REJECT operation=UBI_UPDATE' 'URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION' 'URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET_BACKEND' 'URSUS_MF2_HWTEST8_LED_BEGIN'; do
+    grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "MF3 PERSIST1 binary marker missing: $marker" >&2; exit 1; }
+done
+! grep -Fq 'URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE' "$WORK/u-boot.strings" || { echo "MF2 FIP write gate survived PERSIST1" >&2; exit 1; }
+'''
+s = s[:start] + marker_loop + s[end:]
+
+s = s.replace('"MODE=RAM_ONLY_READONLY_BRINGUP"', '"MODE=PERSIST1_FIP_ONLY_CANARY"')
+s = s.replace('"PERSISTENT_WRITES=DISABLED"', '"PERSISTENT_WRITES=FIP_ONLY_CANARY"')
+s = s.replace('"HTTP_POST=REJECTED"', '"HTTP_POST=RAM_INITRAMFS_PLUS_FIP_CANARY_ONLY"')
+s = s.replace('"RECOVERY_PORTS=LAN2,LAN3"', '"RECOVERY_PORTS=LAN2,LAN3,LAN4"')
+p.write_text(s, encoding='utf-8')
+
+cfg = Path('ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig')
+c = cfg.read_text(encoding='utf-8')
+if c.count('CONFIG_LOGLEVEL=9') != 1:
+    raise SystemExit('CONFIG_LOGLEVEL=9 anchor missing')
+cfg.write_text(c.replace('CONFIG_LOGLEVEL=9', 'CONFIG_LOGLEVEL=7', 1), encoding='utf-8')
+print('MF3_PERSIST1_BUILD_BINDING=PASS hwtest8=retained write=fip-only generic-cli-writers=disabled loglevel=7')
+PY
+
+bash ursusboot/scripts/build_mf2_ramboot.sh
+
+OUT="$ROOT/work/mf2-ramboot/out"
+SRC="$ROOT/work/mf2-ramboot/u-boot"
+DONOR="$MEDVE_DIR/data/payloads/nokia-xg-040g-mf-an7583-production-bl31-uboot.fip"
+test "$(stat -c %s "$DONOR")" = 319568
+test "$(sha256sum "$DONOR" | awk '{print $1}')" = 99b6c20a7cb46a56692eaeb9f086f70fc7e987a641396653e6a8fb5c03e07aa7
+
+python3 ursusboot/scripts/mf2_repack_from_medve.py \
+  --medve-patcher "$MEDVE_DIR/data/recovery/recovery-safe-uboot-source/patch_recovery_safe_fip.py" \
+  --source "$DONOR" \
+  --bl33-raw "$OUT/u-boot.bin" \
+  --bl33-output "$OUT/u-boot.persistent.lzma" \
+  --output "$OUT/ursusboot-mf-0.1.0-mf3-persist1-persistent.fip" \
+  --report "$OUT/MF3-PERSISTENT-FIP-REPACK.json"
+
+python3 - <<'PY'
+import json
+from pathlib import Path
+r=json.loads(Path('work/mf2-ramboot/out/MF3-PERSISTENT-FIP-REPACK.json').read_text())
+assert r['entry_count'] == 2
+assert r['bl31_byte_exact'] is True
+assert r['mf2_bl33_roundtrip'] is True
+assert r['mf2_bl33_lzma_known_size'] is True
+assert r['mf2_bl33_lzma_eopm'] is False
+print('MF3_PERSISTENT_FIP_QA=PASS sha256=' + r['output_sha256'] + ' size=' + str(r['output_size']))
+PY
+sha256sum "$OUT/ursusboot-mf-0.1.0-mf3-persist1-persistent.fip" "$OUT/u-boot.persistent.lzma" >> "$OUT/SHA256SUMS"
+
+CFG="$OUT/u-boot.MF2_RAM.full.config"
+BIN="$OUT/u-boot.bin"
+for sym in CONFIG_CMD_MTD CONFIG_CMD_MTD_MARKBAD CONFIG_CMD_MTD_NAND_WRITE_TEST CONFIG_CMD_UBI CONFIG_CMD_UBI_RENAME CONFIG_CMD_ERASEENV CONFIG_CMD_NAND CONFIG_CMD_SF CONFIG_ENV_IS_IN_MTD CONFIG_ENV_IS_IN_UBI; do
+  ! grep -q "^${sym}=y" "$CFG"
+done
+grep -Eq '^CONFIG_ENV_IS_NOWHERE=y$' "$CFG"
+grep -Eq '^CONFIG_LOGLEVEL=7$' "$CFG"
+
+strings "$BIN" | grep -Eq '0\.1\.0-mf3-persist1\+g[0-9a-f]{8}'
+strings "$BIN" | grep -Fq 'URSUS_MF3_PERSIST1_COMMIT_BEGIN'
+strings "$BIN" | grep -Fq 'URSUS_MF3_PERSIST1_COMMIT_OK'
+strings "$BIN" | grep -Fq 'URSUS_UPDATE_READBACK_OK layout=STOCK bytes=0x%lx prefix=preserved env=preserved'
+strings "$BIN" | grep -Fq 'URSUS_MF2_READONLY_REJECT operation=UBI_UPDATE'
+strings "$BIN" | grep -Fq 'URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION'
+strings "$BIN" | grep -Fq 'URSUS_MF2_READONLY_REJECT operation=SETTINGS_RESET_BACKEND'
+! strings "$BIN" | grep -Fq 'URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE'
+strings "$BIN" | grep -Fq 'URSUS_MF2_HWTEST8_LED_END result=OK'
+
+python3 - <<'PY'
+from pathlib import Path
+web=Path('work/mf2-ramboot/u-boot/cmd/ursusweb.c').read_text()
+upd=Path('work/mf2-ramboot/u-boot/cmd/ursusupdate.c').read_text()
+gate=web.index('URSUS_MF3_PERSIST1_POST_REJECT')
+for route in (
+    'POST /api/console ', 'POST /api/firmware-begin ',
+    'POST /api/ubi-preloader-begin ', 'POST /api/install-openwrt-stock-layout ',
+    'POST /api/install-ubi ', 'POST /api/reset-openwrt-settings '):
+    assert web.index(route, gate) > gate, route
+step0=upd.index('int ursus_fip_update_step(void)')
+step1=upd.index('static int ursus_update_run(', step0)
+step=upd[step0:step1]
+assert 'run_command("ubi ' not in step
+assert 'URSUS_UP_UBI_' not in step
+assert 'mtd_erase(ursus_update_nand' in step
+assert 'mtd_write(ursus_update_nand' in step
+assert 'memcmp(ursus_up.stock_candidate, ursus_up.stock_readback' in step
+assert 'MF3_PERSIST1_UBI_BLOCKED' in step
+print('MF3_PERSIST1_SOURCE_SCOPE=PASS web-console=blocked ubi=blocked stock-fip-direct-mtd-only=1 readback=full-512KiB')
+PY
+
+python3 - <<'PY'
+import hashlib, json
+from pathlib import Path
+out=Path('work/mf2-ramboot/out')
+files={
+    'ram_preloader': out/'ursusboot-mf-0.1.0-mf3-persist1-uart-preloader.bin',
+    'ram_fip': out/'ursusboot-mf-0.1.0-mf3-persist1-ram.fip',
+    'persistent_fip': out/'ursusboot-mf-0.1.0-mf3-persist1-persistent.fip',
+    'uboot': out/'u-boot.bin',
+}
+report={
+    'result':'PASS',
+    'target':'Nokia XG-040G-MF / Airoha AN7583',
+    'mode':'PERSIST1_FIP_ONLY_CANARY',
+    'write_scope':'stock mtd0 0x00000000..0x0007ffff only, via full-span preserve/replace/readback',
+    'fip_offset':'0x800',
+    'stock_bootloader_span':'0x80000',
+    'stock_env_offset':'0x7c000',
+    'stock_env_size':'0x4000',
+    'ubi_migration':'BLOCKED',
+    'openwrt_install':'BLOCKED',
+    'settings_write':'BLOCKED',
+    'web_console':'BLOCKED_BY_POST_GATE',
+    'generic_writer_commands':'DISABLED_BY_KCONFIG',
+    'bl2_write':'NONE',
+    'lan234_hw_baseline':'HWTEST8_ACCEPTED_BY_OPERATOR',
+    'files':{},
+}
+for name,p in files.items():
+    b=p.read_bytes()
+    report['files'][name]={'name':p.name,'size':len(b),'sha256':hashlib.sha256(b).hexdigest()}
+(out/'MF3-PERSIST1-AUDIT.json').write_text(json.dumps(report,indent=2)+'\n')
+print('MF3_PERSIST1_AUDIT=PASS')
+PY
+
+SHORT_SHA=${GITHUB_SHA:0:8}
+BUILD_EPOCH=$(git show -s --format=%ct "$GITHUB_SHA")
+BUILD_UTC=$(date -u -d "@$BUILD_EPOCH" '+%Y-%m-%dT%H:%M:%SZ')
+PERSIST_SIZE=$(stat -c %s "$OUT/ursusboot-mf-0.1.0-mf3-persist1-persistent.fip")
+PERSIST_SHA=$(sha256sum "$OUT/ursusboot-mf-0.1.0-mf3-persist1-persistent.fip" | awk '{print $1}')
+{
+  echo 'STAGE=PERSIST1'
+  echo "GIT_SHA=$GITHUB_SHA"
+  echo "DISPLAY_VERSION=0.1.0-mf3-persist1+g$SHORT_SHA"
+  echo "BUILD_UTC=$BUILD_UTC"
+  echo 'HW_BASELINE=MF2 HWTEST8 LAN2/LAN3/LAN4 accepted on hardware'
+  echo 'WRITE_SCOPE=FIP_ONLY_CANARY'
+  echo 'STOCK_BOOTLOADER_SPAN=0x80000'
+  echo 'FIP_OFFSET=0x800'
+  echo 'ENV_OFFSET=0x7c000'
+  echo 'ENV_SIZE=0x4000'
+  echo 'UBI_MIGRATION=BLOCKED'
+  echo 'BL2_WRITE=NONE'
+  echo 'GENERIC_WRITER_COMMANDS=DISABLED'
+  echo "PERSISTENT_FIP_SIZE=$PERSIST_SIZE"
+  echo "PERSISTENT_FIP_SHA256=$PERSIST_SHA"
+done | tee "$OUT/MF3-PERSIST1-BUILD-ID.txt"
+
+echo "MF3_PERSIST1_CI=PASS out=$OUT"
