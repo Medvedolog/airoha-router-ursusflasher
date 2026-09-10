@@ -9,10 +9,16 @@ on:
       - 'scripts/build_release.py'
       - 'scripts/repo_common.py'
       - 'ursusflasher/src/**'
+      - 'ursusboot/configs/**'
+      - 'ursusboot/scripts/**'
+      - 'ursusboot/source/**'
+      - 'toolchains/**'
       - 'config/**'
       - 'payloads/**'
       - 'START_EXPERT.cmd'
       - 'START_EXPERT.sh'
+      - 'START_UART_RESTORE.cmd'
+      - 'START_UART_RESTORE.sh'
   workflow_dispatch:
 
 permissions:
@@ -26,19 +32,80 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Compile MF acceptance code
+
+      - name: Checkout pinned MedveFlasher rc35 evidence/payloads
+        uses: actions/checkout@v4
+        with:
+          repository: Medvedolog/nokia-router-medveflasher
+          ref: 342cac4cb99a924f3d83eb8e4b5259490377704e
+          path: work/medveflasher-rc35
+
+      - name: Install MF RAM recovery build dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends liblzma-dev
+
+      - name: Build and audit MF RAM recovery helper
+        env:
+          MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
+          JOBS: '2'
+        run: |
+          bash ursusboot/scripts/build_mf2_ramboot.sh
+          python3 ursusboot/scripts/audit_mf2_ramboot_artifact.py work/mf-ramboot/out
+          mkdir -p payloads/mf/recovery
+          cp work/mf-ramboot/out/ursusboot-mf-0.1.0-TEST61-uart-preloader.bin payloads/mf/recovery/
+          cp work/mf-ramboot/out/ursusboot-mf-0.1.0-TEST61-ram.fip payloads/mf/recovery/
+
+      - name: Compile MF acceptance and unified UART recovery code
         run: |
           python3 -m py_compile \
             ursusflasher/src/mf_persistent.py \
             ursusflasher/src/mf_persistent_install.py \
-            ursusflasher/src/expert_mf_acceptance.py
+            ursusflasher/src/expert_mf_acceptance.py \
+            ursusflasher/src/uart_bootarea_restore.py
+
+      - name: Verify packaged UART recovery profiles before export
+        run: |
+          python3 - <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, str(Path('ursusflasher/src').resolve()))
+          import uart_bootarea_restore as r
+          for family in ('md', 'mf'):
+              p = r.family_profile(family)
+              r.verify_profile(p)
+              print(f"{family.upper()} UART recovery profile PASS")
+          PY
+
       - name: Build release tree
         run: python3 scripts/build_release.py --out-dir dist
+
+      - name: Verify UART restore launchers are exported
+        run: |
+          python3 - <<'PY'
+          import zipfile
+          from pathlib import Path
+          zpath = next(Path('dist').glob('UrsusFlasher-*.zip'))
+          with zipfile.ZipFile(zpath) as z:
+              names = z.namelist()
+              root = names[0].split('/', 1)[0]
+              required = [
+                  f'{root}/START_UART_RESTORE.cmd',
+                  f'{root}/START_UART_RESTORE.sh',
+                  f'{root}/data/uart_bootarea_restore.py',
+                  f'{root}/data/payloads/mf/recovery/ursusboot-mf-0.1.0-TEST61-uart-preloader.bin',
+                  f'{root}/data/payloads/mf/recovery/ursusboot-mf-0.1.0-TEST61-ram.fip',
+              ]
+              missing = [x for x in required if x not in names]
+              if missing:
+                  raise SystemExit('missing packaged UART recovery files: ' + ', '.join(missing))
+              print('packaged UART recovery files PASS')
+          PY
+
       - name: Stage package artifact
         run: |
           mkdir upload
           cp dist/UrsusFlasher-*.zip upload/
           sha256sum upload/*.zip > upload/SHA256SUMS.txt
+
       - uses: actions/upload-artifact@v4
         with:
           name: ursusflasher-mf-persistent-hw-acceptance
