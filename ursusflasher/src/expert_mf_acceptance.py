@@ -104,19 +104,19 @@ def acceptance_bootloader_dispatch(host: str, state: ds.DeviceState) -> None:
     access = None
     bootstrap_telnet = None
     try:
-        # Re-read stock identity/credentials at the latest safe point. Unlike the
-        # passive menu probe this explicit write action may provision Telnet/root
-        # if stock firmware currently has the service disabled. No NAND writer is
-        # called here; the installer still performs backup + preflight first.
-        access = proven.ask_credentials(
-            require_model_gate=True,
-            offer_interactive_plain_retry=True,
-        )
+        # Reuse the existing MedveFlasher-derived MF install access gate. It
+        # re-detects MF through live stock Web; a manual model choice is never
+        # accepted as write authorization. Closed Telnet still fails visibly.
+        access = proven._install_access(proven.MF_INSTALL_PROFILE)
         if getattr(access, "family", "") != "mf":
             raise RuntimeError(tr(
                 "Повторная проверка stock Web не подтвердила семейство MF; запись запрещена.",
                 "The repeated stock Web check did not confirm the MF family; writing is forbidden.",
             ))
+
+        # The explicit write flow may provision a stock service used to obtain
+        # a UID-0 account. This is a stock-settings state change, not a NAND
+        # firmware writer; read-only flows continue to pass False here.
         bootstrap_telnet = proven.login_root_family(
             access,
             "mf",
