@@ -76,6 +76,10 @@ def check(config: Path, fragments: list[Path]) -> None:
     errors = []
     for name, expected in desired.items():
         got = actual.get(name)
+        # Kconfig may omit an invisible symbol entirely instead of emitting
+        # '# CONFIG_FOO is not set'. Semantically both states are disabled.
+        if UNSET_RE.match(expected) and got is None:
+            continue
         if got != expected:
             errors.append(f"{name}: expected {expected!r}, got {got!r}")
     if errors:
