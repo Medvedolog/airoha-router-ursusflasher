@@ -208,6 +208,18 @@ jobs:
 
           manifest_path = Path('config/MANIFEST.json')
           manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          md_frozen_manifest = json.loads(Path('work/medveflasher-md-frozen/data/MANIFEST.json').read_text(encoding='utf-8'))
+          mf_proven_manifest = json.loads(Path('work/medveflasher-rc35/data/MANIFEST.json').read_text(encoding='utf-8'))
+          for key in ('bundle', 'manual_bundle'):
+              assert key in md_frozen_manifest
+              manifest[key] = md_frozen_manifest[key]
+          for key in ('mf_transition_bundle', 'mf_manual_transition_bundle'):
+              assert key in mf_proven_manifest
+              manifest[key] = mf_proven_manifest[key]
+          manifest['transition_metadata_provenance'] = {
+              'md': 'Medvedolog/nokia-router-medveflasher@bb9db0904ea49000ccf5ecdc4bdefcc4d5946eca',
+              'mf': 'Medvedolog/nokia-router-medveflasher@342cac4cb99a924f3d83eb8e4b5259490377704e',
+          }
           manifest['version'] = version
           manifest['build_tag'] = build_tag
           release = manifest.setdefault('release', {})
