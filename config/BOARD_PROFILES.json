@@ -57,15 +57,15 @@
         ]
       },
       "network": {
-        "recovery_preferred_ports": ["LAN2", "LAN3"],
+        "recovery_preferred_ports": ["LAN2", "LAN3", "LAN4"],
         "recovery_excluded_ports": ["LAN1"],
-        "lan4_status": "DEFERRED"
+        "lan4_status": "HWTEST8_HW_PASS"
       },
       "write_policy": {
         "mf1_enabled": true,
         "persistent_write_enabled": false,
         "allowed_write_actions": ["restore_nokia"],
-        "backend": "DISABLED_READ_ONLY_BRINGUP_EXCEPT_PROVEN_STOCK_RESTORE",
+        "backend": "PERSISTENT_CANARY_NOT_YET_ENABLED",
         "bl2_last_required": true,
         "automatic_alternate_writer": false
       },
@@ -80,7 +80,8 @@
         "permanent_install": "HW_PROVEN",
         "stock_restore_uart": "HW_PROVEN_MEDVE_BACKEND",
         "stock_restore_ram_recovery": "URSUS_STATIC_QA_PASS_HW_ACCEPTANCE_REQUIRED",
-        "ursusboot_an7583": "MF2_HWTEST4_STATIC_QA_PASS_HW_TEST_CANDIDATE"
+        "ursusboot_an7583": "MF2_HWTEST8_HW_PASS",
+        "ursusboot_an7583_network_led": "LAN2_LAN3_LAN4_HW_PASS"
       }
     }
   }
