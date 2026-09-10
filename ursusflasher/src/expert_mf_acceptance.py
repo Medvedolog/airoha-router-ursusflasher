@@ -6,6 +6,8 @@ from __future__ import annotations
 The production MD implementation remains untouched. This wrapper narrows one
 specific action for a positively identified Nokia XG-040G-MF running stock:
 EXPERT item 2 may invoke the stock-derived mtd0/NT_FW hardware-acceptance path.
+It also exposes one model-explicit UART-only boot-area recovery action for both
+MD and MF; that recovery action does not depend on the installed NAND layout.
 Every other state delegates to the normal EXPERT policy and dispatcher.
 """
 
@@ -21,12 +23,15 @@ import device_state as ds
 import expert
 import mf_persistent_install
 import proven_backend as proven
+import uart_bootarea_restore
 
 MF_ACCEPTANCE_BACKEND = "MF_STOCK_DERIVED_MTD0_HW_ACCEPTANCE"
+UART_BOOTAREA_BACKEND = "BOOTROM_UART_BOOTAREA_RESTORE"
 
 _original_action_applicability = ds.action_applicability
 _original_bootloader_dispatch = expert.run_bootloader_install_or_update
 _original_bootloader_menu_detail = expert._bootloader_menu_detail
+_original_menu_detail = expert._menu_detail
 
 
 def tr(ru: str, en: str) -> str:
@@ -39,15 +44,32 @@ def _family(state: ds.DeviceState) -> str | None:
 
 
 def acceptance_action_applicability(state: ds.DeviceState) -> dict[int, ds.ActionApplicability]:
-    """Expose exactly one MF writer only for complete, positively identified STOCK MF.
+    """Expose the MF acceptance writer plus the explicit UART recovery writer.
 
-    The board profile deliberately keeps the broad production write switch off.
-    This feature-branch entrypoint is the sole exception used to obtain the first
-    cold-boot hardware acceptance of the device-derived persistent candidate.
+    The MF board profile keeps its broad production persistent-write switch off.
+    Item 2 is therefore opened only for a fully identified stock MF during HW
+    acceptance. Item 5 is different: it is a BootROM/RAM recovery writer whose
+    model and source image are selected explicitly after entering the action;
+    the existing NAND layout is intentionally not a write-authorization gate.
     """
     out = _original_action_applicability(state)
-    if _family(state) != "mf":
+    family = _family(state)
+    if family != "mf":
         return out
+
+    recovery = out[5]
+    out[5] = ds.ActionApplicability(
+        number=recovery.number,
+        key=recovery.key,
+        enabled=True,
+        reason="",
+        note=tr(
+            "UART-only debrick: модель MD/MF и 512-КиБ boot-area выбираются оператором; текущая NAND-разметка не требуется.",
+            "UART-only debrick: the operator selects MD/MF and a 512-KiB boot-area; the current NAND layout is not required.",
+        ),
+        write_capable=True,
+        resolved_backend=UART_BOOTAREA_BACKEND,
+    )
 
     current = out[2]
     if state.current_system == "NOKIA_STOCK" and state.probe_status == ds.PROBE_COMPLETE:
@@ -87,6 +109,15 @@ def acceptance_bootloader_menu_detail(state: ds.DeviceState, action: ds.ActionAp
             "MF STOCK HW acceptance: full backup → actual mtd0 → NT_FW/BL33-only replacement → write → full readback; no automatic reboot",
         )
     return _original_bootloader_menu_detail(state, action)
+
+
+def acceptance_menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
+    if number == 5:
+        return (
+            "UART-only: выбрать MD/MF → BootROM/XMODEM → U-Boot из RAM → восстановить любой рабочий boot-area/mtd0 ровно 512 КиБ → readback",
+            "UART-only: choose MD/MF → BootROM/XMODEM → RAM U-Boot → restore any working exact 512-KiB boot-area/mtd0 → readback",
+        )
+    return _original_menu_detail(number, state, app)
 
 
 def acceptance_bootloader_dispatch(host: str, state: ds.DeviceState) -> None:
@@ -143,6 +174,14 @@ def install_hooks() -> None:
     ds.action_applicability = acceptance_action_applicability
     expert.run_bootloader_install_or_update = acceptance_bootloader_dispatch
     expert._bootloader_menu_detail = acceptance_bootloader_menu_detail
+    expert._menu_detail = acceptance_menu_detail
+
+    # Keep the proven base EXPERT file byte-stable. Item 5 still calls these two
+    # symbols, so redirect them in the feature wrapper: the generic UART helper
+    # owns the only destructive y/N and therefore the old entry confirmation is
+    # intentionally suppressed here.
+    expert.confirm_uart_recovery = lambda *args, **kwargs: True
+    expert.ursusboot_update.uart_bootrom_recover = uart_bootarea_restore.interactive
 
 
 def main() -> int:
