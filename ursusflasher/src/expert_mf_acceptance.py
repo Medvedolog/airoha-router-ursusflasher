@@ -3,7 +3,7 @@ from __future__ import annotations
 
 """Feature-branch EXPERT entrypoint for MF persistent hardware acceptance.
 
-The production MD implementation remains untouched.  This wrapper narrows one
+The production MD implementation remains untouched. This wrapper narrows one
 specific action for a positively identified Nokia XG-040G-MF running stock:
 EXPERT item 2 may invoke the stock-derived mtd0/NT_FW hardware-acceptance path.
 Every other state delegates to the normal EXPERT policy and dispatcher.
@@ -20,6 +20,7 @@ import board_profiles as bp
 import device_state as ds
 import expert
 import mf_persistent_install
+import proven_backend as proven
 
 MF_ACCEPTANCE_BACKEND = "MF_STOCK_DERIVED_MTD0_HW_ACCEPTANCE"
 
@@ -101,15 +102,39 @@ def acceptance_bootloader_dispatch(host: str, state: ds.DeviceState) -> None:
         ))
 
     access = None
+    bootstrap_telnet = None
     try:
-        # Re-read family and credentials immediately before the destructive path.
-        # This helper is read-only and refuses cross-family drift.  The acceptance
-        # installer itself performs the restore-grade backup and target preflight.
-        access = expert._readonly_stock_access(host, expected_family="mf")
+        # Re-read stock identity/credentials at the latest safe point. Unlike the
+        # passive menu probe this explicit write action may provision Telnet/root
+        # if stock firmware currently has the service disabled. No NAND writer is
+        # called here; the installer still performs backup + preflight first.
+        access = proven.ask_credentials(
+            require_model_gate=True,
+            offer_interactive_plain_retry=True,
+        )
+        if getattr(access, "family", "") != "mf":
+            raise RuntimeError(tr(
+                "Повторная проверка stock Web не подтвердила семейство MF; запись запрещена.",
+                "The repeated stock Web check did not confirm the MF family; writing is forbidden.",
+            ))
+        bootstrap_telnet = proven.login_root_family(
+            access,
+            "mf",
+            allow_service_provisioning=True,
+        )
+        proven.require_supported_model_over_telnet(access, bootstrap_telnet)
+        bootstrap_telnet.close()
+        bootstrap_telnet = None
+
         rc = mf_persistent_install.run_stock_acceptance(access)
         if rc not in (0, 2):
             raise RuntimeError(f"MF persistent acceptance returned rc={rc}")
     finally:
+        if bootstrap_telnet is not None:
+            try:
+                bootstrap_telnet.close()
+            except Exception:
+                pass
         if access is not None:
             access.close_web(announce=False)
 
