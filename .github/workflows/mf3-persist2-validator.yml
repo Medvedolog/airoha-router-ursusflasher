@@ -1,0 +1,49 @@
+name: MF3 AN7583 PERSIST2 validator rollback
+
+on:
+  push:
+    branches:
+      - feature/mf3-an7583-persistent
+    paths:
+      - 'ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_*'
+      - 'ursusboot/scripts/mf2_*'
+      - 'ursusboot/scripts/mf3_*'
+      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
+      - 'toolchains/**'
+      - '.github/workflows/mf3-persist2-validator.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout UrsusFlasher persistent branch
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned MedveFlasher rc35 evidence and payloads
+        uses: actions/checkout@v4
+        with:
+          repository: Medvedolog/nokia-router-medveflasher
+          ref: 342cac4cb99a924f3d83eb8e4b5259490377704e
+          path: work/medveflasher-rc35
+
+      - name: Install host FIP repack dependency
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends liblzma-dev
+
+      - name: Build and audit MF3 PERSIST2
+        env:
+          MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
+          JOBS: '2'
+        run: bash ursusboot/scripts/build_mf3_persist2_ci.sh
+
+      - name: Upload MF3 PERSIST2 artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-mf3-an7583-persist2-validator-rollback
+          path: work/mf2-ramboot/out
+          if-no-files-found: warn
+          retention-days: 14
