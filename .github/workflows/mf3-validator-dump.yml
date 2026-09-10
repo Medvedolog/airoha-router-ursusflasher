@@ -6,6 +6,7 @@ on:
       - feature/mf3-an7583-persistent
     paths:
       - '.github/workflows/mf3-validator-dump.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,11 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Extract TEST61 source and print FIP validator
+      - name: Extract TEST61 source and export validator context
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p work/src
+          mkdir -p work/src work/out
           tar --use-compress-program=unzstd -xf ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst -C work/src
           python3 - <<'PY'
           from pathlib import Path
@@ -29,13 +30,14 @@ jobs:
               raise SystemExit(f'ursusupdate.c matches={files}')
           p=files[0]
           s=p.read_text(encoding='utf-8')
-          print('SOURCE=' + str(p))
+          out=[]
+          out.append('SOURCE=' + str(p))
 
           def dump_func(name):
-              needles=(f'static int {name}(', f'int {name}(')
+              needles=(f'static int {name}(', f'int {name}(', f'static bool {name}(', f'bool {name}(')
               starts=[s.find(n) for n in needles if s.find(n) >= 0]
               if not starts:
-                  print(f'=== {name}: NOT FOUND ===')
+                  out.append(f'=== {name}: NOT FOUND ===')
                   return
               start=min(starts)
               brace=s.find('{', start)
@@ -48,10 +50,38 @@ jobs:
                       if depth==0:
                           end=i+1
                           break
-              print(f'=== BEGIN {name} ===')
-              print(s[start:end])
-              print(f'=== END {name} ===')
+              out.append(f'=== BEGIN {name} ===')
+              out.append(s[start:end])
+              out.append(f'=== END {name} ===')
 
-          for name in ('ursus_fip_validate','ursus_fip_validate_current','ursus_mem_has','ursus_fip_update_start'):
+          for name in (
+              'ursus_mem_has',
+              'ursus_fip_validate',
+              'ursus_fip_validate_current',
+              'ursus_fip_update_start',
+              'ursus_fip_update_step',
+          ):
               dump_func(name)
+
+          # Also retain declarations/constants around the FIP validator because
+          # the MF port must preserve the production MD parser rather than
+          # replacing it with a build-specific hash gate.
+          idx=s.find('ursus_fip_validate(')
+          if idx >= 0:
+              lo=max(0, s.rfind('\n', 0, max(0, idx-12000)))
+              hi=min(len(s), idx+18000)
+              out.append('=== VALIDATOR_CONTEXT ===')
+              out.append(s[lo:hi])
+              out.append('=== END VALIDATOR_CONTEXT ===')
+
+          text='\n'.join(out)+'\n'
+          Path('work/out/MD_TEST61_FIP_VALIDATOR.txt').write_text(text, encoding='utf-8')
+          print(text)
           PY
+      - name: Upload validator source
+        uses: actions/upload-artifact@v4
+        with:
+          name: md-test61-fip-validator-source
+          path: work/out/MD_TEST61_FIP_VALIDATOR.txt
+          if-no-files-found: error
+          retention-days: 2
