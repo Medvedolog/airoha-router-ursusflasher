@@ -70,7 +70,7 @@
       "write_policy": {
         "mf1_enabled": true,
         "persistent_write_enabled": false,
-        "allowed_write_actions": ["restore_nokia"],
+        "allowed_write_actions": ["restore_nokia", "recover_bootloader"],
         "backend": "DEVICE_DERIVED_MTD0_PATCH_PENDING_HW_ACCEPTANCE",
         "persistent_install_contract": "HOST_DEVICE_DERIVED_STOCK_FIP_BL33_PATCH",
         "rejected_backends": ["MF3_PERSIST1", "MF3_PERSIST2"],
