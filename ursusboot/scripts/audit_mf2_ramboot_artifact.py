@@ -148,6 +148,15 @@ def audit(outdir: Path) -> dict:
         if marker not in raw:
             raise SystemExit(f"required MF2 binary marker missing: {marker!r}")
 
+    hwtest8 = b"URSUS_MF2_HWTEST8_LED_BEGIN" in raw
+    if hwtest8:
+        for marker in (
+            b"URSUS_MF2_HWTEST8_LED_END result=OK",
+            b"URSUS_MF2_HWTEST7_PHY_PROBE_BEGIN",
+        ):
+            if marker not in raw:
+                raise SystemExit(f"HWTEST8 binary marker missing: {marker!r}")
+
     syms = sym.read_text(encoding="utf-8", errors="replace")
     for token in FORBIDDEN_SYMBOL_TOKENS:
         if token in syms:
@@ -230,10 +239,11 @@ def audit(outdir: Path) -> dict:
         "ursus_persistent_entrypoints": "HARD_REJECT_EROFS",
         "md_board_identity": "ABSENT",
         "md_stockbridge": "NOT_LINKED",
-        "recovery_ports": "LAN2_LAN3_AN7583_INTERNAL_GPHY",
-        "lan23_led_pinmux": "GPIO2_PHY2_LED0_GPIO3_PHY3_LED0",
+        "recovery_ports": "LAN2_LAN3_LAN4_AN7583_INTERNAL_GPHY" if hwtest8 else "LAN2_LAN3_AN7583_INTERNAL_GPHY",
+        "lan23_led_pinmux": "GPIO2_PHY2_LED0_GPIO3_PHY3_LED0_GPIO4_PHY4_LED0" if hwtest8 else "GPIO2_PHY2_LED0_GPIO3_PHY3_LED0",
         "lan1_en8811": "NOT_LINKED_OUT_OF_SCOPE",
-        "lan4_led": "DEFERRED",
+        "lan4_led": "HWTEST8_VOLATILE_NATIVE_C45_LED0" if hwtest8 else "DEFERRED",
+        "led_backend": "MT7531_MDIO_MMIO_NATIVE_C45_VEND2" if hwtest8 else "PINMUX_ONLY_OR_DIAGNOSTIC",
     }
     (outdir / "MF2-INDEPENDENT-AUDIT.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="ascii"
