@@ -1,5 +1,6 @@
 {
   "schema": 1,
+  "source": "UnameOne paired MD/MF OpenWrt snapshot set supplied for UrsusFlasher 0.2.62 hardware testing",
   "profiles": {
     "md": {
       "target": "Nokia XG-040G-MD / Airoha AN7581",
@@ -19,6 +20,20 @@
           "required": true
         },
         {
+          "path": "fw/openwrt-airoha-an7581-nokia_xg-040g-md-initramfs-uImage.itb",
+          "role": "OPENWRT_NONUBI_INITRAMFS",
+          "sha256": "6696c96ef824defc56163f9fe4f2846fd4ab61cdbc5679415939d658071dca63",
+          "size": 8335560,
+          "required": false
+        },
+        {
+          "path": "fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-initramfs-recovery.itb",
+          "role": "OPENWRT_UBI_INITRAMFS_RECOVERY",
+          "sha256": "3ce8726e38f6dcdbdb6f25859e269ad32fe04201c5b57b064b11da7e469864fb",
+          "size": 8519680,
+          "required": false
+        },
+        {
           "path": "data/payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin",
           "repo_path": "payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin",
           "role": "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE",
@@ -30,14 +45,34 @@
     },
     "mf": {
       "target": "Nokia XG-040G-MF / Airoha AN7583",
-      "openwrt_source": "pinned MedveFlasher 342cac4cb99a924f3d83eb8e4b5259490377704e hardware-proven production payload",
       "files": [
+        {
+          "path": "fw/openwrt-airoha-an7583-nokia_xg-040g-mf-squashfs-sysupgrade.bin",
+          "role": "OPENWRT_NONUBI_SYSUPGRADE",
+          "sha256": "bd2a4947468ddd7ca71a42d36c7fd4462a24a1ceb6be4658f79c5c2bcb0ccf29",
+          "size": 8540433,
+          "required": true
+        },
         {
           "path": "fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb",
           "role": "OPENWRT_UBI_SYSUPGRADE",
-          "sha256": "db881b8053cdfbdf49dd6c2336dee3ddfa489966456a3e75556c5a0f6cc7663b",
-          "size": 9191705,
+          "sha256": "0043b450c1d8e311b6f6c12458c66e976a72cb93ed657e12029fa79fffe5dc3a",
+          "size": 10240281,
           "required": true
+        },
+        {
+          "path": "fw/openwrt-airoha-an7583-nokia_xg-040g-mf-initramfs-uImage.itb",
+          "role": "OPENWRT_NONUBI_INITRAMFS",
+          "sha256": "92ad187fc271cce7e3a6e4556679f4307ceefdfc9db1ca2c34269d9ee3eba326",
+          "size": 8180272,
+          "required": false
+        },
+        {
+          "path": "fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-initramfs-recovery.itb",
+          "role": "OPENWRT_UBI_INITRAMFS_RECOVERY",
+          "sha256": "2d00595c7aab49d8f24de0d13374c6c3b479b846267dd3644fbb305db071f05c",
+          "size": 8257536,
+          "required": false
         },
         {
           "path": "data/payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin",
@@ -46,12 +81,6 @@
           "sha256": "778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e",
           "size": 118333,
           "required": true
-        }
-      ],
-      "not_bundled": [
-        {
-          "role": "OPENWRT_NONUBI_SYSUPGRADE",
-          "reason": "not required for the normal MF one-click STOCK/OPENWRT_STOCK_LAYOUT -> OPENWRT_UBI path; may be added when the matching factory-layout image is supplied"
         }
       ]
     }
