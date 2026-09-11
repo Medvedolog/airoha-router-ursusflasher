@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +12,7 @@ HERE = Path(__file__).resolve().parent
 _REPO_CONFIG = HERE.parent.parent / "config" / "UI_TERMS.json"
 _DATA_PATH = _REPO_CONFIG if _REPO_CONFIG.is_file() else HERE / "UI_TERMS.json"
 _DATA = json.loads(_DATA_PATH.read_text(encoding="utf-8"))
+_LOG = logging.getLogger("ursusflasher.ui_terms")
 
 
 def is_en() -> bool:
@@ -22,6 +25,24 @@ def tr(ru: str, en: str) -> str:
 
 def _pick(item: dict) -> str:
     return str(item["en"] if is_en() else item["ru"])
+
+
+def _warn_ui_term(message: str) -> None:
+    """Record a non-fatal UI dictionary problem without creating import cycles.
+
+    EXPERT loads proven_backend before rendering the menu, so use its session-only
+    logger when it is already present.  Standalone callers fall back to Python's
+    logger instead of importing proven_backend from this low-level UI module.
+    """
+    try:
+        proven = sys.modules.get("proven_backend")
+        writer = getattr(proven, "_write_session_only", None) if proven is not None else None
+        if callable(writer):
+            writer("[UI_TERMS WARNING] " + message)
+            return
+    except Exception:
+        pass
+    _LOG.warning(message)
 
 
 def _normalize_tri_bool(value: Any) -> str:
@@ -73,9 +94,9 @@ def human(value: Any, kind: str) -> str:
     table = _DATA[table_name]
     item = table.get(raw) or table.get(raw.upper())
     if item is None:
-        # Enum/state values are fail-closed at the UI boundary.  UNKNOWN is a
+        # Enum/state values remain fail-closed at the UI boundary. UNKNOWN is a
         # legitimate explicit machine value, but an unregistered new enum must
-        # never be silently rendered as UNKNOWN.
+        # be caught by build QA rather than silently rendered as UNKNOWN.
         raise KeyError(f"no UI term for kind={kind!r} value={raw!r}")
     return _pick(item)
 
@@ -85,7 +106,22 @@ def layout_label(value: object) -> str:
 
 
 def action_title(key: str) -> str:
-    return _pick(_DATA["expert_actions"][key])
+    """Return an EXPERT action title without allowing a label bug to kill menu UI.
+
+    Dictionary completeness is a build-time contract. At runtime an unknown or
+    malformed action key is rendered verbatim and logged so the remaining rescue
+    actions stay available to the operator.
+    """
+    raw = str(key)
+    item = _DATA.get("expert_actions", {}).get(raw)
+    if not isinstance(item, dict):
+        _warn_ui_term(f"missing expert action title: key={raw!r}")
+        return raw
+    try:
+        return _pick(item)
+    except Exception as exc:
+        _warn_ui_term(f"malformed expert action title: key={raw!r}: {type(exc).__name__}: {exc}")
+        return raw
 
 
 def action_number(key: str) -> int:
