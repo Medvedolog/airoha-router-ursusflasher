@@ -20,10 +20,13 @@ import ursusboot_install
 import ursusboot_update
 
 # Keep the mature EXPERT helpers/state machine. Replace only the board-sensitive
-# entrypoints and the menu dispatcher where item 4 is now a real factory
-# boot-area restore instead of the historical alias to item 2.
+# entrypoints and the menu dispatcher where item 4 is a real factory boot-area
+# restore. The overlay updates the action registry before applicability is
+# evaluated, so final ActionApplicability keys cannot exist outside the registry.
 base.one_key = one_key_multi
 runtime_kit.install()
+if ds.ACTION_KEYS.get(4) == "update_bootloader":
+    ds.ACTION_KEYS[4] = "restore_factory_bootarea"
 
 
 def tr(ru: str, en: str) -> str:
@@ -99,7 +102,7 @@ def action_applicability(state: ds.DeviceState):
     # any BootROM transfer. The destructive y/N remains inside the restore flow.
     old4 = out[4]
     out[4] = ds.ActionApplicability(
-        old4.number, "restore_factory_bootarea", True, "", "",
+        old4.number, ds.ACTION_KEYS[4], True, "", "",
         True, "UART_BOOTAREA_FACTORY_RESTORE",
     )
 
@@ -119,6 +122,14 @@ def action_applicability(state: ds.DeviceState):
 base.ds.action_applicability = action_applicability
 
 
+def _show_action(number: int, app: dict[int, ds.ActionApplicability], detail_ru: str = "", detail_en: str = "") -> None:
+    """Do not repeat an unavailable action's reason as a second detail line."""
+    if not app[number].enabled:
+        detail_ru = ""
+        detail_en = ""
+    base._show_action(number, app, detail_ru, detail_en)
+
+
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     family = _family(state)
     suffix = ""
@@ -128,26 +139,26 @@ def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApp
         suffix = "Nokia XG-040G-MF / AN7583"
 
     if number == 4:
-        ru = "USB-UART → Airoha BootROM → RAM Recovery → заводской boot-area/mtd0 0x80000 → полный readback"
-        en = "USB-UART → Airoha BootROM → RAM Recovery → factory boot-area/mtd0 0x80000 → full readback"
+        ru = "USB-UART → Airoha BootROM → загрузка в память → заводская загрузочная область (mtd0 0x80000) → полная проверка записанного"
+        en = "USB-UART → Airoha BootROM → RAM bootstrap → factory boot area (mtd0 0x80000) → full verification of written data"
         if suffix:
-            ru += f"; цель: {suffix}"
-            en += f"; target: {suffix}"
+            ru += f"; модель: {suffix}"
+            en += f"; model: {suffix}"
         return ru, en
     if number == 5:
         if family == "mf":
             return (
-                "MF: USB-UART → AN7583 preloader → UrsusBoot TEST61 RAM Recovery; MD/AN7581 alpha3 payload запрещён",
-                "MF: USB-UART → AN7583 preloader → UrsusBoot TEST61 RAM Recovery; MD/AN7581 alpha3 payload is forbidden",
+                "Для модели MF. Через USB-UART, с загрузкой в память. Образы от модели MD не используются.",
+                "For the MF model. Via USB-UART, booting into RAM. MD images are not used.",
             )
         if family == "md":
             return (
-                "MD: USB-UART → AN7581 preloader → UrsusBoot alpha3 RAM installer → восстановление proven UrsusBoot",
-                "MD: USB-UART → AN7581 preloader → UrsusBoot alpha3 RAM installer → recover proven UrsusBoot",
+                "Для модели MD. Через USB-UART, с загрузкой в память. Образы от модели MF не используются.",
+                "For the MD model. Via USB-UART, booting into RAM. MF images are not used.",
             )
         return (
-            "USB-UART → выбор MD/MF → board-specific preloader + RAM Recovery; чужой payload не используется",
-            "USB-UART → choose MD/MF → board-specific preloader + RAM Recovery; cross-family payloads are never used",
+            "Через USB-UART. Сначала выбирается модель MD или MF, затем используется только её образ.",
+            "Via USB-UART. Select MD or MF first; only the matching model image is then used.",
         )
     return base._menu_detail(number, state, app)
 
@@ -171,14 +182,14 @@ def _run_ursus_recovery(state: ds.DeviceState) -> None:
     base.ui.rule(tr("MF: BOOTROM → RAM URSUSBOOT", "MF: BOOTROM → RAM URSUSBOOT"), style="amber2")
     base.ui.status("TARGET", f"{profile['model']} / {profile['soc']}")
     base.ui.note(tr(
-        "Будут переданы только MF/AN7583 preloader и UrsusBoot TEST61 RAM FIP. Persistent MF recovery writer пока не вызывается из этого пункта; NAND не изменяется.",
-        "Only the MF/AN7583 preloader and UrsusBoot TEST61 RAM FIP will be sent. The persistent MF recovery writer is not yet invoked from this item; NAND is not modified.",
+        "Будет запущена аварийная среда UrsusBoot для MF из оперативной памяти. NAND в этом пункте пока не изменяется.",
+        "The MF UrsusBoot rescue environment will be booted from RAM. This item does not modify NAND yet.",
     ))
     sp, log, log_path = uart_bootarea_restore.boot_ram(profile)
     try:
         base.ui.status(tr("ГОТОВО", "READY"), tr(
-            f"MF UrsusBoot TEST61 запущен из RAM. Лог: {log_path}",
-            f"MF UrsusBoot TEST61 is running from RAM. Log: {log_path}",
+            f"Аварийная среда UrsusBoot для MF запущена из памяти. Лог: {log_path}",
+            f"The MF UrsusBoot rescue environment is running from RAM. Log: {log_path}",
         ))
     finally:
         try:
@@ -204,22 +215,22 @@ def main() -> int:
         base.ui.section(tr("Установить", "Install"))
         for number in (1, 2, 3):
             detail_ru, detail_en = _menu_detail(number, state, app)
-            base._show_action(number, app, detail_ru, detail_en)
+            _show_action(number, app, detail_ru, detail_en)
 
         base.ui.section(tr("Если роутер не загружается", "If the router does not boot"), style="amber2")
-        base._show_action(4, app, *_menu_detail(4, state, app))
-        base._show_action(5, app, *_menu_detail(5, state, app))
-        base._show_action(6, app, *base._menu_detail(6, state, app))
+        _show_action(4, app, *_menu_detail(4, state, app))
+        _show_action(5, app, *_menu_detail(5, state, app))
+        _show_action(6, app, *base._menu_detail(6, state, app))
 
         base.ui.section(tr("Резервные копии", "Backups"), style="ok")
         for number in (7, 8, 9):
             detail_ru, detail_en = base._menu_detail(number, state, app)
-            base._show_action(number, app, detail_ru, detail_en)
+            _show_action(number, app, detail_ru, detail_en)
 
         base.ui.section(tr("Посмотреть", "Inspect"), style="amber2")
         for number in (10, 11, 12):
             detail_ru, detail_en = base._menu_detail(number, state, app)
-            base._show_action(number, app, detail_ru, detail_en)
+            _show_action(number, app, detail_ru, detail_en)
 
         print()
         base.ui.menu_item(0, tr("Выход", "Exit"))
@@ -275,8 +286,8 @@ def main() -> int:
             base.ui.rule(tr("ВОССТАНОВЛЕНИЕ ЗАВОДСКОГО ЗАГРУЗЧИКА NOKIA",
                             "RESTORE NOKIA FACTORY BOOTLOADER"), style="bad")
             base.ui.status(tr("ВНИМАНИЕ", "WARNING"), tr(
-                "Будет восстановлен заводской Nokia boot-area/mtd0 для выбранной модели.",
-                "The Nokia factory boot-area/mtd0 for the selected model will be restored.",
+                "Будет восстановлена заводская загрузочная область Nokia для выбранной модели.",
+                "The Nokia factory boot area for the selected model will be restored.",
             ))
             base.ui.note(tr(
                 "Нужен USB-UART 3.3 V. VCC не подключать. Подтверждение записи будет запрошено один раз после автоматического preflight.",
@@ -286,8 +297,8 @@ def main() -> int:
         elif number == 5:
             base.network_guidance.show()
             if base.confirm_uart_recovery(
-                "Airoha BootROM запустит board-specific UrsusBoot Recovery из RAM. MD и MF используют разные preloader/FIP; cross-family payload запрещён.",
-                "Airoha BootROM will start the board-specific UrsusBoot Recovery from RAM. MD and MF use different preloader/FIP payloads; cross-family payloads are forbidden.",
+                "Airoha BootROM запустит подходящую для выбранной модели аварийную среду UrsusBoot из памяти. Образы MD и MF не смешиваются.",
+                "Airoha BootROM will start the rescue UrsusBoot environment for the selected model from RAM. MD and MF images are never mixed.",
             ):
                 base.run_action(lambda: _run_ursus_recovery(state), write_may_happen=True)
         elif number == 6:
