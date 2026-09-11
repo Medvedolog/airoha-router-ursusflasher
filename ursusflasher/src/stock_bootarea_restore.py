@@ -8,6 +8,8 @@ import console_ui as ui
 import uart_bootarea_restore as ubr
 
 HERE = Path(__file__).resolve().parent
+BOOT_AREA_SIZE = 0x80000
+MF_STOCK_MTD0_SHA256 = "144d63272049eeb7122a01f2f3a0192b874ca4c68c10a5b4726fa4c2e84ac1bf"
 
 
 def tr(ru: str, en: str) -> str:
@@ -31,8 +33,16 @@ def bundled_stock_mtd0(family: str) -> Path | None:
     else:
         raise RuntimeError(tr("Неизвестная модель Nokia.", "Unknown Nokia model."))
     for path in candidates:
-        if path.is_file():
-            return path.resolve()
+        if not path.is_file():
+            continue
+        path = path.resolve()
+        if path.stat().st_size != BOOT_AREA_SIZE:
+            raise RuntimeError(f"bundled {family.upper()} stock mtd0 size mismatch: {path.stat().st_size} != {BOOT_AREA_SIZE}")
+        if family == "mf":
+            got = ubr.sha256(path)
+            if got != MF_STOCK_MTD0_SHA256:
+                raise RuntimeError(f"bundled MF stock mtd0 SHA256 mismatch: {got} != {MF_STOCK_MTD0_SHA256}")
+        return path
     return None
 
 
@@ -48,6 +58,8 @@ def restore_factory_bootarea(family: str) -> None:
             f"Комплектный заводской boot-area/mtd0: {image.name}",
             f"Bundled factory boot-area/mtd0: {image.name}",
         ))
+        if family == "mf":
+            ui.status("SHA256", MF_STOCK_MTD0_SHA256)
     else:
         ui.status(tr("НЕТ В КОМПЛЕКТЕ", "NOT BUNDLED"), tr(
             "Для этой модели canonical заводской mtd0 ещё не включён в пакет. Можно указать проверенный 512-КиБ mtd0 вручную.",
