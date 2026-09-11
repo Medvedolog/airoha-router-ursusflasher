@@ -1,4 +1,4 @@
-name: Package UrsusFlasher 0.2.63 MF runtime-guard hotfix
+name: Package UrsusFlasher 0.2.63 registry fix
 
 on:
   push:
@@ -13,11 +13,13 @@ on:
       - 'START_EXPERT.sh'
       - 'config/UI_TERMS.json'
       - 'ursusflasher/src/ui_terms.py'
+      - 'ursusflasher/src/device_state.py'
       - 'ursusflasher/src/one_key_multi.py'
       - 'ursusflasher/src/expert_multi.py'
       - 'ursusflasher/src/stock_bootarea_restore.py'
       - 'ursusflasher/src/uart_bootarea_restore.py'
       - 'ursusflasher/tools/selftest_stateui3_enum_coverage.py'
+      - 'ursusflasher/tools/selftest_stateui6_action_preflight.py'
       - 'ursusflasher/tools/selftest_stateui14_multiboard_registry.py'
   workflow_dispatch:
 
@@ -41,6 +43,7 @@ jobs:
       - name: Source UI registry regression QA
         run: |
           python3 ursusflasher/tools/selftest_stateui3_enum_coverage.py
+          python3 ursusflasher/tools/selftest_stateui6_action_preflight.py
           python3 ursusflasher/tools/selftest_stateui14_multiboard_registry.py
 
       - name: Download last fully-audited 0.2.62 hardware kit
@@ -58,7 +61,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import hashlib, shutil, zipfile
+          import hashlib, os, shutil, zipfile
 
           oldzip = Path('base/UrsusFlasher-0.2.62.zip')
           work = Path('work/hotfix63')
@@ -81,11 +84,20 @@ jobs:
           shutil.copy2('VERSION', root / 'VERSION')
           shutil.copy2('VERSION', root / 'data' / 'VERSION')
           shutil.copy2('config/UI_TERMS.json', root / 'data' / 'UI_TERMS.json')
-          for name in ('ui_terms.py', 'one_key_multi.py', 'expert_multi.py', 'stock_bootarea_restore.py', 'uart_bootarea_restore.py'):
+          for name in (
+              'ui_terms.py', 'device_state.py', 'one_key_multi.py', 'expert_multi.py',
+              'stock_bootarea_restore.py', 'uart_bootarea_restore.py',
+          ):
               shutil.copy2(Path('ursusflasher/src') / name, root / 'data' / name)
 
+          # Embed the exact source commit in the inner kit. This makes it
+          # impossible to confuse a successful Actions run with an older ZIP.
+          (root / 'BUILD_COMMIT.txt').write_text(
+              os.environ['GITHUB_SHA'] + '\n', encoding='ascii', newline='\n'
+          )
+
           # v63 wrappers were a temporary hotfix layer and caused interface
-          # drift. 0.2.63 now uses the canonical multi-board entrypoints.
+          # drift. 0.2.63 uses the canonical multi-board entrypoints.
           for name in ('one_key_v63.py', 'expert_v63.py'):
               p = root / 'data' / name
               if p.exists():
@@ -135,11 +147,12 @@ jobs:
                       z.write(p, p.relative_to(root.parent))
           digest = sha256(zpath)
           (out / 'UrsusFlasher-0.2.63.zip.sha256.txt').write_text(
-              f'{digest}  {zpath.name}\n', encoding='utf-8', newline='\n')
+              f'{digest}  {zpath.name}\n', encoding='utf-8', newline='\n'
+          )
           print('HOTFIX63_ZIP', zpath, zpath.stat().st_size, digest)
           PY
 
-      - name: Package and startup regression QA
+      - name: Package bytes and startup regression QA
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -151,8 +164,11 @@ jobs:
               names = set(z.namelist())
               assert r + 'START_ONECLICK.cmd' in names
               assert r + 'START_EXPERT.cmd' in names
+              assert r + 'BUILD_COMMIT.txt' in names
+              assert z.read(r + 'BUILD_COMMIT.txt').decode().strip() == os.environ['GITHUB_SHA']
               assert r + 'data/one_key_multi.py' in names
               assert r + 'data/expert_multi.py' in names
+              assert r + 'data/device_state.py' in names
               assert r + 'data/ui_terms.py' in names
               assert r + 'data/UI_TERMS.json' in names
               assert r + 'data/one_key_v63.py' not in names
@@ -165,6 +181,31 @@ jobs:
               assert b'expert_multi.py' in z.read(r + 'START_EXPERT.cmd')
               assert b'_v63.py' not in z.read(r + 'START_ONECLICK.cmd')
               assert b'_v63.py' not in z.read(r + 'START_EXPERT.cmd')
+
+              # The exact source files under test must be the bytes shipped in
+              # data/. Do this before importing anything so an overlay cannot
+              # hide a stale canonical registry.
+              critical = {
+                  'device_state.py': Path('ursusflasher/src/device_state.py'),
+                  'expert_multi.py': Path('ursusflasher/src/expert_multi.py'),
+                  'ui_terms.py': Path('ursusflasher/src/ui_terms.py'),
+                  'UI_TERMS.json': Path('config/UI_TERMS.json'),
+              }
+              for packaged, source in critical.items():
+                  packed = z.read(r + 'data/' + packaged)
+                  source_bytes = source.read_bytes()
+                  assert packed == source_bytes, (packaged, hashlib.sha256(packed).hexdigest(), hashlib.sha256(source_bytes).hexdigest())
+
+              device_source = z.read(r + 'data/device_state.py').decode('utf-8')
+              expert_source = z.read(r + 'data/expert_multi.py').decode('utf-8')
+              ui_source = z.read(r + 'data/ui_terms.py').decode('utf-8')
+              assert '4: "restore_factory_bootarea"' in device_source
+              assert '4: "update_bootloader"' not in device_source
+              assert 'elif key == "update_bootloader"' not in device_source
+              assert 'ALIAS_TO_ACTION_2' not in device_source
+              assert 'ds.ACTION_KEYS[4] =' not in expert_source
+              assert 'base.ds.action_applicability = action_applicability' not in expert_source
+              assert '_DATA.get("expert_actions", {}).get(raw)' in ui_source
 
               terms_json = json.loads(z.read(r + 'data/UI_TERMS.json'))
               assert terms_json['version'] >= 14
@@ -210,18 +251,24 @@ jobs:
           assert one_key_multi.mf_runtime_mode({'persistent_write_enabled': False, 'ram_read_only': True}) == 'RAM_ONLY'
           assert one_key_multi.mf_runtime_mode({'version': '0.1.0-TEST61'}) == 'LEGACY_RAM_ONLY'
 
+          # Canonical registry first; only then import the board specialization.
           import device_state as ds
-          import expert_multi
           assert ds.ACTION_KEYS[4] == 'restore_factory_bootarea'
+          canonical_keys = dict(ds.ACTION_KEYS)
+          canonical_applicability = ds.action_applicability
+          import expert_multi
+          assert ds.ACTION_KEYS == canonical_keys
+          assert ds.action_applicability is canonical_applicability
+
           for state in (
               ds.DeviceState(),
-              ds.DeviceState(current_system='RECOVERY', current_layout='OPENWRT_UBI', bootloader='URSUSBOOT', evidence={'board_profile':'mf'}),
+              ds.DeviceState(current_system='RECOVERY', current_layout='OPENWRT_UBI', bootloader='URSUSBOOT', evidence={'board_profile': 'mf'}),
           ):
               app = expert_multi.action_applicability(state)
               for number, action in app.items():
                   assert action.key == ds.ACTION_KEYS[number]
                   assert action.key in ui_terms._DATA['expert_actions']
-          mf_app = expert_multi.action_applicability(ds.DeviceState(current_system='RECOVERY', evidence={'board_profile':'mf'}))
+          mf_app = expert_multi.action_applicability(ds.DeviceState(current_system='RECOVERY', evidence={'board_profile': 'mf'}))
           assert mf_app[2].resolved_backend == 'MF_DEVICE_DERIVED_HOST_ONLY'
           assert expert_multi.action_applicability(ds.DeviceState())[4].resolved_backend == 'UART_BOOTAREA_FACTORY_RESTORE'
 
@@ -255,6 +302,9 @@ jobs:
           item4_block = expert_source.split('elif number == 4:', 1)[1].split('elif number == 5:', 1)[0]
           assert 'confirm_uart_recovery' not in item4_block
 
+          print('PACKAGED_SOURCE_PARITY=PASS')
+          print('CANONICAL_ACTION_REGISTRY=PASS')
+          print('NO_IMPORT_TIME_REGISTRY_MUTATION=PASS')
           print('MF_RUNTIME_MODE_GUARD=PASS')
           print('STATEUI14_ACTION_REGISTRY=PASS')
           print('EXPERT_ITEM4_UI=PASS')
@@ -264,6 +314,7 @@ jobs:
           PY
           python3 -m py_compile \
             work/smoke63/UrsusFlasher-0.2.63/data/ui_terms.py \
+            work/smoke63/UrsusFlasher-0.2.63/data/device_state.py \
             work/smoke63/UrsusFlasher-0.2.63/data/one_key_multi.py \
             work/smoke63/UrsusFlasher-0.2.63/data/expert_multi.py
 
@@ -276,6 +327,6 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: ursusflasher-0.2.63-mf-runtime-guard-hwtest
+          name: ursusflasher-0.2.63-registryfix-hwtest
           path: upload/
           if-no-files-found: error
