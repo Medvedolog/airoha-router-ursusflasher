@@ -113,7 +113,7 @@ ACTION_KEYS = {
     1: "install_openwrt",
     2: "install_or_repair_bootloader",
     3: "custom_openwrt",
-    4: "update_bootloader",
+    4: "restore_factory_bootarea",
     5: "recover_bootloader",
     6: "restore_nokia",
     7: "full_backup",
@@ -497,11 +497,6 @@ def action_applicability(state: DeviceState) -> dict[int, ActionApplicability]:
                 backend = "SSH_PERSISTENT_OPENWRT"
             elif state.current_system == "NOKIA_STOCK":
                 backend = "TELNET_NOKIA_STOCK"
-        elif key == "update_bootloader":
-            # Hidden compatibility alias for historical EXPERT item 4.
-            backend = "ALIAS_TO_ACTION_2"
-            enabled = out.get(2, ActionApplicability(2, "install_or_repair_bootloader", True, "", "", True, "AUTO_URSUSBOOT_INSTALL_UPDATE")).enabled
-            reason = out.get(2, ActionApplicability(2, "install_or_repair_bootloader", True, "", "", True, "AUTO_URSUSBOOT_INSTALL_UPDATE")).reason
         elif key == "custom_openwrt":
             if state.current_system == "RECOVERY":
                 backend = "URSUSBOOT_RECOVERY_CUSTOM_IMAGE"
