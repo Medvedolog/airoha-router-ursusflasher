@@ -109,8 +109,8 @@ def action_applicability(state: ds.DeviceState):
         out[2] = ds.ActionApplicability(
             old.number, old.key, False,
             tr(
-                "MF bootloader update is device-derived and runs from Nokia stock or OpenWrt, not from Recovery",
-                "MF bootloader update is device-derived and runs from Nokia stock or OpenWrt, not from Recovery",
+                "Установка UrsusBoot на MF выполняется из заводской Nokia или из OpenWrt, не из режима восстановления",
+                "MF UrsusBoot installation is device-derived and runs from Nokia stock or OpenWrt, not from Recovery",
             ),
             "", old.write_capable, "MF_DEVICE_DERIVED_HOST_ONLY",
         )
@@ -127,19 +127,12 @@ def _show_action(number: int, app: dict[int, ds.ActionApplicability], detail_ru:
 
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     family = _family(state)
-    suffix = ""
-    if family == "md":
-        suffix = "Nokia XG-040G-MD / AN7581"
-    elif family == "mf":
-        suffix = "Nokia XG-040G-MF / AN7583"
 
     if number == 4:
-        ru = "USB-UART → Airoha BootROM → загрузка в память → заводская загрузочная область (mtd0 0x80000) → полная проверка записанного"
-        en = "USB-UART → Airoha BootROM → RAM bootstrap → factory boot area (mtd0 0x80000) → full verification of written data"
-        if suffix:
-            ru += f"; модель: {suffix}"
-            en += f"; model: {suffix}"
-        return ru, en
+        return (
+            "Через USB-UART. Вернёт заводскую загрузочную область с полной проверкой.",
+            "Via USB-UART. Restores the factory boot area with full verification.",
+        )
     if number == 5:
         if family == "mf":
             return (
