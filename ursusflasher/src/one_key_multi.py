@@ -5,7 +5,6 @@ import hashlib
 import json
 import os
 import sys
-import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -28,7 +27,7 @@ probe_http_identity = md_one_key.probe_http_identity
 
 HOST = os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
 MD_TARGET = "0.1.0-alpha5-UBIUX1-TEST61"
-MF_TARGET = "0.1.0-TEST61"
+MF_TARGET = "0.1.0-TEST62"
 
 
 def _root() -> Path:
@@ -165,20 +164,22 @@ def _require_mf_persistent_runtime(st: dict) -> None:
     ui.status(tr("РЕЖИМ", "MODE"), f"MF UrsusBoot: {mode}")
     if mode != "PERSISTENT_RUNTIME":
         raise RuntimeError(tr(
-            "Обнаружен MF RAM-only/legacy Recovery, а не persistent UrsusBoot. ONE-KEY остановлен ДО записи OpenWrt. Не обходите HTTP 403: верните/загрузите Nokia stock и запустите ONE-KEY снова; тогда сначала будет установлен device-derived persistent UrsusBoot-MF.",
-            "MF RAM-only/legacy Recovery was detected instead of persistent UrsusBoot. ONE-KEY stopped BEFORE any OpenWrt write. Do not bypass HTTP 403: boot/restore Nokia stock and run ONE-KEY again; it will install the device-derived persistent UrsusBoot-MF first.",
+            "Обнаружен MF RAM-only/legacy Recovery, а не persistent UrsusBoot. ONE-KEY остановлен ДО записи OpenWrt. Сначала обновите/почините UrsusBoot через EXPERT; universal FIP не используется — кандидат собирается из mtd0 этого устройства.",
+            "MF RAM-only/legacy Recovery was detected instead of persistent UrsusBoot. ONE-KEY stopped BEFORE any OpenWrt write. Update/repair UrsusBoot through EXPERT first; no universal FIP is used, the candidate is derived from this device's mtd0.",
         ))
 
 
 def _report_runtime(st: dict, family: str) -> None:
     version = str(st.get("version") or "UNKNOWN")
+    build = str(st.get("build") or "UNKNOWN")
     target = MD_TARGET if family == "md" else MF_TARGET
+    label = f"UrsusBoot {version} · build {build} ({family.upper()})"
     if version == target:
-        ui.status(tr("ГОТОВО", "READY"), f"UrsusBoot {version} ({family.upper()})")
+        ui.status(tr("ГОТОВО", "READY"), label)
     else:
         ui.status(tr("ИНФО", "INFO"), tr(
-            f"Запущен UrsusBoot {version}; целевая линия {family.upper()} — {target}. Автоматического второго обновления загрузчика нет.",
-            f"Running UrsusBoot is {version}; the target {family.upper()} line is {target}. No automatic second bootloader update will be attempted.",
+            f"Запущен {label}; целевая линия — {target}. Обновление загрузчика выполняется отдельной явной операцией.",
+            f"Running {label}; target line is {target}. Bootloader update is a separate explicit operation.",
         ))
 
 
@@ -207,10 +208,7 @@ def main(*, skip_full_backup: bool = False) -> int:
     root = _root()
     version = ui.package_version(root)
     ui.banner("UrsusFlasher ONE-KEY", version=version)
-    ui.danger_block(tr("ОБЯЗАТЕЛЬНО ПЕРЕД УСТАНОВКОЙ", "REQUIRED BEFORE INSTALLATION"), [
-        tr("! Nokia XG-040G-MD / XG-040G-MF на родной прошивке должна быть сброшена к заводским настройкам.", "! Nokia XG-040G-MD / XG-040G-MF on stock firmware must be reset to factory defaults."),
-        tr("  При включённом роутере удерживайте RESET не менее 20 секунд, затем дождитесь полной загрузки Nokia.", "  With the router powered on, hold RESET for at least 20 seconds, then wait for Nokia stock to boot completely."),
-    ])
+    # network_guidance owns the single shared, large stock-reset warning.
     network_guidance.show()
     HOST = md_one_key.choose_stock_ip()
     os.environ["NOKIA_ROUTER_IP"] = HOST
@@ -242,11 +240,16 @@ def main(*, skip_full_backup: bool = False) -> int:
     if recovery_family != family:
         raise RuntimeError(f"family changed across reboot: {family} -> {recovery_family}")
     _report_runtime(st, family)
-    result = _install_openwrt(st, family, already_authorized=already_authorized)
+    _install_openwrt(st, family, already_authorized=already_authorized)
     ui.status(tr("ГОТОВО", "READY"), tr(f"Операция OpenWrt для {family.upper()} завершена и проверена.", f"The OpenWrt operation for {family.upper()} completed and was verified."))
-    ui.note(tr("Сейчас UrsusBoot перезагрузит устройство в установленную OpenWrt.", "UrsusBoot will now reboot the device into the installed OpenWrt."))
-    time.sleep(1)
-    uw.reboot(HOST)
+    ui.note(tr(
+        "Автоматически перезагружать роутер не буду. КРАТКО нажмите RESET на устройстве (не удерживайте), чтобы загрузить установленную OpenWrt.",
+        "The router will not be rebooted automatically. Briefly press RESET on the device (do not hold it) to boot the installed OpenWrt.",
+    ))
+    ui.prompt(tr(
+        "После краткого нажатия RESET нажмите Enter для завершения ONE-KEY: ",
+        "After briefly pressing RESET, press Enter to finish ONE-KEY: ",
+    ))
     return 0
 
 
