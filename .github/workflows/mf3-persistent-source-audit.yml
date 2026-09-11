@@ -32,6 +32,7 @@ jobs:
           test -f work/mf3-source/cmd/ursusweb.c
           test -f work/mf3-source/cmd/ursusubi.c
           test -f work/mf3-source/cmd/ursusupdate.c
+          test -f work/mf3-source/cmd/ursusstock.c
 
       - name: Collect persistent-path source evidence
         shell: bash
@@ -44,6 +45,7 @@ jobs:
           cp "$SRC/cmd/ursusweb.c" "$OUT/TEST61-ursusweb.c"
           cp "$SRC/cmd/ursusubi.c" "$OUT/TEST61-ursusubi.c"
           cp "$SRC/cmd/ursusupdate.c" "$OUT/TEST61-ursusupdate.c"
+          cp "$SRC/cmd/ursusstock.c" "$OUT/TEST61-ursusstock.c"
           cp "$SRC/cmd/ursusled.c" "$OUT/TEST61-ursusled.c"
           cp "$SRC/cmd/Makefile" "$OUT/TEST61-cmd-Makefile"
           cp "$SRC/drivers/gpio/Makefile" "$OUT/TEST61-gpio-Makefile"
@@ -58,6 +60,9 @@ jobs:
           {
             echo '=== TEST61 persistent entrypoints ==='
             grep -nE 'ursus_ubi_(update|migration|reset)|ursus_fip_update|POST /api|ubi(updatevol|mkvol|format)|mtd_(erase|write)|mtd (erase|write)' "$SRC/cmd/ursusweb.c" "$SRC/cmd/ursusubi.c" "$SRC/cmd/ursusupdate.c" || true
+            echo
+            echo '=== StockBridge parser ==='
+            grep -nE 'HDR2|HDR3|ursusstockboot|STOCKBOOT|NTFW|bootm' "$SRC/cmd/ursusstock.c" || true
             echo
             echo '=== board/layout literals ==='
             grep -nE 'XG-040G-MD|AN7581|0x51c0000|0x5200000|ubootenv|ubootenv2|bosa|ri|fip|fit' "$SRC/cmd/ursusubi.c" "$SRC/cmd/ursusupdate.c" | head -n 300 || true
