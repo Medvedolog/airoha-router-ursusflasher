@@ -19,14 +19,12 @@ import uart_bootarea_restore
 import ursusboot_install
 import ursusboot_update
 
-# Keep the mature EXPERT helpers/state machine. Replace only the board-sensitive
-# entrypoints and the menu dispatcher where item 4 is a real factory boot-area
-# restore. The overlay updates the action registry before applicability is
-# evaluated, so final ActionApplicability keys cannot exist outside the registry.
+# Keep the mature EXPERT helpers/state machine. Replace only board-sensitive
+# entrypoints and the menu dispatcher. The canonical action registry lives in
+# device_state.py; this module may specialize applicability but must not mutate
+# ACTION_KEYS or replace device_state.action_applicability globally.
 base.one_key = one_key_multi
 runtime_kit.install()
-if ds.ACTION_KEYS.get(4) == "update_bootloader":
-    ds.ACTION_KEYS[4] = "restore_factory_bootarea"
 
 
 def tr(ru: str, en: str) -> str:
@@ -119,9 +117,6 @@ def action_applicability(state: ds.DeviceState):
     return out
 
 
-base.ds.action_applicability = action_applicability
-
-
 def _show_action(number: int, app: dict[int, ds.ActionApplicability], detail_ru: str = "", detail_en: str = "") -> None:
     """Do not repeat an unavailable action's reason as a second detail line."""
     if not app[number].enabled:
@@ -208,7 +203,7 @@ def main() -> int:
     host = os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
     while True:
         state = ds.probe_device_state(host)
-        app = ds.action_applicability(state)
+        app = action_applicability(state)
 
         base.ui.banner("UrsusFlasher EXPERT", version=version)
 
@@ -260,7 +255,7 @@ def main() -> int:
         elif number == 2:
             base.network_guidance.show()
             fresh_state = base._interactive_diagnostic_state(ds.probe_device_state(host))
-            fresh_action = ds.action_applicability(fresh_state)[2]
+            fresh_action = action_applicability(fresh_state)[2]
             if not fresh_action.enabled:
                 base.ui.status(tr("СТОП", "STOP"), fresh_action.reason or tr("Действие сейчас неприменимо.", "This action is not currently applicable."))
                 base.ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
@@ -272,7 +267,7 @@ def main() -> int:
         elif number == 3:
             base.network_guidance.show()
             fresh_state = ds.probe_device_state(host)
-            fresh_action = ds.action_applicability(fresh_state)[3]
+            fresh_action = action_applicability(fresh_state)[3]
             if not fresh_action.enabled:
                 base.ui.status(tr("СТОП", "STOP"), fresh_action.reason or tr("Действие сейчас неприменимо.", "This action is not currently applicable."))
                 base.ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
