@@ -1,324 +1,98 @@
 {
-  "version": 15,
+  "version": 16,
   "layouts": {
-    "STOCK": {
-      "ru": "Заводская прошивка Nokia",
-      "en": "Nokia factory firmware"
-    },
-    "NOKIA_STOCK": {
-      "ru": "Заводская прошивка Nokia",
-      "en": "Nokia factory firmware"
-    },
-    "OPENWRT_UBI": {
-      "ru": "OpenWrt с разметкой UBI",
-      "en": "OpenWrt with UBI layout"
-    },
-    "OPENWRT_STOCK_LAYOUT": {
-      "ru": "OpenWrt в заводской разметке",
-      "en": "OpenWrt in factory layout"
-    },
-    "OPENWRT_FACTORY": {
-      "ru": "OpenWrt в заводской разметке",
-      "en": "OpenWrt in factory layout"
-    },
-    "BROKEN_TRANSITION": {
-      "ru": "Незавершённый переход разметки",
-      "en": "Interrupted layout transition"
-    },
-    "UNKNOWN": {
-      "ru": "Неизвестное состояние разметки",
-      "en": "Unknown layout state"
-    }
+    "STOCK": {"ru": "Заводская прошивка Nokia", "en": "Nokia factory firmware"},
+    "NOKIA_STOCK": {"ru": "Заводская прошивка Nokia", "en": "Nokia factory firmware"},
+    "OPENWRT_UBI": {"ru": "OpenWrt с разметкой UBI", "en": "OpenWrt with UBI layout"},
+    "OPENWRT_STOCK_LAYOUT": {"ru": "OpenWrt в заводской разметке", "en": "OpenWrt in factory layout"},
+    "OPENWRT_FACTORY": {"ru": "OpenWrt в заводской разметке", "en": "OpenWrt in factory layout"},
+    "BROKEN_TRANSITION": {"ru": "Незавершённый переход разметки", "en": "Interrupted layout transition"},
+    "UNKNOWN": {"ru": "Неизвестное состояние разметки", "en": "Unknown layout state"}
   },
   "expert_actions": {
-    "install_openwrt": {
-      "number": 1,
-      "ru": "Установить OpenWrt",
-      "en": "Install OpenWrt"
-    },
-    "install_or_repair_bootloader": {
-      "number": 2,
-      "ru": "Установить или обновить UrsusBoot",
-      "en": "Install or update UrsusBoot"
-    },
-    "custom_openwrt": {
-      "number": 3,
-      "ru": "Установить свою прошивку OpenWrt",
-      "en": "Install a custom OpenWrt image"
-    },
-    "restore_factory_bootarea": {
-      "number": 4,
-      "ru": "Вернуть заводской загрузчик Nokia (UrsusBoot будет удалён)",
-      "en": "Restore Nokia factory bootloader (removes UrsusBoot)"
-    },
-    "recover_bootloader": {
-      "number": 5,
-      "ru": "Починить UrsusBoot, если он не запускается",
-      "en": "Repair UrsusBoot if it does not start"
-    },
-    "restore_nokia": {
-      "number": 6,
-      "ru": "Вернуть роутер к заводскому состоянию целиком",
-      "en": "Restore the entire router to factory state"
-    },
-    "full_backup": {
-      "number": 7,
-      "ru": "Снять полную копию памяти роутера",
-      "en": "Capture a complete router memory backup"
-    },
-    "validate_backup": {
-      "number": 8,
-      "ru": "Проверить резервную копию",
-      "en": "Validate a backup"
-    },
-    "disaster_kit": {
-      "number": 9,
-      "ru": "Собрать комплект восстановления",
-      "en": "Build a recovery kit"
-    },
-    "capabilities": {
-      "number": 10,
-      "ru": "Что этот роутер позволяет сделать",
-      "en": "What this router can do"
-    },
-    "flash_diagnostics": {
-      "number": 11,
-      "ru": "Память, разметка и сбойные блоки",
-      "en": "Memory, layout and bad blocks"
-    },
-    "package_files": {
-      "number": 12,
-      "ru": "Проверить файлы программы",
-      "en": "Check program files"
-    }
+    "install_openwrt": {"number": 1, "ru": "Установить OpenWrt", "en": "Install OpenWrt"},
+    "install_or_repair_bootloader": {"number": 2, "ru": "Установить или обновить UrsusBoot", "en": "Install or update UrsusBoot"},
+    "custom_openwrt": {"number": 3, "ru": "Установить свою прошивку OpenWrt", "en": "Install a custom OpenWrt image"},
+    "restore_factory_bootarea": {"number": 4, "ru": "Вернуть заводской загрузчик Nokia (UrsusBoot будет удалён)", "en": "Restore Nokia factory bootloader (removes UrsusBoot)"},
+    "recover_bootloader": {"number": 5, "ru": "Починить UrsusBoot, если он не запускается", "en": "Repair UrsusBoot if it does not start"},
+    "restore_nokia": {"number": 6, "ru": "Вернуть роутер к заводскому состоянию целиком", "en": "Restore the entire router to factory state"},
+    "full_backup": {"number": 7, "ru": "Снять полную копию памяти роутера", "en": "Capture a complete router memory backup"},
+    "validate_backup": {"number": 8, "ru": "Проверить резервную копию", "en": "Validate a backup"},
+    "disaster_kit": {"number": 9, "ru": "Собрать комплект восстановления", "en": "Build a recovery kit"},
+    "capabilities": {"number": 10, "ru": "Что этот роутер позволяет сделать", "en": "What this router can do"},
+    "flash_diagnostics": {"number": 11, "ru": "Память, разметка и сбойные блоки", "en": "Memory, layout and bad blocks"},
+    "package_files": {"number": 12, "ru": "Проверить файлы программы", "en": "Check program files"}
   },
-  "contract": "STATEUI15 MF63: item 4 is board-aware Nokia factory boot-area/mtd0 restore; final EXPERT action keys and methods are canonical; unknown presentation values degrade to raw text plus session warning instead of crashing the recovery menu; disabled actions show reason only; note/reason/detail are separate UI lines; visible actions derive from the canonical action registry; task-oriented menu; passive DeviceState is informational; explicit items 7/10/11 may authenticate read-only via system OpenSSH; authorization remains per-action; ! means persistent-write-capable only",
+  "contract": "STATEUI16 MF TEST62: MF Recovery may perform device-derived UrsusBoot self-update only from a validated backup of this device; item 4 is board-aware Nokia factory boot-area/mtd0 restore; final EXPERT action keys and methods are canonical; unknown presentation values degrade to raw text plus session warning instead of crashing the recovery menu; disabled actions show reason only; note/reason/detail are separate UI lines; visible actions derive from the canonical action registry; task-oriented menu; passive DeviceState is informational; explicit items 7/10/11 may authenticate read-only via system OpenSSH; authorization remains per-action; ! means persistent-write-capable only",
   "systems": {
-    "NOKIA_STOCK": {
-      "ru": "Заводская прошивка Nokia",
-      "en": "Nokia factory firmware"
-    },
-    "OPENWRT_UBI": {
-      "ru": "OpenWrt с разметкой UBI",
-      "en": "OpenWrt with UBI layout"
-    },
-    "OPENWRT_FACTORY": {
-      "ru": "OpenWrt в заводской разметке",
-      "en": "OpenWrt in factory layout"
-    },
-    "RECOVERY": {
-      "ru": "Режим восстановления UrsusBoot",
-      "en": "UrsusBoot recovery mode"
-    },
-    "UNKNOWN": {
-      "ru": "Не определена",
-      "en": "Not determined"
-    },
-    "STOCK": {
-      "ru": "Заводская прошивка Nokia",
-      "en": "Nokia factory firmware"
-    },
-    "OPENWRT_STOCK_LAYOUT": {
-      "ru": "OpenWrt в заводской разметке",
-      "en": "OpenWrt in factory layout"
-    },
-    "BROKEN_TRANSITION": {
-      "ru": "Незавершённый переход разметки",
-      "en": "Interrupted layout transition"
-    }
+    "NOKIA_STOCK": {"ru": "Заводская прошивка Nokia", "en": "Nokia factory firmware"},
+    "OPENWRT_UBI": {"ru": "OpenWrt с разметкой UBI", "en": "OpenWrt with UBI layout"},
+    "OPENWRT_FACTORY": {"ru": "OpenWrt в заводской разметке", "en": "OpenWrt in factory layout"},
+    "RECOVERY": {"ru": "Режим восстановления UrsusBoot", "en": "UrsusBoot recovery mode"},
+    "UNKNOWN": {"ru": "Не определена", "en": "Not determined"},
+    "STOCK": {"ru": "Заводская прошивка Nokia", "en": "Nokia factory firmware"},
+    "OPENWRT_STOCK_LAYOUT": {"ru": "OpenWrt в заводской разметке", "en": "OpenWrt in factory layout"},
+    "BROKEN_TRANSITION": {"ru": "Незавершённый переход разметки", "en": "Interrupted layout transition"}
   },
   "bootloaders": {
-    "URSUSBOOT": {
-      "ru": "UrsusBoot",
-      "en": "UrsusBoot"
-    },
-    "STOCK_TCBOOT": {
-      "ru": "Заводской загрузчик Nokia (tcboot)",
-      "en": "Nokia factory bootloader (tcboot)"
-    },
-    "UNKNOWN": {
-      "ru": "Не определён",
-      "en": "Not determined"
-    },
-    "TCBOOT": {
-      "ru": "Заводской загрузчик Nokia (tcboot)",
-      "en": "Nokia factory bootloader (tcboot)"
-    }
+    "URSUSBOOT": {"ru": "UrsusBoot", "en": "UrsusBoot"},
+    "STOCK_TCBOOT": {"ru": "Заводской загрузчик Nokia (tcboot)", "en": "Nokia factory bootloader (tcboot)"},
+    "UNKNOWN": {"ru": "Не определён", "en": "Not determined"},
+    "TCBOOT": {"ru": "Заводской загрузчик Nokia (tcboot)", "en": "Nokia factory bootloader (tcboot)"}
   },
   "backup_states": {
-    "NOT_FOUND": {
-      "ru": "не найдена",
-      "en": "not found"
-    },
-    "FOUND_UNVERIFIED": {
-      "ru": "найдена, не проверена",
-      "en": "found, not validated"
-    },
-    "VERIFIED": {
-      "ru": "проверена",
-      "en": "validated"
-    },
-    "RESTORE_READY": {
-      "ru": "готова к восстановлению",
-      "en": "ready for restore"
-    },
-    "UNKNOWN": {
-      "ru": "не определено",
-      "en": "not determined"
-    },
-    "FOUND": {
-      "ru": "найдена, не проверена",
-      "en": "found, not validated"
-    }
+    "NOT_FOUND": {"ru": "не найдена", "en": "not found"},
+    "FOUND_UNVERIFIED": {"ru": "найдена, не проверена", "en": "found, not validated"},
+    "VERIFIED": {"ru": "проверена", "en": "validated"},
+    "RESTORE_READY": {"ru": "готова к восстановлению", "en": "ready for restore"},
+    "UNKNOWN": {"ru": "не определено", "en": "not determined"},
+    "FOUND": {"ru": "найдена, не проверена", "en": "found, not validated"}
   },
   "probe_states": {
-    "COMPLETE": {
-      "ru": "данные полные",
-      "en": "complete"
-    },
-    "PARTIAL": {
-      "ru": "данные неполные",
-      "en": "partial"
-    },
-    "FAILED": {
-      "ru": "проверка не удалась",
-      "en": "failed"
-    },
-    "UNKNOWN": {
-      "ru": "не определено",
-      "en": "not determined"
-    }
+    "COMPLETE": {"ru": "данные полные", "en": "complete"},
+    "PARTIAL": {"ru": "данные неполные", "en": "partial"},
+    "FAILED": {"ru": "проверка не удалась", "en": "failed"},
+    "UNKNOWN": {"ru": "не определено", "en": "not determined"}
   },
   "write_states": {
-    "CLEAN": {
-      "ru": "нет незавершённых операций",
-      "en": "no unfinished operations"
-    },
-    "WRITE_STATE_UNKNOWN": {
-      "ru": "состояние записи неизвестно",
-      "en": "write state unknown"
-    },
-    "LEGACY_UNTRACKED": {
-      "ru": "не отслеживается в этой версии",
-      "en": "not tracked in this version"
-    },
-    "UNKNOWN": {
-      "ru": "не определено",
-      "en": "not determined"
-    }
+    "CLEAN": {"ru": "нет незавершённых операций", "en": "no unfinished operations"},
+    "WRITE_STATE_UNKNOWN": {"ru": "состояние записи неизвестно", "en": "write state unknown"},
+    "LEGACY_UNTRACKED": {"ru": "не отслеживается в этой версии", "en": "not tracked in this version"},
+    "UNKNOWN": {"ru": "не определено", "en": "not determined"}
   },
   "tri_bools": {
-    "TRUE": {
-      "ru": "есть",
-      "en": "yes"
-    },
-    "FALSE": {
-      "ru": "нет",
-      "en": "no"
-    },
-    "UNKNOWN": {
-      "ru": "не определён",
-      "en": "not determined"
-    }
+    "TRUE": {"ru": "есть", "en": "yes"},
+    "FALSE": {"ru": "нет", "en": "no"},
+    "UNKNOWN": {"ru": "не определён", "en": "not determined"}
   },
-  "generic_values": {
-    "UNKNOWN": {
-      "ru": "не определено",
-      "en": "not determined"
-    }
-  },
+  "generic_values": {"UNKNOWN": {"ru": "не определено", "en": "not determined"}},
   "probe_reasons": {
-    "URSUS_MODEL_UNCONFIRMED": {
-      "ru": "UrsusBoot отвечает, но модель не подтверждена",
-      "en": "UrsusBoot responds, but the model was not confirmed"
-    },
-    "STOCK_MODEL_SOC_MISMATCH": {
-      "ru": "Заводской веб-интерфейс отвечает, но пара модель/SoC не совпала с поддерживаемым профилем MD/AN7581 или MF/AN7583",
-      "en": "The factory web interface responds, but the model/SoC pair does not match the supported MD/AN7581 or MF/AN7583 profile"
-    },
-    "OPENWRT_BOARD_LAYOUT_UNCONFIRMED": {
-      "ru": "OpenWrt отвечает по SSH, но модель платы и разметка не подтверждены",
-      "en": "OpenWrt responds over SSH, but the board model and layout were not confirmed"
-    },
-    "OPENWRT_ROOT_SSH_UNAVAILABLE": {
-      "ru": "OpenWrt отвечает по HTTP, но проверить доступ root по SSH не удалось",
-      "en": "OpenWrt responds over HTTP, but root access over SSH could not be checked"
-    },
-    "NO_NETWORK_ENDPOINT": {
-      "ru": "Роутер не отвечает ни по одному известному адресу",
-      "en": "The router does not respond on any known network endpoint"
-    },
-    "NETWORK_IDENTITY_AMBIGUOUS": {
-      "ru": "Устройство отвечает по сети, но определить его точно не удалось",
-      "en": "The device responds over the network, but it could not be identified unambiguously"
-    },
-    "EXECUTION_ENVIRONMENT_UNCONFIRMED": {
-      "ru": "OpenWrt подтверждена, но не удалось определить, запущена она из flash-памяти или из оперативной памяти",
-      "en": "OpenWrt was confirmed, but it was not possible to determine whether it is running from flash or RAM"
-    },
-    "BOARD_PROFILE_WRITE_DISABLED": {
-      "ru": "Профиль платы подключён только для чтения; persistent write ещё не разрешён аппаратной приёмкой",
-      "en": "The board profile is read-only; persistent writes are not yet authorized by hardware acceptance"
-    },
-    "UNKNOWN": {
-      "ru": "Причина не определена",
-      "en": "Reason not determined"
-    }
+    "URSUS_MODEL_UNCONFIRMED": {"ru": "UrsusBoot отвечает, но модель не подтверждена", "en": "UrsusBoot responds, but the model was not confirmed"},
+    "STOCK_MODEL_SOC_MISMATCH": {"ru": "Заводской веб-интерфейс отвечает, но пара модель/SoC не совпала с поддерживаемым профилем MD/AN7581 или MF/AN7583", "en": "The factory web interface responds, but the model/SoC pair does not match the supported MD/AN7581 or MF/AN7583 profile"},
+    "OPENWRT_BOARD_LAYOUT_UNCONFIRMED": {"ru": "OpenWrt отвечает по SSH, но модель платы и разметка не подтверждены", "en": "OpenWrt responds over SSH, but the board model and layout were not confirmed"},
+    "OPENWRT_ROOT_SSH_UNAVAILABLE": {"ru": "OpenWrt отвечает по HTTP, но проверить доступ root по SSH не удалось", "en": "OpenWrt responds over HTTP, but root access over SSH could not be checked"},
+    "NO_NETWORK_ENDPOINT": {"ru": "Роутер не отвечает ни по одному известному адресу", "en": "The router does not respond on any known network endpoint"},
+    "NETWORK_IDENTITY_AMBIGUOUS": {"ru": "Устройство отвечает по сети, но определить его точно не удалось", "en": "The device responds over the network, but it could not be identified unambiguously"},
+    "EXECUTION_ENVIRONMENT_UNCONFIRMED": {"ru": "OpenWrt подтверждена, но не удалось определить, запущена она из flash-памяти или из оперативной памяти", "en": "OpenWrt was confirmed, but it was not possible to determine whether it is running from flash or RAM"},
+    "BOARD_PROFILE_WRITE_DISABLED": {"ru": "Профиль платы подключён только для чтения; persistent write ещё не разрешён аппаратной приёмкой", "en": "The board profile is read-only; persistent writes are not yet authorized by hardware acceptance"},
+    "UNKNOWN": {"ru": "Причина не определена", "en": "Reason not determined"}
   },
   "execution_environments": {
-    "PERSISTENT_ROOT": {
-      "ru": "установленная OpenWrt во flash-памяти",
-      "en": "installed OpenWrt from flash"
-    },
-    "RAM_ROOT": {
-      "ru": "OpenWrt запущена из оперативной памяти",
-      "en": "OpenWrt running from RAM"
-    },
-    "UNKNOWN": {
-      "ru": "не определена",
-      "en": "not determined"
-    }
+    "PERSISTENT_ROOT": {"ru": "установленная OpenWrt во flash-памяти", "en": "installed OpenWrt from flash"},
+    "RAM_ROOT": {"ru": "OpenWrt запущена из оперативной памяти", "en": "OpenWrt running from RAM"},
+    "UNKNOWN": {"ru": "не определена", "en": "not determined"}
   },
   "methods": {
-    "AUTO_BOOTLOADER_INSTALL_REPAIR": {
-      "ru": "Подходящий способ определяется автоматически",
-      "en": "The applicable method is selected automatically"
-    },
-    "SSH_PERSISTENT_OPENWRT": {
-      "ru": "Через SSH из установленной OpenWrt",
-      "en": "Over SSH from installed OpenWrt"
-    },
-    "SSH_RAM_OPENWRT": {
-      "ru": "Через SSH из OpenWrt, запущенной из оперативной памяти",
-      "en": "Over SSH from OpenWrt running in RAM"
-    },
-    "TELNET_NOKIA_STOCK": {
-      "ru": "Через Telnet из запущенной заводской прошивки Nokia",
-      "en": "Over Telnet from Nokia factory firmware"
-    },
-    "AUTO_URSUSBOOT_INSTALL_UPDATE": {
-      "ru": "Установка или обновление UrsusBoot с автоматическим выбором транспорта",
-      "en": "Install or update UrsusBoot with automatic transport selection"
-    },
-    "URSUSBOOT_RECOVERY_SELFUPDATE": {
-      "ru": "Через веб-интерфейс UrsusBoot, запасной путь — TFTP",
-      "en": "Through the UrsusBoot web interface; TFTP is the fallback path"
-    },
-    "SSH_PERSISTENT_OPENWRT_SYSUPGRADE": {
-      "ru": "Через SSH и штатный sysupgrade из установленной OpenWrt",
-      "en": "Over SSH and native sysupgrade from installed OpenWrt"
-    },
-    "URSUSBOOT_RECOVERY_CUSTOM_IMAGE": {
-      "ru": "Через веб-интерфейс UrsusBoot",
-      "en": "Through the UrsusBoot web interface"
-    },
-    "UART_BOOTAREA_FACTORY_RESTORE": {
-      "ru": "Через USB-UART и Airoha BootROM, с полной проверкой записанного",
-      "en": "Via USB-UART and Airoha BootROM, with full verification of written data"
-    },
-    "MF_DEVICE_DERIVED_HOST_ONLY": {
-      "ru": "Индивидуальная сборка по данным этого устройства из Nokia или OpenWrt",
-      "en": "Device-derived build from Nokia firmware or OpenWrt"
-    }
+    "AUTO_BOOTLOADER_INSTALL_REPAIR": {"ru": "Подходящий способ определяется автоматически", "en": "The applicable method is selected automatically"},
+    "SSH_PERSISTENT_OPENWRT": {"ru": "Через SSH из установленной OpenWrt", "en": "Over SSH from installed OpenWrt"},
+    "SSH_RAM_OPENWRT": {"ru": "Через SSH из OpenWrt, запущенной из оперативной памяти", "en": "Over SSH from OpenWrt running in RAM"},
+    "TELNET_NOKIA_STOCK": {"ru": "Через Telnet из запущенной заводской прошивки Nokia", "en": "Over Telnet from Nokia factory firmware"},
+    "AUTO_URSUSBOOT_INSTALL_UPDATE": {"ru": "Установка или обновление UrsusBoot с автоматическим выбором транспорта", "en": "Install or update UrsusBoot with automatic transport selection"},
+    "URSUSBOOT_RECOVERY_SELFUPDATE": {"ru": "Через веб-интерфейс UrsusBoot, запасной путь — TFTP", "en": "Through the UrsusBoot web interface; TFTP is the fallback path"},
+    "SSH_PERSISTENT_OPENWRT_SYSUPGRADE": {"ru": "Через SSH и штатный sysupgrade из установленной OpenWrt", "en": "Over SSH and native sysupgrade from installed OpenWrt"},
+    "URSUSBOOT_RECOVERY_CUSTOM_IMAGE": {"ru": "Через веб-интерфейс UrsusBoot", "en": "Through the UrsusBoot web interface"},
+    "UART_BOOTAREA_FACTORY_RESTORE": {"ru": "Через USB-UART и Airoha BootROM, с полной проверкой записанного", "en": "Via USB-UART and Airoha BootROM, with full verification of written data"},
+    "MF_DEVICE_DERIVED_HOST_ONLY": {"ru": "Индивидуальная сборка по данным этого устройства из Nokia или OpenWrt", "en": "Device-derived build from Nokia firmware or OpenWrt"},
+    "MF_RECOVERY_DEVICE_DERIVED_FIP_UPDATE": {"ru": "Через UrsusBoot Recovery; индивидуальный FIP собирается из mtd0 backup этого устройства и проверяется после записи", "en": "Through UrsusBoot Recovery; a device-derived FIP is built from this device's mtd0 backup and verified after writing"}
   }
 }
