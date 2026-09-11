@@ -153,6 +153,28 @@ def _install_bootloader(state: ds.DeviceState, family: str, skip_full_backup: bo
     return _wait_recovery()
 
 
+def mf_runtime_mode(st: dict) -> str:
+    """Classify MF UrsusBoot by explicit write capability, never by version alone."""
+    persistent = st.get("persistent_write_enabled")
+    ram_ro = st.get("ram_read_only")
+    if persistent is True and ram_ro is False:
+        return "PERSISTENT_RUNTIME"
+    if persistent is False or ram_ro is True:
+        return "RAM_ONLY"
+    # Legacy MF Recovery without capability fields is conservative/read-only.
+    return "LEGACY_RAM_ONLY"
+
+
+def _require_mf_persistent_runtime(st: dict) -> None:
+    mode = mf_runtime_mode(st)
+    ui.status(tr("РЕЖИМ", "MODE"), f"MF UrsusBoot: {mode}")
+    if mode != "PERSISTENT_RUNTIME":
+        raise RuntimeError(tr(
+            "Обнаружен MF RAM-only/legacy Recovery, а не persistent UrsusBoot. ONE-KEY остановлен ДО записи OpenWrt. Не обходите HTTP 403: верните/загрузите Nokia stock и запустите ONE-KEY снова; тогда сначала будет установлен device-derived persistent UrsusBoot-MF.",
+            "MF RAM-only/legacy Recovery was detected instead of persistent UrsusBoot. ONE-KEY stopped BEFORE any OpenWrt write. Do not bypass HTTP 403: boot/restore Nokia stock and run ONE-KEY again; it will install the device-derived persistent UrsusBoot-MF first.",
+        ))
+
+
 def _report_runtime(st: dict, family: str) -> None:
     version = str(st.get("version") or "UNKNOWN")
     target = MD_TARGET if family == "md" else MF_TARGET
@@ -218,9 +240,15 @@ def main(*, skip_full_backup: bool = False) -> int:
         st = uw.status(HOST)
         family = _family_from_ursus(st)
         verify_family_payloads(family)
+        if family == "mf":
+            _require_mf_persistent_runtime(st)
     elif state.current_system in ("NOKIA_STOCK", "OPENWRT_UBI", "OPENWRT_FACTORY", "OPENWRT_STOCK_LAYOUT"):
         st = _install_bootloader(state, family, skip_full_backup)
         already_authorized = True
+        # A newly installed MF runtime must prove persistent write capability
+        # before ONE-KEY is allowed to enter the OpenWrt writer.
+        if family == "mf":
+            _require_mf_persistent_runtime(st)
     else:
         raise RuntimeError(tr(
             f"ONE-KEY не может безопасно продолжить из состояния {state.current_system}.",
