@@ -11,6 +11,7 @@ on:
       - 'START_ONECLICK.sh'
       - 'START_EXPERT.cmd'
       - 'START_EXPERT.sh'
+      - 'scripts/repo_common.py'
       - 'ursusflasher/src/one_key_v63.py'
       - 'ursusflasher/src/expert_v63.py'
   workflow_dispatch:
@@ -72,6 +73,13 @@ jobs:
           shutil.copy2('ursusflasher/src/one_key_v63.py', root / 'data' / 'one_key_v63.py')
           shutil.copy2('ursusflasher/src/expert_v63.py', root / 'data' / 'expert_v63.py')
 
+          # UART boot-area restore is now EXPERT item 4; do not duplicate it
+          # with legacy standalone launchers in the package root.
+          for name in ('START_UART_RESTORE.cmd', 'START_UART_RESTORE.sh'):
+              p = root / name
+              if p.exists():
+                  p.unlink()
+
           # Stamp package-facing textual metadata without touching binaries.
           text_suffixes = {'.py', '.json', '.md', '.txt', '.cmd', '.sh'}
           for p in root.rglob('*'):
@@ -128,6 +136,8 @@ jobs:
               assert r + 'START_EXPERT.cmd' in names
               assert r + 'data/one_key_v63.py' in names
               assert r + 'data/expert_v63.py' in names
+              assert r + 'START_UART_RESTORE.cmd' not in names
+              assert r + 'START_UART_RESTORE.sh' not in names
               assert z.read(r + 'VERSION') == b'0.2.63\n'
               assert z.read(r + 'data/VERSION') == b'0.2.63\n'
               assert b'one_key_v63.py' in z.read(r + 'START_ONECLICK.cmd')
@@ -144,15 +154,22 @@ jobs:
               forbidden = ('transition-bundle.bin', 'transition-manual-bundle.bin', 'mf-transition-bundle.bin', 'mf-transition-manual-bundle.bin', 'vendor/')
               assert not [n for n in names if any(x in n for x in forbidden)]
 
-          # Syntax + capability classifier regression outside the extracted kit.
+          # Syntax + capability classifier + EXPERT binding regression.
           sys.path.insert(0, 'ursusflasher/src')
           import one_key_v63
+          assert callable(one_key_v63.choose_language)
+          assert callable(one_key_v63.main)
           assert one_key_v63.mf_runtime_mode({'persistent_write_enabled': True, 'ram_read_only': False}) == 'PERSISTENT_RUNTIME'
           assert one_key_v63.mf_runtime_mode({'persistent_write_enabled': False, 'ram_read_only': True}) == 'RAM_ONLY'
           assert one_key_v63.mf_runtime_mode({'version': '0.1.0-TEST61'}) == 'LEGACY_RAM_ONLY'
+          import expert_v63
+          assert expert_v63.expert_multi.base.one_key is one_key_v63
+          assert callable(expert_v63.expert_multi.base.one_key.choose_language)
+          assert callable(expert_v63.expert_multi.base.one_key.main)
           print('MF_RUNTIME_MODE_GUARD=PASS')
+          print('EXPERT_V63_BINDING=PASS')
           PY
-          python3 -m py_compile ursusflasher/src/one_key_v63.py ursusflasher/src/expert_v63.py
+          python3 -m py_compile ursusflasher/src/one_key_v63.py ursusflasher/src/expert_v63.py ursusflasher/src/expert_multi.py
 
       - name: Stage artifact
         run: |
