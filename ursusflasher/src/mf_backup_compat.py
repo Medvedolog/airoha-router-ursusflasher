@@ -38,13 +38,13 @@ def _mf_mac_writer(original):
     def wrapped(destination: Path, telnet, model_name: str, family: str):
         if family != "mf":
             return original(destination, telnet, model_name, family)
-        # MD and MF use the same hardware-confirmed RI identity offsets:
-        # MAC @ 0x3e, 12-byte ASCII serial @ 0x1a, G.984 suffix @ 0x58.
-        # Reuse the mature fixed-offset implementation instead of the runtime
-        # eth0 placeholder path, then correct only the metadata family label.
+        # Hardware evidence for both MD and MF uses the same fixed RI identity
+        # contract: MAC @0x3e, serial @0x1a, G.984 suffix @0x58. Reuse the
+        # already-hardened fixed-offset path rather than stock eth0 placeholders.
         result = original(destination, telnet, model_name, "md")
         _rewrite_family(destination / "DEVICE_MAC.txt")
         return result
+    wrapped._ursus_mf_fixed_ri = True
     return wrapped
 
 
@@ -57,27 +57,32 @@ def _mf_identity_writer(original):
         for name in ("DEVICE_IDENTITY.txt", "DEVICE_IDENTITY.json"):
             _rewrite_family(destination / name)
         return result
+    wrapped._ursus_mf_fixed_ri = True
     return wrapped
+
+
+def install_fixed_ri_compat() -> None:
+    """Make the proven fixed RI parser family-neutral for the process."""
+    if not getattr(pb._write_backup_device_mac, "_ursus_mf_fixed_ri", False):
+        pb._write_backup_device_mac = _mf_mac_writer(pb._write_backup_device_mac)
+    if not getattr(pb._write_backup_device_identity, "_ursus_mf_fixed_ri", False):
+        pb._write_backup_device_identity = _mf_identity_writer(pb._write_backup_device_identity)
+
+
+# Any caller importing this compatibility layer gets the corrected family-
+# neutral identity behavior. It changes only family=mf; MD remains untouched.
+install_fixed_ri_compat()
 
 
 @contextmanager
 def stock_backup_compat(*, compact_progress: bool = True):
-    """Apply MF fixed-RI identity and readable live-TFTP progress temporarily.
-
-    This intentionally patches only the stock-backup call window. The mature
-    backend remains the single implementation for transport, validation and
-    restore-grade metadata.
-    """
-    old_mac = pb._write_backup_device_mac
-    old_identity = pb._write_backup_device_identity
+    """Keep long live-TFTP backups readable without changing transport logic."""
     had_print = "print" in pb.__dict__
     old_print = pb.__dict__.get("print")
     last_progress: dict[str, float] = {}
 
     def filtered_print(*args, **kwargs):
         text = " ".join(str(x) for x in args)
-        # Long gzip/TFTP reads used to emit a line every ~5 s. Keep start/end
-        # lines and one stable progress line about every 20 s per partition.
         m = re.search(r"\[(?:ЖДУ|WAIT)\]\s+(mtd\d+):\s+(?:принято|received)", text, re.I)
         if compact_progress and m:
             key = m.group(1).lower()
@@ -87,14 +92,10 @@ def stock_backup_compat(*, compact_progress: bool = True):
             last_progress[key] = now
         builtins.print(*args, **kwargs)
 
-    pb._write_backup_device_mac = _mf_mac_writer(old_mac)
-    pb._write_backup_device_identity = _mf_identity_writer(old_identity)
     pb.print = filtered_print
     try:
         yield
     finally:
-        pb._write_backup_device_mac = old_mac
-        pb._write_backup_device_identity = old_identity
         if had_print:
             pb.print = old_print
         else:
