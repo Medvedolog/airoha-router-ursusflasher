@@ -28,12 +28,7 @@ def _pick(item: dict) -> str:
 
 
 def _warn_ui_term(message: str) -> None:
-    """Record a non-fatal UI dictionary problem without creating import cycles.
-
-    EXPERT loads proven_backend before rendering the menu, so use its session-only
-    logger when it is already present.  Standalone callers fall back to Python's
-    logger instead of importing proven_backend from this low-level UI module.
-    """
+    """Record a non-fatal UI dictionary problem without creating import cycles."""
     try:
         proven = sys.modules.get("proven_backend")
         writer = getattr(proven, "_write_session_only", None) if proven is not None else None
@@ -61,9 +56,9 @@ def _normalize_tri_bool(value: Any) -> str:
 def human(value: Any, kind: str) -> str:
     """Convert machine/state values to operator-facing text.
 
-    DeviceState enum/bool values must cross this boundary before display.  Kinds
-    that intentionally carry free-form identity/address data still localize the
-    UNKNOWN sentinel instead of exposing it.
+    Registry completeness is enforced by build QA. At runtime an unregistered
+    value is shown verbatim and logged instead of crashing a recovery menu.
+    Authorization never depends on this presentation fallback.
     """
     kind = str(kind or "").strip().lower()
     raw = str(value if value is not None else "UNKNOWN").strip()
@@ -94,10 +89,8 @@ def human(value: Any, kind: str) -> str:
     table = _DATA[table_name]
     item = table.get(raw) or table.get(raw.upper())
     if item is None:
-        # Enum/state values remain fail-closed at the UI boundary. UNKNOWN is a
-        # legitimate explicit machine value, but an unregistered new enum must
-        # be caught by build QA rather than silently rendered as UNKNOWN.
-        raise KeyError(f"no UI term for kind={kind!r} value={raw!r}")
+        _warn_ui_term(f"missing UI term: kind={kind!r} value={raw!r}")
+        return raw
     return _pick(item)
 
 
@@ -106,12 +99,7 @@ def layout_label(value: object) -> str:
 
 
 def action_title(key: str) -> str:
-    """Return an EXPERT action title without allowing a label bug to kill menu UI.
-
-    Dictionary completeness is a build-time contract. At runtime an unknown or
-    malformed action key is rendered verbatim and logged so the remaining rescue
-    actions stay available to the operator.
-    """
+    """Return an EXPERT action title without allowing a label bug to kill menu UI."""
     raw = str(key)
     item = _DATA.get("expert_actions", {}).get(raw)
     if not isinstance(item, dict):
