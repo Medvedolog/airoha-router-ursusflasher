@@ -155,10 +155,11 @@ def menu_item(number: int | str, title: str, detail: str | None = None, *, tone:
     elif tone == 'safe':
         num_style = 'ok'
     marker = '!' if write_capable else ' '
-    suffix = f"  — {reason}" if reason else ''
-    print(f" {paint(marker, 'sand' if write_capable else 'muted')} {paint(str(number).rjust(2), num_style)}  {paint(title + suffix, title_style)}")
+    print(f" {paint(marker, 'sand' if write_capable else 'muted')} {paint(str(number).rjust(2), num_style)}  {paint(title, title_style)}")
     if detail:
         print(f"       {paint(detail, 'dim')}")
+    if reason:
+        print(f"       {paint(reason, 'dim')}")
 
 
 def status(label: str, text: str, *, stream=None) -> None:
