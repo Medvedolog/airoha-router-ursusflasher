@@ -269,13 +269,20 @@ def main() -> int:
             base.run_action(lambda: base.run_custom_openwrt(host, fresh_state, fresh_action), write_may_happen=True)
         elif number == 4:
             base.network_guidance.show()
-            if base.confirm_uart_recovery(
-                "Будет восстановлен заводской Nokia boot-area/mtd0 для выбранной модели. Сначала board-specific RAM Recovery, затем один итоговый y/N перед raw write и полный readback.",
-                "The Nokia factory boot-area/mtd0 for the selected model will be restored. A board-specific RAM Recovery is booted first, followed by one final y/N before raw write and full readback.",
-                title_ru="ВОССТАНОВЛЕНИЕ ЗАВОДСКОГО ЗАГРУЗЧИКА NOKIA",
-                title_en="RESTORE NOKIA FACTORY BOOTLOADER",
-            ):
-                base.run_action(lambda: _run_factory_bootarea_restore(state), write_may_happen=True)
+            # Informational preflight only. uart_bootarea_restore.restore() owns
+            # the single destructive y/N at the latest safe point, after the
+            # board-specific RAM environment and NAND geometry are verified.
+            base.ui.rule(tr("ВОССТАНОВЛЕНИЕ ЗАВОДСКОГО ЗАГРУЗЧИКА NOKIA",
+                            "RESTORE NOKIA FACTORY BOOTLOADER"), style="bad")
+            base.ui.status(tr("ВНИМАНИЕ", "WARNING"), tr(
+                "Будет восстановлен заводской Nokia boot-area/mtd0 для выбранной модели.",
+                "The Nokia factory boot-area/mtd0 for the selected model will be restored.",
+            ))
+            base.ui.note(tr(
+                "Нужен USB-UART 3.3 V. VCC не подключать. Подтверждение записи будет запрошено один раз после автоматического preflight.",
+                "A 3.3 V USB-UART adapter is required. Do not connect VCC. Flashing will be confirmed once after automatic preflight.",
+            ))
+            base.run_action(lambda: _run_factory_bootarea_restore(state), write_may_happen=True)
         elif number == 5:
             base.network_guidance.show()
             if base.confirm_uart_recovery(
