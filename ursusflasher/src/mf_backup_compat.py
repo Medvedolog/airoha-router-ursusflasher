@@ -38,9 +38,6 @@ def _mf_mac_writer(original):
     def wrapped(destination: Path, telnet, model_name: str, family: str):
         if family != "mf":
             return original(destination, telnet, model_name, family)
-        # Hardware evidence for both MD and MF uses the same fixed RI identity
-        # contract: MAC @0x3e, serial @0x1a, G.984 suffix @0x58. Reuse the
-        # already-hardened fixed-offset path rather than stock eth0 placeholders.
         result = original(destination, telnet, model_name, "md")
         _rewrite_family(destination / "DEVICE_MAC.txt")
         return result
@@ -61,45 +58,44 @@ def _mf_identity_writer(original):
     return wrapped
 
 
+_GLOBAL_PROGRESS: dict[str, float] = {}
+_ORIGINAL_PRINT = pb.__dict__.get("print", builtins.print)
+
+
+def _compact_print(*args, **kwargs):
+    text = " ".join(str(x) for x in args)
+    m = re.search(r"\[(?:ЖДУ|WAIT)\]\s+(mtd\d+):\s+(?:принято|received)", text, re.I)
+    if m:
+        key = m.group(1).lower()
+        now = time.monotonic()
+        if now - _GLOBAL_PROGRESS.get(key, 0.0) < 30.0:
+            return
+        _GLOBAL_PROGRESS[key] = now
+    _ORIGINAL_PRINT(*args, **kwargs)
+
+
+_compact_print._ursus_compact_backup_progress = True
+
+
 def install_fixed_ri_compat() -> None:
-    """Make the proven fixed RI parser family-neutral for the process."""
+    """Apply family-neutral RI identity and compact backup progress once."""
     if not getattr(pb._write_backup_device_mac, "_ursus_mf_fixed_ri", False):
         pb._write_backup_device_mac = _mf_mac_writer(pb._write_backup_device_mac)
     if not getattr(pb._write_backup_device_identity, "_ursus_mf_fixed_ri", False):
         pb._write_backup_device_identity = _mf_identity_writer(pb._write_backup_device_identity)
+    if not getattr(pb.__dict__.get("print"), "_ursus_compact_backup_progress", False):
+        pb.print = _compact_print
 
 
-# Any caller importing this compatibility layer gets the corrected family-
-# neutral identity behavior. It changes only family=mf; MD remains untouched.
 install_fixed_ri_compat()
 
 
 @contextmanager
 def stock_backup_compat(*, compact_progress: bool = True):
-    """Keep long live-TFTP backups readable without changing transport logic."""
-    had_print = "print" in pb.__dict__
-    old_print = pb.__dict__.get("print")
-    last_progress: dict[str, float] = {}
-
-    def filtered_print(*args, **kwargs):
-        text = " ".join(str(x) for x in args)
-        m = re.search(r"\[(?:ЖДУ|WAIT)\]\s+(mtd\d+):\s+(?:принято|received)", text, re.I)
-        if compact_progress and m:
-            key = m.group(1).lower()
-            now = time.monotonic()
-            if now - last_progress.get(key, 0.0) < 20.0:
-                return
-            last_progress[key] = now
-        builtins.print(*args, **kwargs)
-
-    pb.print = filtered_print
-    try:
-        yield
-    finally:
-        if had_print:
-            pb.print = old_print
-        else:
-            pb.__dict__.pop("print", None)
+    # Global compatibility is already installed on import. Keep this context API
+    # for callers so the transport call remains explicit and future-proof.
+    install_fixed_ri_compat()
+    yield
 
 
 def read_mtd0_backup(path: Path) -> bytes:
