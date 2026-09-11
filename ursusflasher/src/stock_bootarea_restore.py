@@ -22,8 +22,8 @@ def bundled_stock_mtd0(family: str) -> Path | None:
     candidates: list[Path]
     if family == "md":
         candidates = [
-            payloads / "md" / "ursusboot" / "stock_mtd0_reference.bin",
-            HERE / "payloads" / "md" / "ursusboot" / "stock_mtd0_reference.bin",
+            payloads / "md" / "stock" / "nokia-xg-040g-md-stock-mtd0.bin",
+            HERE / "payloads" / "md" / "stock" / "nokia-xg-040g-md-stock-mtd0.bin",
         ]
     elif family == "mf":
         candidates = [
