@@ -52,7 +52,7 @@ jobs:
           python3 ursusflasher/tools/selftest_stateui14_multiboard_registry.py
           python3 ursusflasher/tools/selftest_mf_stock_access.py
 
-      - name: Build corrected MF persistent runtime
+      - name: Build corrected MF TEST62 runtime
         env:
           MF2_MEDVE_DIR: ${{ github.workspace }}/work/medveflasher-rc35
           JOBS: '2'
@@ -64,32 +64,36 @@ jobs:
           name: mf-runtime-preassert-${{ github.run_id }}
           path: |
             work/mf-runtime/out/u-boot.runtime.lzma
+            work/mf-runtime/out/ursusboot-mf-0.1.0-TEST62-runtime-ram.fip
+            work/mf-runtime/out/ursusboot-mf-0.1.0-TEST62-uart-preloader.bin
             work/mf-runtime/out/MF-RUNTIME-BUILD-INFO.txt
             work/mf-runtime/out/SHA256SUMS
           if-no-files-found: error
           retention-days: 2
 
-      - name: Prove MF runtime binary bindings
+      - name: Prove MF TEST62 binary contract
         run: |
           python3 - <<'PY'
           import lzma
           from pathlib import Path
-
-          p = Path('work/mf-runtime/out/u-boot.runtime.lzma')
-          raw = lzma.decompress(p.read_bytes(), format=lzma.FORMAT_ALONE)
-          checks = {
-              'mf_preloader_digest': bytes.fromhex('778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e') in raw,
-              'mf_bl2_digest': bytes.fromhex('c655479c4d14b4f6d1a7a5eb8de80bfb204b3cdf46c9e48a5c6f3aea22d98131') in raw,
-              'md_preloader_absent': bytes.fromhex('6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808') not in raw,
-              'md_bl2_absent': bytes.fromhex('6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d') not in raw,
-              'stockbridge_hdr3': b'URSUS_STOCKBOOT_%s_HDR3_INVALID' in raw,
-              'stockbridge_hdr2_absent': b'URSUS_STOCKBOOT_%s_HDR2_INVALID' not in raw,
-              'mf_identity': b'Nokia XG-040G-MF' in raw,
+          raw=lzma.decompress(Path('work/mf-runtime/out/u-boot.runtime.lzma').read_bytes(),format=lzma.FORMAT_ALONE)
+          checks={
+            'test62': b'0.1.0-TEST62' in raw,
+            'mf_preloader_digest': bytes.fromhex('778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e') in raw,
+            'mf_bl2_digest': bytes.fromhex('c655479c4d14b4f6d1a7a5eb8de80bfb204b3cdf46c9e48a5c6f3aea22d98131') in raw,
+            'md_preloader_absent': bytes.fromhex('6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808') not in raw,
+            'md_bl2_absent': bytes.fromhex('6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d') not in raw,
+            'stockbridge_hdr3': b'URSUS_STOCKBOOT_%s_HDR3_INVALID' in raw,
+            'stockbridge_hdr2_absent': b'URSUS_STOCKBOOT_%s_HDR2_INVALID' not in raw,
+            'complete_serdes': b'URSUS_STOCKBOOT_TCBOOT_MF_ARGS pon=00 ethernet=12 wifi1=05 wifi2=05 usb1=00 usb2=02' in raw,
+            'selfupdate': b'URSUS_FIP_SELFUPDATE_ENABLED=1' in raw,
+            'selfupdate_guard_absent': b'URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE' not in raw,
+            'mf_identity': b'Nokia XG-040G-MF' in raw,
           }
           for k,v in checks.items(): print(f'MF_RUNTIME_CHECK {k}={int(v)}')
-          missing=[k for k,v in checks.items() if not v]
-          if missing: raise SystemExit('MF_RUNTIME_BINARY_BINDINGS_FAIL ' + ','.join(missing))
-          print('MF_RUNTIME_BINARY_BINDINGS=PASS bytes=' + str(len(raw)))
+          bad=[k for k,v in checks.items() if not v]
+          if bad: raise SystemExit('MF_RUNTIME_BINARY_CONTRACT_FAIL '+','.join(bad))
+          print('MF_RUNTIME_BINARY_CONTRACT=PASS bytes='+str(len(raw)))
           PY
 
       - name: Download fully-audited 0.2.62 hardware kit
@@ -100,84 +104,66 @@ jobs:
           gh run download 34589613011 --repo "$GITHUB_REPOSITORY" --name ursusflasher-0.2.62-md-mf-minimal-hwtest --dir base
           test -f base/UrsusFlasher-0.2.62.zip
 
-      - name: Package current host plus corrected MF runtime
+      - name: Package current host plus TEST62 MF payloads
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import hashlib, os, shutil, zipfile
-
-          def sha256(p: Path) -> str:
+          def sha256(p):
               h=hashlib.sha256()
-              with p.open('rb') as f:
-                  for c in iter(lambda:f.read(1024*1024), b''): h.update(c)
+              with Path(p).open('rb') as f:
+                  for c in iter(lambda:f.read(1024*1024),b''): h.update(c)
               return h.hexdigest()
-
           oldzip=Path('base/UrsusFlasher-0.2.62.zip')
-          work=Path('work/hwcycle63')
-          if work.exists(): shutil.rmtree(work)
-          work.mkdir(parents=True)
+          work=Path('work/hwcycle63'); shutil.rmtree(work,ignore_errors=True); work.mkdir(parents=True)
           with zipfile.ZipFile(oldzip) as z: z.extractall(work)
           oldroot=work/'UrsusFlasher-0.2.62'
-
           frozen={}
           for base_rel in ('data/payloads','fw'):
               for p in (oldroot/base_rel).rglob('*'):
                   if p.is_file(): frozen[p.relative_to(oldroot).as_posix()]=sha256(p)
-
-          root=work/'UrsusFlasher-0.2.63'
-          oldroot.rename(root)
+          root=work/'UrsusFlasher-0.2.63'; oldroot.rename(root)
           for name in ('START_ONECLICK.cmd','START_ONECLICK.sh','START_EXPERT.cmd','START_EXPERT.sh','VERSION'):
-              shutil.copy2(name, root/name)
-          shutil.copy2('VERSION', root/'data'/'VERSION')
-
-          src_root=Path('ursusflasher/src')
-          current_top=set()
+              shutil.copy2(name,root/name)
+          shutil.copy2('VERSION',root/'data'/'VERSION')
+          src_root=Path('ursusflasher/src'); current_top=set()
           for src in sorted(src_root.rglob('*')):
               if not src.is_file() or src.name.endswith(('.pyc','.pyo')) or '__pycache__' in src.parts: continue
-              rel=src.relative_to(src_root)
-              dst=root/'data'/rel
-              dst.parent.mkdir(parents=True,exist_ok=True)
-              shutil.copy2(src,dst)
+              rel=src.relative_to(src_root); dst=root/'data'/rel; dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst)
               if len(rel.parts)==1 and rel.suffix=='.py': current_top.add(rel.name)
           for packed in (root/'data').glob('*.py'):
               if packed.name not in current_top: packed.unlink()
           for name in ('UI_TERMS.json','FIRMWARE_CAPABILITIES.json','BOARD_PROFILES.json','FIRMWARE_BUNDLES.json'):
-              shutil.copy2(Path('config')/name, root/'data'/name)
-
+              shutil.copy2(Path('config')/name,root/'data'/name)
           for name in ('one_key_v63.py','expert_v63.py'):
               (root/'data'/name).unlink(missing_ok=True)
           for name in ('START_UART_RESTORE.cmd','START_UART_RESTORE.sh'):
               (root/name).unlink(missing_ok=True)
 
           runtime_rel='data/payloads/mf/ursusboot/u-boot.runtime.lzma'
-          runtime_src=Path('work/mf-runtime/out/u-boot.runtime.lzma')
-          runtime_dst=root/runtime_rel
-          runtime_dst.parent.mkdir(parents=True,exist_ok=True)
-          shutil.copy2(runtime_src,runtime_dst)
+          runtime_dst=root/runtime_rel; runtime_dst.parent.mkdir(parents=True,exist_ok=True)
+          shutil.copy2('work/mf-runtime/out/u-boot.runtime.lzma',runtime_dst)
+          recovery=root/'data/payloads/mf/recovery'; recovery.mkdir(parents=True,exist_ok=True)
+          shutil.copy2('work/mf-runtime/out/ursusboot-mf-0.1.0-TEST62-runtime-ram.fip',recovery/'ursusboot-mf-0.1.0-TEST62-runtime-ram.fip')
+          shutil.copy2('work/mf-runtime/out/ursusboot-mf-0.1.0-TEST62-uart-preloader.bin',recovery/'ursusboot-mf-0.1.0-TEST62-uart-preloader.bin')
 
           for rel,expected in frozen.items():
               if rel==runtime_rel: continue
-              p=root/rel
-              assert p.is_file(), rel
-              assert sha256(p)==expected, 'frozen hardware changed: '+rel
+              p=root/rel; assert p.is_file(),rel; assert sha256(p)==expected,'frozen hardware changed: '+rel
           for rel,expected in frozen.items():
               if rel.startswith('data/payloads/md/') or rel.startswith('fw/openwrt-airoha-an7581'):
-                  assert sha256(root/rel)==expected, 'MD byte regression: '+rel
+                  assert sha256(root/rel)==expected,'MD byte regression: '+rel
 
           (root/'BUILD_COMMIT.txt').write_text(os.environ['GITHUB_SHA']+'\n',encoding='ascii')
-          manifest=root/'SHA256SUMS'
-          rows=[]
+          manifest=root/'SHA256SUMS'; rows=[]
           for p in sorted(root.rglob('*'),key=lambda x:x.relative_to(root).as_posix()):
               if p.is_file() and p!=manifest: rows.append(f'{sha256(p)}  {p.relative_to(root).as_posix()}')
           manifest.write_text('\n'.join(rows)+'\n',encoding='utf-8')
-
-          out=Path('dist'); out.mkdir(exist_ok=True)
-          zpath=out/'UrsusFlasher-0.2.63.zip'
+          out=Path('dist'); out.mkdir(exist_ok=True); zpath=out/'UrsusFlasher-0.2.63.zip'
           with zipfile.ZipFile(zpath,'w',zipfile.ZIP_DEFLATED,compresslevel=9) as z:
               for p in sorted(root.rglob('*'),key=lambda x:x.relative_to(root).as_posix()):
                   if p.is_file(): z.write(p,p.relative_to(root.parent))
-          digest=sha256(zpath)
-          (out/'UrsusFlasher-0.2.63.zip.sha256.txt').write_text(f'{digest}  {zpath.name}\n',encoding='ascii')
+          digest=sha256(zpath); (out/'UrsusFlasher-0.2.63.zip.sha256.txt').write_text(f'{digest}  {zpath.name}\n',encoding='ascii')
           print('HWCYCLE63_ZIP',zpath,zpath.stat().st_size,digest)
           print('MF_RUNTIME_LZMA_SHA256',sha256(runtime_dst))
           PY
@@ -191,23 +177,30 @@ jobs:
           with zipfile.ZipFile(zpath) as z:
               r='UrsusFlasher-0.2.63/'
               one=z.read(r+'data/one_key_multi.py').decode()
+              expert=z.read(r+'data/expert_multi.py').decode()
               net=z.read(r+'data/network_guidance.py').decode()
-              assert 'choose_stock_ip()' in one
-              assert 'unattended=(route == "stock")' in one
+              compat=z.read(r+'data/mf_backup_compat.py').decode()
+              assert one.count('ОБЯЗАТЕЛЬНО ПЕРЕД УСТАНОВКОЙ') == 0
+              assert 'КРАТКО нажмите RESET' in one and 'uw.reboot(HOST)' not in one
+              assert 'MF_RECOVERY_DEVICE_DERIVED_FIP_UPDATE' in expert
+              assert 'Web/Telnet/TFTP' in expert
+              assert 'ri@0x3e' in compat or '@0x3e' in compat
+              assert '30.0' in compat
               assert 'не менее 20 секунд' in net
-              packed=z.read(r+'data/payloads/mf/ursusboot/u-boot.runtime.lzma')
-              raw=lzma.decompress(packed,format=lzma.FORMAT_ALONE)
-              assert bytes.fromhex('778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e') in raw
-              assert bytes.fromhex('c655479c4d14b4f6d1a7a5eb8de80bfb204b3cdf46c9e48a5c6f3aea22d98131') in raw
-              assert b'URSUS_STOCKBOOT_%s_HDR3_INVALID' in raw
-              assert b'URSUS_STOCKBOOT_%s_HDR2_INVALID' not in raw
+              raw=lzma.decompress(z.read(r+'data/payloads/mf/ursusboot/u-boot.runtime.lzma'),format=lzma.FORMAT_ALONE)
+              assert b'0.1.0-TEST62' in raw
+              assert b'URSUS_FIP_SELFUPDATE_ENABLED=1' in raw
+              assert b'URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE' not in raw
+              assert b'URSUS_STOCKBOOT_TCBOOT_MF_ARGS pon=00 ethernet=12 wifi1=05 wifi2=05 usb1=00 usb2=02' in raw
+              assert z.getinfo(r+'data/payloads/mf/recovery/ursusboot-mf-0.1.0-TEST62-runtime-ram.fip').file_size > 0
+              assert z.getinfo(r+'data/payloads/mf/recovery/ursusboot-mf-0.1.0-TEST62-uart-preloader.bin').file_size > 0
           print('PACKAGED_MF_HARDWARE_CYCLE_QA=PASS')
           PY
 
       - name: Upload hardware-test artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ursusflasher-0.2.63-mf-hardware-cycle-fix-hwtest
+          name: ursusflasher-0.2.63-mf-test62-hwtest
           path: |
             dist/UrsusFlasher-0.2.63.zip
             dist/UrsusFlasher-0.2.63.zip.sha256.txt
