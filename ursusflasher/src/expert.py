@@ -416,17 +416,18 @@ def capability_report(state: ds.DeviceState) -> None:
     print_state_header(state)
     print()
     print(tr("Доступность действий:", "Action availability:"))
-    for number in VISIBLE_ACTIONS:
+    for number in ds.visible_action_numbers():
         a = app[number]
         title = terms.action_title(a.key)
         yes = tr("ДА", "YES") if a.enabled else tr("НЕТ", "NO")
-        extra = f" — {a.reason}" if (not a.enabled and a.reason) else ""
         marker = "!" if a.write_capable else " "
-        print(f" {marker} {number:2d}  {title:<42} {yes}{extra}")
+        print(f" {marker} {number:2d}  {title:<42} {yes}")
         detail_ru, detail_en = _menu_detail(number, state, app)
         detail = tr(detail_ru, detail_en)
         if detail:
             print(f"       {detail}")
+        if not a.enabled and a.reason:
+            print(f"       {a.reason}")
         if a.enabled and a.note:
             print(f"       {a.note}")
     print()
@@ -507,19 +508,18 @@ def run_action(fn, *, write_may_happen: bool = False) -> None:
 def _show_action(number: int, app: dict[int, ds.ActionApplicability], detail_ru: str = "", detail_en: str = "") -> None:
     a = app[number]
     detail = tr(detail_ru, detail_en) if detail_ru or detail_en else ""
-    if a.enabled and a.note:
-        detail = (detail + " — " if detail else "") + a.note
     ui.menu_item(
         number, terms.action_title(a.key), detail or None,
         write_capable=a.write_capable, enabled=a.enabled,
         reason=a.reason if not a.enabled else "",
     )
-
-
-VISIBLE_ACTIONS = (1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12)
+    if a.enabled and a.note:
+        print(f"       {ui.paint(a.note, 'dim')}")
 
 
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
+    if number in app and not app[number].enabled:
+        return "", ""
     if number == 1:
         return (
             "Полный переход: резервная копия → UrsusBoot → комплектная OpenWrt; транспорт выбирается по текущей системе",
