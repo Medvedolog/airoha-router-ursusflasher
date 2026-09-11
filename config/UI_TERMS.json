@@ -1,5 +1,5 @@
 {
-  "version": 14,
+  "version": 15,
   "layouts": {
     "STOCK": {
       "ru": "Заводская прошивка Nokia",
@@ -48,18 +48,18 @@
     },
     "restore_factory_bootarea": {
       "number": 4,
-      "ru": "Восстановить заводской загрузчик Nokia",
-      "en": "Restore Nokia factory bootloader"
+      "ru": "Вернуть заводской загрузчик Nokia (UrsusBoot будет удалён)",
+      "en": "Restore Nokia factory bootloader (removes UrsusBoot)"
     },
     "recover_bootloader": {
       "number": 5,
-      "ru": "Восстановить загрузчик через USB-UART",
-      "en": "Recover the bootloader via USB-UART"
+      "ru": "Починить UrsusBoot, если он не запускается",
+      "en": "Repair UrsusBoot if it does not start"
     },
     "restore_nokia": {
       "number": 6,
-      "ru": "Восстановить заводскую прошивку Nokia",
-      "en": "Restore Nokia factory firmware"
+      "ru": "Вернуть роутер к заводскому состоянию целиком",
+      "en": "Restore the entire router to factory state"
     },
     "full_backup": {
       "number": 7,
@@ -92,7 +92,7 @@
       "en": "Check program files"
     }
   },
-  "contract": "STATEUI14 MF63: item 4 is board-aware Nokia factory boot-area/mtd0 restore; final EXPERT action keys must be registered; unknown presentation values degrade to raw text plus session warning instead of crashing the recovery menu; disabled actions show reason only; task-oriented menu; passive DeviceState is informational; explicit items 7/10/11 may authenticate read-only via system OpenSSH; authorization remains per-action; ! means persistent-write-capable only",
+  "contract": "STATEUI15 MF63: item 4 is board-aware Nokia factory boot-area/mtd0 restore; final EXPERT action keys and methods are canonical; unknown presentation values degrade to raw text plus session warning instead of crashing the recovery menu; disabled actions show reason only; note/reason/detail are separate UI lines; visible actions derive from the canonical action registry; task-oriented menu; passive DeviceState is informational; explicit items 7/10/11 may authenticate read-only via system OpenSSH; authorization remains per-action; ! means persistent-write-capable only",
   "systems": {
     "NOKIA_STOCK": {
       "ru": "Заводская прошивка Nokia",
@@ -319,10 +319,6 @@
     "MF_DEVICE_DERIVED_HOST_ONLY": {
       "ru": "Индивидуальная сборка по данным этого устройства из Nokia или OpenWrt",
       "en": "Device-derived build from Nokia firmware or OpenWrt"
-    },
-    "ALIAS_TO_ACTION_2": {
-      "ru": "Совместимый псевдоним пункта 2",
-      "en": "Compatibility alias for item 2"
     }
   }
 }
