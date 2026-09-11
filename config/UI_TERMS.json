@@ -1,5 +1,5 @@
 {
-  "version": 13,
+  "version": 14,
   "layouts": {
     "STOCK": {
       "ru": "Заводская прошивка Nokia",
@@ -43,8 +43,8 @@
     },
     "custom_openwrt": {
       "number": 3,
-      "ru": "Записать пользовательскую прошивку OpenWrt",
-      "en": "Flash a custom OpenWrt image"
+      "ru": "Установить свою прошивку OpenWrt",
+      "en": "Install a custom OpenWrt image"
     },
     "restore_factory_bootarea": {
       "number": 4,
@@ -53,8 +53,8 @@
     },
     "recover_bootloader": {
       "number": 5,
-      "ru": "Восстановить загрузчик",
-      "en": "Recover the bootloader"
+      "ru": "Восстановить загрузчик через USB-UART",
+      "en": "Recover the bootloader via USB-UART"
     },
     "restore_nokia": {
       "number": 6,
@@ -63,8 +63,8 @@
     },
     "full_backup": {
       "number": 7,
-      "ru": "Создать полную копию flash-памяти",
-      "en": "Capture a complete flash backup"
+      "ru": "Снять полную копию памяти роутера",
+      "en": "Capture a complete router memory backup"
     },
     "validate_backup": {
       "number": 8,
@@ -78,21 +78,21 @@
     },
     "capabilities": {
       "number": 10,
-      "ru": "Состояние устройства и доступные операции",
-      "en": "Device state and available operations"
+      "ru": "Что этот роутер позволяет сделать",
+      "en": "What this router can do"
     },
     "flash_diagnostics": {
       "number": 11,
-      "ru": "Flash-память, разметка и сбойные блоки",
-      "en": "Flash memory, layout and bad blocks"
+      "ru": "Память, разметка и сбойные блоки",
+      "en": "Memory, layout and bad blocks"
     },
     "package_files": {
       "number": 12,
-      "ru": "Проверить файлы комплекта",
-      "en": "Check package files"
+      "ru": "Проверить файлы программы",
+      "en": "Check program files"
     }
   },
-  "contract": "STATEUI13 MF63: item 4 is board-aware Nokia factory boot-area/mtd0 restore; task-oriented menu; passive DeviceState is informational; explicit items 7/10/11 may authenticate read-only via system OpenSSH; item 7 uses self-contained exact raw BootROM backup; authorization remains per-action; ! means persistent-write-capable only",
+  "contract": "STATEUI14 MF63: item 4 is board-aware Nokia factory boot-area/mtd0 restore; final EXPERT action keys must be registered; unknown presentation values degrade to raw text plus session warning instead of crashing the recovery menu; disabled actions show reason only; task-oriented menu; passive DeviceState is informational; explicit items 7/10/11 may authenticate read-only via system OpenSSH; authorization remains per-action; ! means persistent-write-capable only",
   "systems": {
     "NOKIA_STOCK": {
       "ru": "Заводская прошивка Nokia",
@@ -301,16 +301,24 @@
       "en": "Install or update UrsusBoot with automatic transport selection"
     },
     "URSUSBOOT_RECOVERY_SELFUPDATE": {
-      "ru": "Через HTTP из UrsusBoot Recovery; при сбое — TFTP",
-      "en": "Over HTTP from UrsusBoot Recovery; TFTP fallback on failure"
+      "ru": "Через веб-интерфейс UrsusBoot, запасной путь — TFTP",
+      "en": "Through the UrsusBoot web interface; TFTP is the fallback path"
     },
     "SSH_PERSISTENT_OPENWRT_SYSUPGRADE": {
       "ru": "Через SSH и штатный sysupgrade из установленной OpenWrt",
       "en": "Over SSH and native sysupgrade from installed OpenWrt"
     },
     "URSUSBOOT_RECOVERY_CUSTOM_IMAGE": {
-      "ru": "Через HTTP из UrsusBoot Recovery",
-      "en": "Over HTTP from UrsusBoot Recovery"
+      "ru": "Через веб-интерфейс UrsusBoot",
+      "en": "Through the UrsusBoot web interface"
+    },
+    "UART_BOOTAREA_FACTORY_RESTORE": {
+      "ru": "Через USB-UART и Airoha BootROM, с полной проверкой записанного",
+      "en": "Via USB-UART and Airoha BootROM, with full verification of written data"
+    },
+    "MF_DEVICE_DERIVED_HOST_ONLY": {
+      "ru": "Индивидуальная сборка по данным этого устройства из Nokia или OpenWrt",
+      "en": "Device-derived build from Nokia firmware or OpenWrt"
     },
     "ALIAS_TO_ACTION_2": {
       "ru": "Совместимый псевдоним пункта 2",
