@@ -5,7 +5,23 @@ import ui_terms as terms
 
 
 def show() -> None:
-    """Operator-facing Ethernet recommendation; no probing and no device writes."""
+    """Operator-facing install prerequisites; no probing and no device writes."""
+    print()
+    print(terms.tr(
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║  ОБЯЗАТЕЛЬНО ДЛЯ NOKIA STOCK MD/MF                                         ║\n"
+        "║  Перед установкой сбросьте роутер к заводским настройкам:                  ║\n"
+        "║  на ВКЛЮЧЁННОМ устройстве удерживайте RESET не менее 20 секунд,             ║\n"
+        "║  затем дождитесь полной загрузки заводской прошивки Nokia.                  ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝",
+        "╔══════════════════════════════════════════════════════════════════════════════╗\n"
+        "║  REQUIRED FOR NOKIA STOCK MD/MF                                             ║\n"
+        "║  Factory-reset the router before installation:                              ║\n"
+        "║  with the device POWERED ON, hold RESET for at least 20 seconds,             ║\n"
+        "║  then wait for the Nokia stock firmware to boot completely.                 ║\n"
+        "╚══════════════════════════════════════════════════════════════════════════════╝",
+    ))
+    print()
     print(terms.tr(
         "[СЕТЬ] Для прошивки рекомендуется использовать порты LAN2 или LAN3. "
         "LAN1 — отдельный 2.5G-порт на PHY Airoha EN8811H; для него уже требовались отдельные исправления инициализации, "
