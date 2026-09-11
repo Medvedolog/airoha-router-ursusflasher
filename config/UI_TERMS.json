@@ -1,5 +1,5 @@
 {
-  "version": 12,
+  "version": 13,
   "layouts": {
     "STOCK": {
       "ru": "Заводская прошивка Nokia",
@@ -46,10 +46,10 @@
       "ru": "Записать пользовательскую прошивку OpenWrt",
       "en": "Flash a custom OpenWrt image"
     },
-    "update_bootloader": {
+    "restore_factory_bootarea": {
       "number": 4,
-      "ru": "Обновить UrsusBoot (совместимость)",
-      "en": "Update UrsusBoot (compatibility alias)"
+      "ru": "Восстановить заводской загрузчик Nokia",
+      "en": "Restore Nokia factory bootloader"
     },
     "recover_bootloader": {
       "number": 5,
@@ -92,7 +92,7 @@
       "en": "Check package files"
     }
   },
-  "contract": "STATEUI8 DIAGAUTH1/BACKUPRAW1 over STATEUI7 MENUOPS1: task-oriented menu; passive DeviceState is informational; explicit items 7/10/11 may authenticate read-only via system OpenSSH; item 7 uses self-contained exact raw BootROM backup; authorization remains per-action; ! means persistent-write-capable only",
+  "contract": "STATEUI13 MF63: item 4 is board-aware Nokia factory boot-area/mtd0 restore; task-oriented menu; passive DeviceState is informational; explicit items 7/10/11 may authenticate read-only via system OpenSSH; item 7 uses self-contained exact raw BootROM backup; authorization remains per-action; ! means persistent-write-capable only",
   "systems": {
     "NOKIA_STOCK": {
       "ru": "Заводская прошивка Nokia",
