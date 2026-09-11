@@ -2,8 +2,9 @@
 from __future__ import annotations
 import os, sys
 from pathlib import Path
-D=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(D/'data'))
+ROOT=Path(__file__).resolve().parents[1]
+DATA=ROOT/'data' if (ROOT/'data').is_dir() else ROOT/'src'
+sys.path.insert(0,str(DATA))
 import device_state as ds
 import ui_terms as terms
 
