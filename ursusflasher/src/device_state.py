@@ -465,6 +465,17 @@ def _action_specs() -> dict[str, dict[str, Any]]:
     return specs if isinstance(specs, dict) else {}
 
 
+def visible_action_numbers() -> tuple[int, ...]:
+    """Return visible actions derived from ACTION_KEYS and explicit spec flags."""
+    specs = _action_specs()
+    visible: list[int] = []
+    for number, key in sorted(ACTION_KEYS.items()):
+        spec = specs.get(key, {}) if isinstance(specs, dict) else {}
+        if bool(spec.get("visible", True)):
+            visible.append(number)
+    return tuple(visible)
+
+
 def _spec_text(spec: dict[str, Any], base: str, default_ru: str, default_en: str) -> str:
     if terms.is_en():
         return str(spec.get(base + "_en") or default_en)
