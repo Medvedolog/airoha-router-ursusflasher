@@ -19,8 +19,11 @@ MEDVE_PATCHER="$MEDVE_DIR/data/recovery/recovery-safe-uboot-source/patch_recover
 PRELOADER="$MEDVE_DIR/data/payloads/nokia-xg-040g-mf-an7583-uart-preloader.bin"
 DONOR="$MEDVE_DIR/data/payloads/nokia-xg-040g-mf-an7583-uart-recovery-safe-bl31-uboot.fip"
 OUT="$WORK/out"
-VERSION="0.1.0-TEST61"
-RELEASE_EPOCH=1788948000
+VERSION="0.1.0-TEST62"
+# By default tie the visible U-Boot build date to the source commit instead of
+# the old fixed Sep-09 epoch. CI/repro builds may override explicitly.
+BUILD_EPOCH=${MF_RUNTIME_BUILD_EPOCH:-$(git -C "$ROOT" show -s --format=%ct HEAD 2>/dev/null || date +%s)}
+BUILD_COMMIT=$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 
 EXPECTED_PRELOADER_SIZE=118322
 EXPECTED_PRELOADER_SHA=c2ac1c183b18bc34632c958dfe0bd1dfdfb607f090e39c41126956641893362f
@@ -47,8 +50,7 @@ tar --zstd -xf "$SDK_BUNDLE" -C "$WORK/sdk"
 tar --zstd -xf "$SOURCE_BUNDLE" -C "$WORK/u-boot"
 cp -a "$WORK/u-boot" "$WORK/u-boot-pristine"
 
-# Reuse the already-proven AN7583 board conversion, then restore TEST61 runtime
-# entrypoints from the pristine source. RAM recovery remains a separate build.
+# TEST62 is a board-specialized derivative of the exact TEST61 source snapshot.
 python3 "$MF_BASE_TRANSFORM" "$WORK/u-boot"
 python3 "$RUNTIME_ENABLE" "$WORK/u-boot" "$WORK/u-boot-pristine"
 python3 "$BOARD_HW" "$WORK/u-boot"
@@ -65,7 +67,7 @@ HOST="$SDK_ROOT/staging_dir/host"
 chmod +x "$ROOT/toolchains/hostshim/xxd" 2>/dev/null || true
 export URSUS_SDK_ROOT="$SDK_ROOT" STAGING_DIR="$SDK_ROOT/staging_dir" STAGING_DIR_HOST="$HOST" BISON_PKGDATADIR="$HOST/share/bison"
 export PATH="$ROOT/toolchains/hostshim:$TC:$HOST/bin:/usr/bin:/bin"
-export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$RELEASE_EPOCH"
+export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$BUILD_EPOCH"
 
 cd "$WORK/u-boot"
 make olddefconfig
@@ -80,8 +82,6 @@ grep -Fq 'CONFIG_ENV_UBI_VOLUME="ubootenv"' .config
 grep -Fq 'CONFIG_ENV_UBI_VOLUME_REDUND="ubootenv2"' .config
 grep -Fxq 'bootcmd=ursusdispatch' defenvs/an7583_nokia_xg-040g-mf_runtime_env
 
-# MF must remain free of the MD raw LED backend while retaining the proven
-# native C45 HWTEST8 path.
 ! grep -q '0x1fa20000' cmd/ursusled.c || { echo "AN7581 SCU raw MMIO survived MF runtime" >&2; exit 1; }
 ! grep -q '0x1fb58000' cmd/ursusled.c || { echo "MT7531 raw MMIO survived MF runtime" >&2; exit 1; }
 ! grep -q '^obj-y += ursus_an7581_safe_gpio.o$' drivers/gpio/Makefile || { echo "AN7581 safe GPIO object still linked" >&2; exit 1; }
@@ -91,9 +91,6 @@ grep -Fq 'obj-y += ursusweb.o ursusubi.o ursusdispatch.o ursusupdate.o ursusstoc
 
 make -j"${JOBS:-$(nproc)}"
 
-# A RAM-loadable runtime FIP is emitted for diagnostics, while normal persistent
-# installation uses only u-boot.runtime.lzma and patches it into the device's
-# own 9-entry stock FIP on the host.
 python3 "$REPACK" \
     --medve-patcher "$MEDVE_PATCHER" \
     --source "$DONOR" \
@@ -116,6 +113,8 @@ for marker in \
     'URSUS_UBI_MIGRATION_ENABLED=1' \
     'URSUS_UBI_UPDATE_ENABLED=1' \
     'URSUS_STOCK_LAYOUT_INSTALL_ENABLED=1' \
+    'URSUS_FIP_SELFUPDATE_ENABLED=1' \
+    'URSUS_STOCKBOOT_TCBOOT_MF_ARGS pon=00 ethernet=12 wifi1=05 wifi2=05 usb1=00 usb2=02' \
     'ursusstockboot' \
     'nokia,xg-040g-mf' \
     'XG040GMF' \
@@ -126,13 +125,11 @@ for forbidden in \
     'MF2 RAM-only build: persistent operations disabled' \
     'URSUS_MF2_READONLY_REJECT operation=UBI_UPDATE' \
     'URSUS_MF2_READONLY_REJECT operation=UBI_MIGRATION' \
+    'URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE' \
     'URSUS_MF2_STOCKBRIDGE_DISABLED' \
     'Nokia XG-040G-MD'; do
     ! grep -Fq "$forbidden" "$WORK/u-boot.strings" || { echo "MF runtime forbidden marker survived: $forbidden" >&2; exit 1; }
 done
-# Bootloader self-update remains host/device-derived on MF; Web firmware/UBI
-# install is open. This avoids reintroducing the rejected universal FIP writer.
-grep -Fq 'URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE' "$WORK/u-boot.strings" || { echo "MF host-only FIP self-update guard missing" >&2; exit 1; }
 
 python3 - "$OUT/MF-RUNTIME-FIP-REPACK.json" <<'PYQA'
 import json, sys
@@ -153,18 +150,20 @@ printf '%s\n' \
   "UrsusBoot ${VERSION}" \
   "TARGET=Nokia XG-040G-MF / Airoha AN7583" \
   "MODE=PERSISTENT_RUNTIME" \
-  "SOURCE=TEST61 exact source snapshot" \
+  "SOURCE=TEST61 exact source snapshot + TEST62 MF fixes" \
+  "BUILD_COMMIT=${BUILD_COMMIT}" \
+  "SOURCE_DATE_EPOCH=${BUILD_EPOCH}" \
   "BOOTCMD=ursusdispatch" \
   "ENV=UBI_REDUNDANT" \
   "OPENWRT_INSTALL=ENABLED" \
   "UBI_MIGRATION=ENABLED" \
   "UBI_UPDATE=ENABLED" \
-  "STOCK_BOOT=ENABLED" \
-  "FIP_SELFUPDATE=HOST_DEVICE_DERIVED_ONLY" \
+  "STOCK_BOOT=ENABLED_SERDES_COMPLETE" \
+  "FIP_SELFUPDATE=ENABLED_DEVICE_DERIVED_CANDIDATE_REQUIRED_BY_HOST" \
   "LAN234_LED=HWTEST8_NATIVE_C45" \
   "COMMON_KCONFIG=PASS" \
   "BOARD_KCONFIG=MF" \
   "MODE_KCONFIG=RUNTIME" > "$OUT/MF-RUNTIME-BUILD-INFO.txt"
 
-echo "MF_RUNTIME_BUILD=PASS"
+echo "MF_RUNTIME_BUILD=PASS version=${VERSION} commit=${BUILD_COMMIT} epoch=${BUILD_EPOCH}"
 echo "Artifacts: $OUT"
