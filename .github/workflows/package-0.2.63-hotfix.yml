@@ -12,10 +12,13 @@ on:
       - 'START_EXPERT.cmd'
       - 'START_EXPERT.sh'
       - 'config/UI_TERMS.json'
+      - 'ursusflasher/src/ui_terms.py'
       - 'ursusflasher/src/one_key_multi.py'
       - 'ursusflasher/src/expert_multi.py'
       - 'ursusflasher/src/stock_bootarea_restore.py'
       - 'ursusflasher/src/uart_bootarea_restore.py'
+      - 'ursusflasher/tools/selftest_stateui3_enum_coverage.py'
+      - 'ursusflasher/tools/selftest_stateui14_multiboard_registry.py'
   workflow_dispatch:
 
 permissions:
@@ -34,6 +37,11 @@ jobs:
 
       - name: Assert hotfix version
         run: test "$(cat VERSION)" = "0.2.63"
+
+      - name: Source UI registry regression QA
+        run: |
+          python3 ursusflasher/tools/selftest_stateui3_enum_coverage.py
+          python3 ursusflasher/tools/selftest_stateui14_multiboard_registry.py
 
       - name: Download last fully-audited 0.2.62 hardware kit
         env:
@@ -73,7 +81,7 @@ jobs:
           shutil.copy2('VERSION', root / 'VERSION')
           shutil.copy2('VERSION', root / 'data' / 'VERSION')
           shutil.copy2('config/UI_TERMS.json', root / 'data' / 'UI_TERMS.json')
-          for name in ('one_key_multi.py', 'expert_multi.py', 'stock_bootarea_restore.py', 'uart_bootarea_restore.py'):
+          for name in ('ui_terms.py', 'one_key_multi.py', 'expert_multi.py', 'stock_bootarea_restore.py', 'uart_bootarea_restore.py'):
               shutil.copy2(Path('ursusflasher/src') / name, root / 'data' / name)
 
           # v63 wrappers were a temporary hotfix layer and caused interface
@@ -145,6 +153,7 @@ jobs:
               assert r + 'START_EXPERT.cmd' in names
               assert r + 'data/one_key_multi.py' in names
               assert r + 'data/expert_multi.py' in names
+              assert r + 'data/ui_terms.py' in names
               assert r + 'data/UI_TERMS.json' in names
               assert r + 'data/one_key_v63.py' not in names
               assert r + 'data/expert_v63.py' not in names
@@ -157,11 +166,17 @@ jobs:
               assert b'_v63.py' not in z.read(r + 'START_ONECLICK.cmd')
               assert b'_v63.py' not in z.read(r + 'START_EXPERT.cmd')
 
-              terms = json.loads(z.read(r + 'data/UI_TERMS.json'))
-              assert terms['version'] >= 13
-              item4 = terms['expert_actions']['restore_factory_bootarea']
+              terms_json = json.loads(z.read(r + 'data/UI_TERMS.json'))
+              assert terms_json['version'] >= 14
+              item4 = terms_json['expert_actions']['restore_factory_bootarea']
               assert item4['number'] == 4
               assert item4['ru'] == 'Восстановить заводской загрузчик Nokia'
+              assert terms_json['expert_actions']['custom_openwrt']['ru'] == 'Установить свою прошивку OpenWrt'
+              assert terms_json['expert_actions']['recover_bootloader']['ru'] == 'Восстановить загрузчик через USB-UART'
+              assert 'UART_BOOTAREA_FACTORY_RESTORE' in terms_json['methods']
+              assert 'MF_DEVICE_DERIVED_HOST_ONLY' in terms_json['methods']
+              assert 'AUTO_URSUSBOOT_INSTALL_UPDATE' in terms_json['methods']
+              assert 'AUTO_URSUSBOOT_INSTALL_UPDATE' not in terms_json['execution_environments']
 
               mf_stock = z.read(r + 'data/payloads/mf/stock/nokia-xg-040g-mf-stock-mtd0.bin')
               assert len(mf_stock) == 524288
@@ -186,6 +201,9 @@ jobs:
 
           import ui_terms
           assert ui_terms.action_title('restore_factory_bootarea') == 'Восстановить заводской загрузчик Nokia'
+          assert ui_terms.action_title('future_action_key') == 'future_action_key'
+          assert ui_terms.human('FUTURE_METHOD', 'method') == 'FUTURE_METHOD'
+          assert ui_terms.human('UART_BOOTAREA_FACTORY_RESTORE', 'method').startswith('Через USB-UART')
 
           import one_key_multi
           assert one_key_multi.mf_runtime_mode({'persistent_write_enabled': True, 'ram_read_only': False}) == 'PERSISTENT_RUNTIME'
@@ -194,6 +212,31 @@ jobs:
 
           import device_state as ds
           import expert_multi
+          assert ds.ACTION_KEYS[4] == 'restore_factory_bootarea'
+          for state in (
+              ds.DeviceState(),
+              ds.DeviceState(current_system='RECOVERY', current_layout='OPENWRT_UBI', bootloader='URSUSBOOT', evidence={'board_profile':'mf'}),
+          ):
+              app = expert_multi.action_applicability(state)
+              for number, action in app.items():
+                  assert action.key == ds.ACTION_KEYS[number]
+                  assert action.key in ui_terms._DATA['expert_actions']
+          mf_app = expert_multi.action_applicability(ds.DeviceState(current_system='RECOVERY', evidence={'board_profile':'mf'}))
+          assert mf_app[2].resolved_backend == 'MF_DEVICE_DERIVED_HOST_ONLY'
+          assert expert_multi.action_applicability(ds.DeviceState())[4].resolved_backend == 'UART_BOOTAREA_FACTORY_RESTORE'
+
+          # Verify the disabled-item renderer discards detail and leaves only reason.
+          app = expert_multi.action_applicability(ds.DeviceState())
+          assert not app[3].enabled and app[3].reason
+          captured = []
+          original_show = expert_multi.base._show_action
+          expert_multi.base._show_action = lambda number, app, detail_ru='', detail_en='': captured.append((number, detail_ru, detail_en))
+          try:
+              expert_multi._show_action(3, app, 'DUPLICATE DETAIL', 'DUPLICATE DETAIL')
+          finally:
+              expert_multi.base._show_action = original_show
+          assert captured == [(3, '', '')]
+
           expert_multi.base.one_key.choose_language = lambda: None
           expert_multi.ds.probe_device_state = lambda host: ds.DeviceState(host=host)
           expert_multi.base.ask_menu = lambda max_item: '0'
@@ -204,21 +247,25 @@ jobs:
           rendered = output.getvalue()
           assert rc == 0
           assert 'Восстановить заводской загрузчик Nokia' in rendered
+          assert 'Восстановить загрузчик через USB-UART' in rendered
           assert 'ЕСЛИ РОУТЕР НЕ ЗАГРУЖАЕТСЯ' in rendered.upper()
+          assert rendered.count('Доступно из установленной OpenWrt или UrsusBoot Recovery') == 1
 
           expert_source = (data_dir / 'expert_multi.py').read_text(encoding='utf-8')
           item4_block = expert_source.split('elif number == 4:', 1)[1].split('elif number == 5:', 1)[0]
           assert 'confirm_uart_recovery' not in item4_block
 
           print('MF_RUNTIME_MODE_GUARD=PASS')
+          print('STATEUI14_ACTION_REGISTRY=PASS')
           print('EXPERT_ITEM4_UI=PASS')
+          print('EXPERT_DISABLED_REASON_DEDUP=PASS')
           print('EXPERT_MENU_SMOKE=PASS')
           print('CANONICAL_ENTRYPOINTS=PASS')
           PY
           python3 -m py_compile \
+            work/smoke63/UrsusFlasher-0.2.63/data/ui_terms.py \
             work/smoke63/UrsusFlasher-0.2.63/data/one_key_multi.py \
-            work/smoke63/UrsusFlasher-0.2.63/data/expert_multi.py \
-            work/smoke63/UrsusFlasher-0.2.63/data/ui_terms.py
+            work/smoke63/UrsusFlasher-0.2.63/data/expert_multi.py
 
       - name: Stage artifact
         run: |
