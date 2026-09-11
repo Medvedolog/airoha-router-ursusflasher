@@ -82,8 +82,8 @@ jobs:
               'mf_bl2_digest': bytes.fromhex('c655479c4d14b4f6d1a7a5eb8de80bfb204b3cdf46c9e48a5c6f3aea22d98131') in raw,
               'md_preloader_absent': bytes.fromhex('6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808') not in raw,
               'md_bl2_absent': bytes.fromhex('6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d') not in raw,
-              'hdr3': b'HDR3' in raw,
-              'hdr2_absent': b'HDR2' not in raw,
+              'stockbridge_hdr3': b'URSUS_STOCKBOOT_%s_HDR3_INVALID' in raw,
+              'stockbridge_hdr2_absent': b'URSUS_STOCKBOOT_%s_HDR2_INVALID' not in raw,
               'mf_identity': b'Nokia XG-040G-MF' in raw,
           }
           for k,v in checks.items(): print(f'MF_RUNTIME_CHECK {k}={int(v)}')
@@ -199,7 +199,8 @@ jobs:
               raw=lzma.decompress(packed,format=lzma.FORMAT_ALONE)
               assert bytes.fromhex('778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e') in raw
               assert bytes.fromhex('c655479c4d14b4f6d1a7a5eb8de80bfb204b3cdf46c9e48a5c6f3aea22d98131') in raw
-              assert b'HDR3' in raw and b'HDR2' not in raw
+              assert b'URSUS_STOCKBOOT_%s_HDR3_INVALID' in raw
+              assert b'URSUS_STOCKBOOT_%s_HDR2_INVALID' not in raw
           print('PACKAGED_MF_HARDWARE_CYCLE_QA=PASS')
           PY
 
