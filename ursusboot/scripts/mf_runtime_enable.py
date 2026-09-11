@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import re
 import shutil
 from pathlib import Path
 
@@ -51,17 +52,22 @@ def _byte_array(hexstr: str) -> str:
     return ", ".join("0x" + hexstr[i:i + 2] for i in range(0, len(hexstr), 2))
 
 
+def _replace_digest_bytes(text: str, old_hex: str, new_hex: str) -> tuple[str, int]:
+    """Replace a C 32-byte digest even when the source wraps it across lines."""
+    old = ["0x" + old_hex[i:i + 2] for i in range(0, len(old_hex), 2)]
+    new = _byte_array(new_hex)
+    pattern = r"\s*,\s*".join(re.escape(item) for item in old)
+    return re.subn(pattern, new, text, flags=re.I)
+
+
 def _patch_mf_transition_constants(text: str) -> tuple[str, dict[str, int]]:
     counts: dict[str, int] = {}
-    pairs = (
-        ("preloader_sha_text", MD_PRELOADER_SHA, MF_PRELOADER_SHA),
-        ("preloader_sha_bytes", _byte_array(MD_PRELOADER_SHA), _byte_array(MF_PRELOADER_SHA)),
-        ("bl2_sha_text", MD_BL2_SHA, MF_BL2_SHA),
-        ("bl2_sha_bytes", _byte_array(MD_BL2_SHA), _byte_array(MF_BL2_SHA)),
-    )
-    for label, old, new in pairs:
-        counts[label] = text.count(old)
-        text = text.replace(old, new)
+    counts["preloader_sha_text"] = text.count(MD_PRELOADER_SHA)
+    text = text.replace(MD_PRELOADER_SHA, MF_PRELOADER_SHA)
+    counts["bl2_sha_text"] = text.count(MD_BL2_SHA)
+    text = text.replace(MD_BL2_SHA, MF_BL2_SHA)
+    text, counts["preloader_sha_bytes"] = _replace_digest_bytes(text, MD_PRELOADER_SHA, MF_PRELOADER_SHA)
+    text, counts["bl2_sha_bytes"] = _replace_digest_bytes(text, MD_BL2_SHA, MF_BL2_SHA)
     counts["preloader_size"] = text.count(MD_PRELOADER_SIZE)
     text = text.replace(MD_PRELOADER_SIZE, MF_PRELOADER_SIZE)
     return text, counts
@@ -80,9 +86,6 @@ def transform(root: Path, pristine: Path) -> None:
     root = root.resolve()
     pristine = pristine.resolve()
 
-    # MF2 recovery deliberately amputates persistent entrypoints. Runtime starts
-    # from the exact TEST61 implementations again, then applies only MF board
-    # identity/transition constants. This keeps the MD implementation frozen.
     restored = (
         "cmd/ursusweb.c",
         "cmd/ursusubi.c",
@@ -92,17 +95,32 @@ def transform(root: Path, pristine: Path) -> None:
     for rel in restored:
         _restore_file(root, pristine, rel)
 
+    transition_counts: dict[str, dict[str, int]] = {}
     for rel in ("cmd/ursusweb.c", "cmd/ursusubi.c", "cmd/ursusdispatch.c", "cmd/ursusstock.c"):
         path = root / rel
         text = _rewrite_identity(path.read_text(encoding="utf-8"))
         text, counts = _patch_mf_transition_constants(text)
+        transition_counts[rel] = counts
+        if rel == "cmd/ursusstock.c":
+            # Hardware proved that both MF stock banks begin with Airoha HDR3,
+            # while the frozen MD StockBridge expects HDR2. Keep MD byte-for-byte
+            # untouched and board-specialize only the generated MF runtime source.
+            hdr2_count = text.count("HDR2")
+            if hdr2_count < 1:
+                raise SystemExit("MF StockBridge HDR2 anchor missing")
+            text = text.replace("HDR2", "HDR3")
+            print(f"MF_STOCKBRIDGE_FORMAT from=HDR2 to=HDR3 replacements={hdr2_count}")
         path.write_text(text, encoding="utf-8")
         if rel in ("cmd/ursusweb.c", "cmd/ursusubi.c"):
             print(f"MF_RUNTIME_CONSTANTS file={rel} " + " ".join(f"{k}={v}" for k, v in counts.items()))
 
-    # Keep the MF2 FIP writer blocked for runtime self-update, but restore the
-    # general MF structural validator so STOCK->UBI migration can validate the
-    # current device-derived 9-entry FIP without a build hash whitelist.
+    # A stale textual hash is easy to catch, but the hardware failure showed
+    # that the binary comparator digest must be bound too. At least one of the
+    # Web/UBI sources must contain and replace each raw digest.
+    for key in ("preloader_sha_bytes", "bl2_sha_bytes"):
+        if sum(transition_counts[p][key] for p in ("cmd/ursusweb.c", "cmd/ursusubi.c")) < 1:
+            raise SystemExit(f"MF transition raw digest anchor missing: {key}")
+
     validator = _load_validator_module()
     update = root / "cmd/ursusupdate.c"
     u = _rewrite_identity(update.read_text(encoding="utf-8"))
@@ -113,8 +131,6 @@ def transform(root: Path, pristine: Path) -> None:
     u = u.replace("MF2_STOCK_FIP_VALIDATION_DISABLED", "NOKIA_XG040GMF_STOCK")
     update.write_text(u, encoding="utf-8")
 
-    # Runtime capability is explicit. Unlike RAM recovery, POST install/update
-    # routes and the ordinary UBI diagnostic probe come from pristine TEST61.
     web = root / "cmd/ursusweb.c"
     w = web.read_text(encoding="utf-8")
     status_old = '"\\\"soc\\\":\\\"Airoha AN7583\\\",\\\"boot_fdt_compatible\\\":\\\"%s\\\",\\\"dram_mib\\\":%u,"'
@@ -125,8 +141,18 @@ def transform(root: Path, pristine: Path) -> None:
         raise SystemExit("MF runtime status capability anchor missing")
     web.write_text(w, encoding="utf-8")
 
-    # The MF2 transform keeps the safe MF-native LED labels and removes AN7581
-    # raw SCU/MT7531 MMIO. HWTEST8 is applied by the board build after this step.
+    # MF WebFailsafe must expose the preloader picker for the actual status enum
+    # returned by TEST61 and must not tell MF users to select an MD preloader.
+    ui_path = root / "include/ursusweb_ui.inc"
+    ui = _rewrite_identity(ui_path.read_text(encoding="utf-8"))
+    ui = ui.replace("openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-preloader.bin", "nokia-xg-040g-mf-an7583-production-preloader.bin")
+    old_expr = "S.image_type==='OPENWRT_UBI'"
+    new_expr = "(S.image_type==='OPENWRT_UBI'||S.image_type==='OPENWRT_UBI_SYSUPGRADE')"
+    if old_expr not in ui:
+        raise SystemExit("MF WebFailsafe migration image_type anchor missing")
+    ui = ui.replace(old_expr, new_expr)
+    ui_path.write_text(ui, encoding="utf-8")
+
     led = (root / "cmd/ursusled.c").read_text(encoding="utf-8")
     for token in ('#define LED_STATUS_RED "red:wan"', '#define LED_USB1_GREEN "green:usb-1"', '#define LED_USB2_GREEN "green:usb-2"'):
         if token not in led:
@@ -138,12 +164,15 @@ def transform(root: Path, pristine: Path) -> None:
     make = (root / "cmd/Makefile").read_text(encoding="utf-8")
     if "ursusstock.o" not in make:
         raise SystemExit("MF runtime StockBridge object is not linked")
-
     dispatch = (root / "cmd/ursusdispatch.c").read_text(encoding="utf-8")
     if 'run_command("ursusstockboot", 0)' not in dispatch:
         raise SystemExit("MF runtime stock boot dispatch is missing")
     if "URSUS_MF2_STOCKBRIDGE_DISABLED" in dispatch:
         raise SystemExit("MF RAM-only StockBridge gate survived runtime transform")
+
+    stock_text = (root / "cmd/ursusstock.c").read_text(encoding="utf-8")
+    if "HDR3" not in stock_text or "HDR2" in stock_text:
+        raise SystemExit("MF runtime StockBridge is not HDR3-specialized")
 
     web_text = web.read_text(encoding="utf-8")
     ubi_text = (root / "cmd/ursusubi.c").read_text(encoding="utf-8")
@@ -160,9 +189,6 @@ def transform(root: Path, pristine: Path) -> None:
         if marker in combined:
             raise SystemExit(f"MF recovery write gate survived runtime transform: {marker}")
 
-    # The exact production MF preloader + derived 128-KiB BL2 candidate are
-    # hardware-proven in the retained Medve lineage. Require the constants to
-    # actually reach source; silently keeping MD constants is forbidden.
     if MF_PRELOADER_SHA not in combined:
         raise SystemExit("MF production preloader SHA was not bound into runtime Web/UBI source")
     if MF_BL2_SHA not in combined:
@@ -172,7 +198,6 @@ def transform(root: Path, pristine: Path) -> None:
 
     version_h = root / "include/ursus_version.h"
     vh = version_h.read_text(encoding="utf-8")
-    import re
     vh, n = re.subn(r'#define URSUS_VERSION "[^"]+"', f'#define URSUS_VERSION "{VERSION}"', vh, count=1)
     if n != 1:
         raise SystemExit("MF runtime version header anchor missing")
@@ -189,7 +214,7 @@ def transform(root: Path, pristine: Path) -> None:
     if leaks:
         raise SystemExit("MF runtime board identity leak: " + ", ".join(leaks))
 
-    print("MF_RUNTIME_ENABLE=PASS writers=ubi/install/reset stockbridge=enabled fip-selfupdate=host-only validator=mf-general")
+    print("MF_RUNTIME_ENABLE=PASS writers=ubi/install/reset stockbridge=hdr3 fip-selfupdate=host-only validator=mf-general")
 
 
 def main() -> int:
