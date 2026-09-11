@@ -13,11 +13,13 @@ import device_state as ds
 import expert as base
 import mf_runtime_install
 import one_key_multi
+import runtime_kit
 import ursusboot_install
 
 # Keep the mature EXPERT UI/state machine. Only replace the board-sensitive
 # entrypoints; this avoids forking the menu and preserves MD TEST61 behavior.
 base.one_key = one_key_multi
+runtime_kit.install()
 
 
 def tr(ru: str, en: str) -> str:
