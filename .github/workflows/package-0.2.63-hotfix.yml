@@ -1,0 +1,168 @@
+name: Package UrsusFlasher 0.2.63 MF runtime-guard hotfix
+
+on:
+  push:
+    branches:
+      - feature/mf3-an7583-persistent
+    paths:
+      - '.github/workflows/package-0.2.63-hotfix.yml'
+      - 'VERSION'
+      - 'START_ONECLICK.cmd'
+      - 'START_ONECLICK.sh'
+      - 'START_EXPERT.cmd'
+      - 'START_EXPERT.sh'
+      - 'ursusflasher/src/one_key_v63.py'
+      - 'ursusflasher/src/expert_v63.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Assert hotfix version
+        run: test "$(cat VERSION)" = "0.2.63"
+
+      - name: Download last fully-audited 0.2.62 hardware kit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p base
+          gh run download 34589613011 \
+            --repo "$GITHUB_REPOSITORY" \
+            --name ursusflasher-0.2.62-md-mf-minimal-hwtest \
+            --dir base
+          test -f base/UrsusFlasher-0.2.62.zip
+
+      - name: Produce 0.2.63 host-only hotfix over audited payload set
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, shutil, zipfile
+
+          oldzip = Path('base/UrsusFlasher-0.2.62.zip')
+          work = Path('work/hotfix63')
+          if work.exists():
+              shutil.rmtree(work)
+          work.mkdir(parents=True)
+          with zipfile.ZipFile(oldzip) as z:
+              z.extractall(work)
+
+          oldroot = work / 'UrsusFlasher-0.2.62'
+          root = work / 'UrsusFlasher-0.2.63'
+          oldroot.rename(root)
+
+          # Host-side hotfix only. Hardware payloads stay byte-for-byte from
+          # the successful 0.2.62 full hardware-kit build (run 34589613011).
+          shutil.copy2('START_ONECLICK.cmd', root / 'START_ONECLICK.cmd')
+          shutil.copy2('START_ONECLICK.sh', root / 'START_ONECLICK.sh')
+          shutil.copy2('START_EXPERT.cmd', root / 'START_EXPERT.cmd')
+          shutil.copy2('START_EXPERT.sh', root / 'START_EXPERT.sh')
+          shutil.copy2('VERSION', root / 'VERSION')
+          shutil.copy2('VERSION', root / 'data' / 'VERSION')
+          shutil.copy2('ursusflasher/src/one_key_v63.py', root / 'data' / 'one_key_v63.py')
+          shutil.copy2('ursusflasher/src/expert_v63.py', root / 'data' / 'expert_v63.py')
+
+          # Stamp package-facing textual metadata without touching binaries.
+          text_suffixes = {'.py', '.json', '.md', '.txt', '.cmd', '.sh'}
+          for p in root.rglob('*'):
+              if not p.is_file() or p.name in {'SHA256SUMS', 'PAYLOAD_SHA256SUMS.txt'}:
+                  continue
+              if p.suffix.lower() not in text_suffixes and p.name != 'VERSION':
+                  continue
+              try:
+                  s = p.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              if '0.2.62' in s:
+                  p.write_text(s.replace('0.2.62', '0.2.63'), encoding='utf-8', newline='\n')
+
+          def sha256(p: Path) -> str:
+              h = hashlib.sha256()
+              with p.open('rb') as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          # Regenerate package manifest after host files/version changed.
+          manifest = root / 'SHA256SUMS'
+          rows = []
+          for p in sorted(root.rglob('*'), key=lambda x: x.relative_to(root).as_posix()):
+              if p.is_file() and p != manifest:
+                  rows.append(f'{sha256(p)}  {p.relative_to(root).as_posix()}')
+          manifest.write_text('\n'.join(rows) + '\n', encoding='utf-8', newline='\n')
+
+          out = Path('dist')
+          out.mkdir(exist_ok=True)
+          zpath = out / 'UrsusFlasher-0.2.63.zip'
+          with zipfile.ZipFile(zpath, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+              for p in sorted(root.rglob('*'), key=lambda x: x.relative_to(root).as_posix()):
+                  if p.is_file():
+                      z.write(p, p.relative_to(root.parent))
+          digest = sha256(zpath)
+          (out / 'UrsusFlasher-0.2.63.zip.sha256.txt').write_text(
+              f'{digest}  {zpath.name}\n', encoding='utf-8', newline='\n')
+          print('HOTFIX63_ZIP', zpath, zpath.stat().st_size, digest)
+          PY
+
+      - name: Hotfix regression QA
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib, sys, zipfile
+
+          zpath = Path('dist/UrsusFlasher-0.2.63.zip')
+          with zipfile.ZipFile(zpath) as z:
+              r = 'UrsusFlasher-0.2.63/'
+              names = set(z.namelist())
+              assert r + 'START_ONECLICK.cmd' in names
+              assert r + 'START_EXPERT.cmd' in names
+              assert r + 'data/one_key_v63.py' in names
+              assert r + 'data/expert_v63.py' in names
+              assert z.read(r + 'VERSION') == b'0.2.63\n'
+              assert z.read(r + 'data/VERSION') == b'0.2.63\n'
+              assert b'one_key_v63.py' in z.read(r + 'START_ONECLICK.cmd')
+              assert b'expert_v63.py' in z.read(r + 'START_EXPERT.cmd')
+
+              mf_stock = z.read(r + 'data/payloads/mf/stock/nokia-xg-040g-mf-stock-mtd0.bin')
+              assert len(mf_stock) == 524288
+              assert hashlib.sha256(mf_stock).hexdigest() == '144d63272049eeb7122a01f2f3a0192b874ca4c68c10a5b4726fa4c2e84ac1bf'
+              md_stock = z.read(r + 'data/payloads/md/stock/nokia-xg-040g-md-stock-mtd0.bin')
+              assert len(md_stock) == 524288
+              assert hashlib.sha256(md_stock).hexdigest() == 'c98f268db69fb3d8ab3ba7bd11f9aa0cc3bfbaacf5b952e7a4e25094476bb629'
+              mf_bl2 = z.read(r + 'data/payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin')
+              assert hashlib.sha256(mf_bl2).hexdigest() == '778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e'
+              forbidden = ('transition-bundle.bin', 'transition-manual-bundle.bin', 'mf-transition-bundle.bin', 'mf-transition-manual-bundle.bin', 'vendor/')
+              assert not [n for n in names if any(x in n for x in forbidden)]
+
+          # Syntax + capability classifier regression outside the extracted kit.
+          sys.path.insert(0, 'ursusflasher/src')
+          import one_key_v63
+          assert one_key_v63.mf_runtime_mode({'persistent_write_enabled': True, 'ram_read_only': False}) == 'PERSISTENT_RUNTIME'
+          assert one_key_v63.mf_runtime_mode({'persistent_write_enabled': False, 'ram_read_only': True}) == 'RAM_ONLY'
+          assert one_key_v63.mf_runtime_mode({'version': '0.1.0-TEST61'}) == 'LEGACY_RAM_ONLY'
+          print('MF_RUNTIME_MODE_GUARD=PASS')
+          PY
+          python3 -m py_compile ursusflasher/src/one_key_v63.py ursusflasher/src/expert_v63.py
+
+      - name: Stage artifact
+        run: |
+          mkdir -p upload
+          cp dist/UrsusFlasher-0.2.63.zip upload/
+          cp dist/UrsusFlasher-0.2.63.zip.sha256.txt upload/
+          sha256sum upload/UrsusFlasher-0.2.63.zip > upload/SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ursusflasher-0.2.63-mf-runtime-guard-hwtest
+          path: upload/
+          if-no-files-found: error
