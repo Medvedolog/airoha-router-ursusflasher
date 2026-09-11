@@ -136,16 +136,13 @@ def _install_bootloader(state: ds.DeviceState, family: str, skip_full_backup: bo
         else:
             raise RuntimeError(f"MD bootloader install is not applicable from {state.current_system}")
     else:
-        # MF is never installed from a universal prebuilt FIP. The runtime BL33
-        # is patched into this device's own FIP/boot area and the result is read
-        # back in full before reboot. Interactive mode retains the single y/N.
         route = "stock" if state.current_system == "NOKIA_STOCK" else "openwrt"
         ui.note(tr(
             "MF: используется фактический FIP этого устройства; native ранние компоненты и factory identity сохраняются. После подтверждённой записи ONE-KEY продолжит переход на OpenWrt UBI без второго destructive-confirm.",
             "MF: the candidate is derived from this device's actual FIP; native early components and factory identity are preserved. After the verified write, ONE-KEY continues to OpenWrt UBI without a second destructive confirmation.",
         ))
         rc = mf_runtime_install.run_install(
-            host=HOST, route=route, unattended=False,
+            host=HOST, route=route, unattended=(route == "stock"),
             skip_full_backup=skip_full_backup, recovery_after=True,
         )
         if rc:
@@ -154,14 +151,12 @@ def _install_bootloader(state: ds.DeviceState, family: str, skip_full_backup: bo
 
 
 def mf_runtime_mode(st: dict) -> str:
-    """Classify MF UrsusBoot by explicit write capability, never by version alone."""
     persistent = st.get("persistent_write_enabled")
     ram_ro = st.get("ram_read_only")
     if persistent is True and ram_ro is False:
         return "PERSISTENT_RUNTIME"
     if persistent is False or ram_ro is True:
         return "RAM_ONLY"
-    # Legacy MF Recovery without capability fields is conservative/read-only.
     return "LEGACY_RAM_ONLY"
 
 
@@ -193,40 +188,33 @@ def _install_openwrt(st: dict, family: str, *, already_authorized: bool) -> dict
     preloader = None
     if layout in ("STOCK", "OPENWRT_STOCK_LAYOUT"):
         preloader = require_role(family, "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE")
-
     keep = True
     if layout == "OPENWRT_UBI":
-        answer = ui.prompt(tr(
-            "Сохранить текущие настройки OpenWrt? [Y/n]: ",
-            "Keep the current OpenWrt settings? [Y/n]: ",
-        )).strip().lower()
+        answer = ui.prompt(tr("Сохранить текущие настройки OpenWrt? [Y/n]: ", "Keep the current OpenWrt settings? [Y/n]: ")).strip().lower()
         keep = answer not in ("n", "no", "н", "нет")
-
-    stage(
-        "OpenWrt",
-        "OpenWrt",
-        f"Проверяю и загружаю {image.name}; layout={layout}.",
-        f"Validating and staging {image.name}; layout={layout}.",
-        "Для STOCK/Factory переход выполняется в UBI с board-specific BL2 последним. Для UBI обновляется только OpenWrt.",
-        "For STOCK/Factory the migration goes to UBI with the board-specific BL2 committed last. For UBI only OpenWrt is updated.",
-    )
-    result = uw.update_firmware(
-        HOST, image, preloader=preloader, keep_settings=keep,
-        confirm=not already_authorized,
-    )
+    stage("OpenWrt", "OpenWrt", f"Проверяю и загружаю {image.name}; layout={layout}.", f"Validating and staging {image.name}; layout={layout}.", "Для STOCK/Factory переход выполняется в UBI с board-specific BL2 последним. Для UBI обновляется только OpenWrt.", "For STOCK/Factory the migration goes to UBI with the board-specific BL2 committed last. For UBI only OpenWrt is updated.")
+    result = uw.update_firmware(HOST, image, preloader=preloader, keep_settings=keep, confirm=not already_authorized)
     if not result.get("operation_complete"):
         raise RuntimeError("UrsusBoot did not report a completed OpenWrt operation")
     return result
 
 
 def main(*, skip_full_backup: bool = False) -> int:
+    global HOST
     pb.start_session_logging()
     ui.enable()
     choose_language()
     root = _root()
     version = ui.package_version(root)
     ui.banner("UrsusFlasher ONE-KEY", version=version)
+    ui.danger_block(tr("ОБЯЗАТЕЛЬНО ПЕРЕД УСТАНОВКОЙ", "REQUIRED BEFORE INSTALLATION"), [
+        tr("! Nokia XG-040G-MD / XG-040G-MF на родной прошивке должна быть сброшена к заводским настройкам.", "! Nokia XG-040G-MD / XG-040G-MF on stock firmware must be reset to factory defaults."),
+        tr("  При включённом роутере удерживайте RESET не менее 20 секунд, затем дождитесь полной загрузки Nokia.", "  With the router powered on, hold RESET for at least 20 seconds, then wait for Nokia stock to boot completely."),
+    ])
     network_guidance.show()
+    HOST = md_one_key.choose_stock_ip()
+    os.environ["NOKIA_ROUTER_IP"] = HOST
+    os.environ["NOKIA_HOST"] = HOST
 
     state = _probe(interactive_ssh=False)
     if state.current_system.startswith("OPENWRT") and state.probe_status != ds.PROBE_COMPLETE:
@@ -245,30 +233,18 @@ def main(*, skip_full_backup: bool = False) -> int:
     elif state.current_system in ("NOKIA_STOCK", "OPENWRT_UBI", "OPENWRT_FACTORY", "OPENWRT_STOCK_LAYOUT"):
         st = _install_bootloader(state, family, skip_full_backup)
         already_authorized = True
-        # A newly installed MF runtime must prove persistent write capability
-        # before ONE-KEY is allowed to enter the OpenWrt writer.
         if family == "mf":
             _require_mf_persistent_runtime(st)
     else:
-        raise RuntimeError(tr(
-            f"ONE-KEY не может безопасно продолжить из состояния {state.current_system}.",
-            f"ONE-KEY cannot safely continue from state {state.current_system}.",
-        ))
+        raise RuntimeError(tr(f"ONE-KEY не может безопасно продолжить из состояния {state.current_system}.", f"ONE-KEY cannot safely continue from state {state.current_system}."))
 
     recovery_family = _family_from_ursus(st)
     if recovery_family != family:
         raise RuntimeError(f"family changed across reboot: {family} -> {recovery_family}")
     _report_runtime(st, family)
-
     result = _install_openwrt(st, family, already_authorized=already_authorized)
-    ui.status(tr("ГОТОВО", "READY"), tr(
-        f"Операция OpenWrt для {family.upper()} завершена и проверена.",
-        f"The OpenWrt operation for {family.upper()} completed and was verified.",
-    ))
-    ui.note(tr(
-        "Сейчас UrsusBoot перезагрузит устройство в установленную OpenWrt.",
-        "UrsusBoot will now reboot the device into the installed OpenWrt.",
-    ))
+    ui.status(tr("ГОТОВО", "READY"), tr(f"Операция OpenWrt для {family.upper()} завершена и проверена.", f"The OpenWrt operation for {family.upper()} completed and was verified."))
+    ui.note(tr("Сейчас UrsusBoot перезагрузит устройство в установленную OpenWrt.", "UrsusBoot will now reboot the device into the installed OpenWrt."))
     time.sleep(1)
     uw.reboot(HOST)
     return 0
