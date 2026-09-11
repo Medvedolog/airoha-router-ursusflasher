@@ -11,9 +11,11 @@ on:
       - 'START_ONECLICK.sh'
       - 'START_EXPERT.cmd'
       - 'START_EXPERT.sh'
-      - 'scripts/repo_common.py'
-      - 'ursusflasher/src/one_key_v63.py'
-      - 'ursusflasher/src/expert_v63.py'
+      - 'config/UI_TERMS.json'
+      - 'ursusflasher/src/one_key_multi.py'
+      - 'ursusflasher/src/expert_multi.py'
+      - 'ursusflasher/src/stock_bootarea_restore.py'
+      - 'ursusflasher/src/uart_bootarea_restore.py'
   workflow_dispatch:
 
 permissions:
@@ -62,7 +64,7 @@ jobs:
           root = work / 'UrsusFlasher-0.2.63'
           oldroot.rename(root)
 
-          # Host-side hotfix only. Hardware payloads stay byte-for-byte from
+          # Host-side changes only. Hardware payloads stay byte-for-byte from
           # the successful 0.2.62 full hardware-kit build (run 34589613011).
           shutil.copy2('START_ONECLICK.cmd', root / 'START_ONECLICK.cmd')
           shutil.copy2('START_ONECLICK.sh', root / 'START_ONECLICK.sh')
@@ -70,11 +72,19 @@ jobs:
           shutil.copy2('START_EXPERT.sh', root / 'START_EXPERT.sh')
           shutil.copy2('VERSION', root / 'VERSION')
           shutil.copy2('VERSION', root / 'data' / 'VERSION')
-          shutil.copy2('ursusflasher/src/one_key_v63.py', root / 'data' / 'one_key_v63.py')
-          shutil.copy2('ursusflasher/src/expert_v63.py', root / 'data' / 'expert_v63.py')
+          shutil.copy2('config/UI_TERMS.json', root / 'data' / 'UI_TERMS.json')
+          for name in ('one_key_multi.py', 'expert_multi.py', 'stock_bootarea_restore.py', 'uart_bootarea_restore.py'):
+              shutil.copy2(Path('ursusflasher/src') / name, root / 'data' / name)
 
-          # UART boot-area restore is now EXPERT item 4; do not duplicate it
-          # with legacy standalone launchers in the package root.
+          # v63 wrappers were a temporary hotfix layer and caused interface
+          # drift. 0.2.63 now uses the canonical multi-board entrypoints.
+          for name in ('one_key_v63.py', 'expert_v63.py'):
+              p = root / 'data' / name
+              if p.exists():
+                  p.unlink()
+
+          # UART boot-area restore is EXPERT item 4; do not duplicate it with
+          # standalone root launchers.
           for name in ('START_UART_RESTORE.cmd', 'START_UART_RESTORE.sh'):
               p = root / name
               if p.exists():
@@ -101,7 +111,6 @@ jobs:
                       h.update(chunk)
               return h.hexdigest()
 
-          # Regenerate package manifest after host files/version changed.
           manifest = root / 'SHA256SUMS'
           rows = []
           for p in sorted(root.rglob('*'), key=lambda x: x.relative_to(root).as_posix()):
@@ -122,11 +131,11 @@ jobs:
           print('HOTFIX63_ZIP', zpath, zpath.stat().st_size, digest)
           PY
 
-      - name: Hotfix regression QA
+      - name: Package and startup regression QA
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import hashlib, sys, zipfile
+          import contextlib, hashlib, io, json, os, shutil, sys, zipfile
 
           zpath = Path('dist/UrsusFlasher-0.2.63.zip')
           with zipfile.ZipFile(zpath) as z:
@@ -134,14 +143,25 @@ jobs:
               names = set(z.namelist())
               assert r + 'START_ONECLICK.cmd' in names
               assert r + 'START_EXPERT.cmd' in names
-              assert r + 'data/one_key_v63.py' in names
-              assert r + 'data/expert_v63.py' in names
+              assert r + 'data/one_key_multi.py' in names
+              assert r + 'data/expert_multi.py' in names
+              assert r + 'data/UI_TERMS.json' in names
+              assert r + 'data/one_key_v63.py' not in names
+              assert r + 'data/expert_v63.py' not in names
               assert r + 'START_UART_RESTORE.cmd' not in names
               assert r + 'START_UART_RESTORE.sh' not in names
               assert z.read(r + 'VERSION') == b'0.2.63\n'
               assert z.read(r + 'data/VERSION') == b'0.2.63\n'
-              assert b'one_key_v63.py' in z.read(r + 'START_ONECLICK.cmd')
-              assert b'expert_v63.py' in z.read(r + 'START_EXPERT.cmd')
+              assert b'one_key_multi.py' in z.read(r + 'START_ONECLICK.cmd')
+              assert b'expert_multi.py' in z.read(r + 'START_EXPERT.cmd')
+              assert b'_v63.py' not in z.read(r + 'START_ONECLICK.cmd')
+              assert b'_v63.py' not in z.read(r + 'START_EXPERT.cmd')
+
+              terms = json.loads(z.read(r + 'data/UI_TERMS.json'))
+              assert terms['version'] >= 13
+              item4 = terms['expert_actions']['restore_factory_bootarea']
+              assert item4['number'] == 4
+              assert item4['ru'] == 'Восстановить заводской загрузчик Nokia'
 
               mf_stock = z.read(r + 'data/payloads/mf/stock/nokia-xg-040g-mf-stock-mtd0.bin')
               assert len(mf_stock) == 524288
@@ -154,22 +174,51 @@ jobs:
               forbidden = ('transition-bundle.bin', 'transition-manual-bundle.bin', 'mf-transition-bundle.bin', 'mf-transition-manual-bundle.bin', 'vendor/')
               assert not [n for n in names if any(x in n for x in forbidden)]
 
-          # Syntax + capability classifier + EXPERT binding regression.
-          sys.path.insert(0, 'ursusflasher/src')
-          import one_key_v63
-          assert callable(one_key_v63.choose_language)
-          assert callable(one_key_v63.main)
-          assert one_key_v63.mf_runtime_mode({'persistent_write_enabled': True, 'ram_read_only': False}) == 'PERSISTENT_RUNTIME'
-          assert one_key_v63.mf_runtime_mode({'persistent_write_enabled': False, 'ram_read_only': True}) == 'RAM_ONLY'
-          assert one_key_v63.mf_runtime_mode({'version': '0.1.0-TEST61'}) == 'LEGACY_RAM_ONLY'
-          import expert_v63
-          assert expert_v63.expert_multi.base.one_key is one_key_v63
-          assert callable(expert_v63.expert_multi.base.one_key.choose_language)
-          assert callable(expert_v63.expert_multi.base.one_key.main)
+          smoke = Path('work/smoke63')
+          if smoke.exists():
+              shutil.rmtree(smoke)
+          with zipfile.ZipFile(zpath) as z:
+              z.extractall(smoke)
+          root = smoke / 'UrsusFlasher-0.2.63'
+          data_dir = root / 'data'
+          sys.path.insert(0, str(data_dir))
+          os.environ['NOKIA_LANG'] = 'ru'
+
+          import ui_terms
+          assert ui_terms.action_title('restore_factory_bootarea') == 'Восстановить заводской загрузчик Nokia'
+
+          import one_key_multi
+          assert one_key_multi.mf_runtime_mode({'persistent_write_enabled': True, 'ram_read_only': False}) == 'PERSISTENT_RUNTIME'
+          assert one_key_multi.mf_runtime_mode({'persistent_write_enabled': False, 'ram_read_only': True}) == 'RAM_ONLY'
+          assert one_key_multi.mf_runtime_mode({'version': '0.1.0-TEST61'}) == 'LEGACY_RAM_ONLY'
+
+          import device_state as ds
+          import expert_multi
+          expert_multi.base.one_key.choose_language = lambda: None
+          expert_multi.ds.probe_device_state = lambda host: ds.DeviceState(host=host)
+          expert_multi.base.ask_menu = lambda max_item: '0'
+          expert_multi.base.proven.start_session_logging = lambda: None
+          output = io.StringIO()
+          with contextlib.redirect_stdout(output):
+              rc = expert_multi.main()
+          rendered = output.getvalue()
+          assert rc == 0
+          assert 'Восстановить заводской загрузчик Nokia' in rendered
+          assert 'ЕСЛИ РОУТЕР НЕ ЗАГРУЖАЕТСЯ' in rendered.upper()
+
+          expert_source = (data_dir / 'expert_multi.py').read_text(encoding='utf-8')
+          item4_block = expert_source.split('elif number == 4:', 1)[1].split('elif number == 5:', 1)[0]
+          assert 'confirm_uart_recovery' not in item4_block
+
           print('MF_RUNTIME_MODE_GUARD=PASS')
-          print('EXPERT_V63_BINDING=PASS')
+          print('EXPERT_ITEM4_UI=PASS')
+          print('EXPERT_MENU_SMOKE=PASS')
+          print('CANONICAL_ENTRYPOINTS=PASS')
           PY
-          python3 -m py_compile ursusflasher/src/one_key_v63.py ursusflasher/src/expert_v63.py ursusflasher/src/expert_multi.py
+          python3 -m py_compile \
+            work/smoke63/UrsusFlasher-0.2.63/data/one_key_multi.py \
+            work/smoke63/UrsusFlasher-0.2.63/data/expert_multi.py \
+            work/smoke63/UrsusFlasher-0.2.63/data/ui_terms.py
 
       - name: Stage artifact
         run: |
