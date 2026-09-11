@@ -12,8 +12,6 @@ import device_state as ds
 import ui_terms as terms
 import expert_multi as multi
 
-# Importing the production multi-board entrypoint must leave one final action
-# registry. Item 4 is no longer allowed to invent a key after applicability.
 assert ds.ACTION_KEYS[4] == 'restore_factory_bootarea', ds.ACTION_KEYS
 
 states=[
@@ -31,8 +29,6 @@ for state in states:
         title=terms.action_title(a.key)
         assert title and title != a.key, (number,a.key,title)
 
-# Every method introduced by the multi-board overlay is registered as a method,
-# not as an execution-environment value.
 unknown_app=multi.action_applicability(ds.DeviceState())
 assert unknown_app[4].resolved_backend == 'UART_BOOTAREA_FACTORY_RESTORE'
 assert 'UART_BOOTAREA_FACTORY_RESTORE' in terms._DATA['methods']
@@ -40,20 +36,18 @@ assert terms.human('UART_BOOTAREA_FACTORY_RESTORE','method').startswith('Чер�
 
 mf_recovery=states[1]
 mf_app=multi.action_applicability(mf_recovery)
-assert mf_app[2].resolved_backend == 'MF_DEVICE_DERIVED_HOST_ONLY'
-assert 'MF_DEVICE_DERIVED_HOST_ONLY' in terms._DATA['methods']
-assert terms.human('MF_DEVICE_DERIVED_HOST_ONLY','method') != 'MF_DEVICE_DERIVED_HOST_ONLY'
+assert mf_app[2].enabled
+assert mf_app[2].resolved_backend == 'MF_RECOVERY_DEVICE_DERIVED_FIP_UPDATE'
+assert 'MF_RECOVERY_DEVICE_DERIVED_FIP_UPDATE' in terms._DATA['methods']
+assert terms.human('MF_RECOVERY_DEVICE_DERIVED_FIP_UPDATE','method') != 'MF_RECOVERY_DEVICE_DERIVED_FIP_UPDATE'
 
 assert 'AUTO_URSUSBOOT_INSTALL_UPDATE' in terms._DATA['methods']
 assert 'AUTO_URSUSBOOT_INSTALL_UPDATE' not in terms._DATA['execution_environments']
 assert terms.human('AUTO_URSUSBOOT_INSTALL_UPDATE','method') != 'AUTO_URSUSBOOT_INSTALL_UPDATE'
 
-# A future missing label must not kill EXPERT; build completeness above still
-# catches production registry omissions.
 assert terms.action_title('future_action_key') == 'future_action_key'
 assert terms.human('FUTURE_METHOD','method') == 'FUTURE_METHOD'
 
-# Disabled actions show the reason once. Their detail line is suppressed.
 disabled=ds.DeviceState()
 app=multi.action_applicability(disabled)
 assert not app[3].enabled and app[3].reason
