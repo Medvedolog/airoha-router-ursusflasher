@@ -49,6 +49,17 @@ jobs:
       - name: Install build dependencies
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends liblzma-dev
 
+      - name: Verify canonical stock boot-area references
+        run: |
+          set -e
+          MD=payloads/md/stock/nokia-xg-040g-md-stock-mtd0.bin
+          MF=payloads/mf/stock/nokia-xg-040g-mf-stock-mtd0.bin
+          test "$(stat -c %s "$MD")" = 524288
+          test "$(sha256sum "$MD" | awk '{print $1}')" = c98f268db69fb3d8ab3ba7bd11f9aa0cc3bfbaacf5b952e7a4e25094476bb629
+          test "$(stat -c %s "$MF")" = 524288
+          test "$(sha256sum "$MF" | awk '{print $1}')" = 144d63272049eeb7122a01f2f3a0192b874ca4c68c10a5b4726fa4c2e84ac1bf
+          echo STOCK_BOOTAREA_REFERENCES=PASS
+
       - name: Verify canonical eight-file UnameOne firmware set
         run: |
           python3 - <<'PY'
@@ -188,7 +199,6 @@ jobs:
           text = text.replace(old_tag, f'BUILD_TAG = "{build_tag}"')
           backend.write_text(text, encoding='utf-8', newline='\n')
 
-          # Make the MF stock identity path canonical in the exported runtime.
           mf = Path('ursusflasher/src/mf_runtime_install.py')
           text = mf.read_text(encoding='utf-8')
           old = 'access = _open_stock_access_auto(host) if unattended else pb.ask_credentials(require_model_gate=True, offer_interactive_plain_retry=True)'
@@ -239,6 +249,7 @@ jobs:
           import one_key_multi
           import proven_backend as pb
           import runtime_kit
+          import stock_bootarea_restore as sbr
           import uart_bootarea_restore as ur
 
           assert set(json.loads((root/'config/FIRMWARE_BUNDLES.json').read_text())['profiles']) == {'md', 'mf'}
@@ -247,6 +258,7 @@ jobs:
               assert p['model'].endswith('-' + fam.upper())
               one_key_multi.verify_family_payloads(fam)
               ur.verify_profile(ur.family_profile(fam))
+              assert sbr.bundled_stock_mtd0(fam) is not None
           assert mf_runtime_install.require_bl33().name == 'u-boot.runtime.lzma'
           runtime_kit.verify_kit()
           assert pb.verify_kit is runtime_kit.verify_kit
@@ -278,16 +290,21 @@ jobs:
           payload_expected = {
               'data/payloads/md/ursusboot/openwrt-6.18.44-mtd-rw.ko',
               'data/payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin',
-              'data/payloads/md/ursusboot/stock_mtd0_reference.bin',
+              'data/payloads/md/stock/nokia-xg-040g-md-stock-mtd0.bin',
               'data/payloads/md/ursusboot/ursus-mtd-raw',
               'data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-bl2.bin',
               'data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-ram-installer.fip',
               'data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-update.fip',
               'data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip',
+              'data/payloads/mf/stock/nokia-xg-040g-mf-stock-mtd0.bin',
               'data/payloads/mf/ursusboot/u-boot.runtime.lzma',
               'data/payloads/mf/recovery/ursusboot-mf-0.1.0-TEST61-uart-preloader.bin',
               'data/payloads/mf/recovery/ursusboot-mf-0.1.0-TEST61-ram.fip',
               'data/payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin',
+          }
+          stock_expected = {
+              'data/payloads/md/stock/nokia-xg-040g-md-stock-mtd0.bin': (524288, 'c98f268db69fb3d8ab3ba7bd11f9aa0cc3bfbaacf5b952e7a4e25094476bb629'),
+              'data/payloads/mf/stock/nokia-xg-040g-mf-stock-mtd0.bin': (524288, '144d63272049eeb7122a01f2f3a0192b874ca4c68c10a5b4726fa4c2e84ac1bf'),
           }
           forbidden = (
               'transition-bundle.bin', 'transition-manual-bundle.bin',
@@ -297,6 +314,7 @@ jobs:
               'transition-network-source/', 'recovery-clients-source/',
               'recovery-safe-uboot-source/', 'alpha4_hwfix_test.py',
               'expert_mf_acceptance.py', 'mf_persistent_install.py',
+              'stock_mtd0_reference.bin',
           )
           with zipfile.ZipFile(zpath) as z:
               names = [n for n in z.namelist() if not n.endswith('/')]
@@ -311,6 +329,10 @@ jobs:
                   assert hashlib.sha256(blob).hexdigest() == sha
               payload_actual = {n for n in rel if n.startswith('data/payloads/')}
               assert payload_actual == payload_expected, (sorted(payload_actual), sorted(payload_expected))
+              for name, (size, sha) in stock_expected.items():
+                  blob = z.read(r+name)
+                  assert len(blob) == size, name
+                  assert hashlib.sha256(blob).hexdigest() == sha, name
               docs = {n for n in rel if n.startswith('doc/')}
               assert not any('TEST57' in n or 'TEST58' in n or 'TEST59' in n or 'TEST60' in n for n in docs)
               assert r+'data/runtime_kit.py' in names
