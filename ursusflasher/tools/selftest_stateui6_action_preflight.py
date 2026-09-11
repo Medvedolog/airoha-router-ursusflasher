@@ -26,5 +26,6 @@ expert=(DATA/'expert.py').read_text(encoding='utf-8')
 assert 'print_state_header(state)\n\n        ui.section' not in expert
 assert 'subtitle=tr(' not in expert
 terms=(DATA/'UI_TERMS.json').read_text(encoding='utf-8') if (DATA/'UI_TERMS.json').is_file() else (ROOT.parent/'config'/'UI_TERMS.json').read_text(encoding='utf-8')
-assert 'Состояние устройства и доступные операции' in terms
+assert 'Что этот роутер позволяет сделать' in terms
+assert 'Состояние устройства и доступные операции' not in terms
 print('STATEUI6_ACTION_PREFLIGHT_QA=PASS')
