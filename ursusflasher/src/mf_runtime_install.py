@@ -79,7 +79,14 @@ def _family_from_state(state: ds.DeviceState) -> str | None:
 
 
 def _open_stock_access_auto(host: str) -> pb.StockAccess:
-    """Authenticate stock Web, prove MF identity, then use the proven service bootstrap."""
+    """Authenticate stock Web, prove MF identity, then use the proven service bootstrap.
+
+    The inherited automatic bootstrap still carries the historical MD-only
+    stock_web.SUPPORTED_INSTALL_MODELS gate.  For this already-proven MF call
+    only, extend that in-memory gate while the common bootstrap provisions the
+    transport, then restore it immediately.  The durable model gate remains the
+    BOARD_PROFILES match above; unknown/wrong models never reach this bridge.
+    """
     module = pb._load_stock_web_module()
     user = str(getattr(module, "DEFAULT_WEB_USER", "CMCCAdmin") or "CMCCAdmin")
     password = str(getattr(module, "DEFAULT_WEB_PASSWORD", "") or "")
@@ -100,7 +107,9 @@ def _open_stock_access_auto(host: str) -> pb.StockAccess:
         except Exception:
             pass
 
-    match = bp.match_profile(model=str(info.get("model") or ""), soc=str(info.get("chipset") or ""))
+    model = str(info.get("model") or "")
+    chipset = str(info.get("chipset") or "")
+    match = bp.match_profile(model=model, soc=chipset)
     if not match or match[0] != "mf":
         raise RuntimeError(
             "stock device is not positively identified as Nokia XG-040G-MF / AN7583: "
@@ -109,16 +118,44 @@ def _open_stock_access_auto(host: str) -> pb.StockAccess:
 
     pb._STARTUP_DEVICE_PROFILE.clear()
     pb._STARTUP_DEVICE_PROFILE.update({
-        "family": "mf", "model": str(info.get("model") or "XG-040G-MF"),
-        "chipset": str(info.get("chipset") or "AN7583"), "host": host,
-        "verified": True, "source": "ursusflasher-0.2.62-one-key",
+        "family": "mf", "model": model or "XG-040G-MF",
+        "chipset": chipset or "AN7583", "host": host,
+        "verified": True, "source": "ursusflasher-mf-runtime-stock-web",
     })
     pb._STARTUP_WEB_AUTH.clear()
     pb._STARTUP_WEB_AUTH.update({"host": host, "user": user, "password": password})
-    access = pb._automatic_stock_web_access(host, module, offer_interactive_plain_retry=False)
+
+    old_supported = tuple(getattr(module, "SUPPORTED_INSTALL_MODELS", ("XG-040G-MD",)))
+    module.SUPPORTED_INSTALL_MODELS = tuple(dict.fromkeys(old_supported + ("XG-040G-MF",)))
+    try:
+        access = pb._automatic_stock_web_access(host, module, offer_interactive_plain_retry=False)
+    finally:
+        module.SUPPORTED_INSTALL_MODELS = old_supported
+
+    # _automatic_stock_web_access predates multi-board StockAccess metadata.
+    # Identity was positively re-read and BOARD_PROFILES-matched above, so
+    # carry that proof into the family-aware MF writer instead of losing it.
+    access.family = "mf"
+    access.model_name = model
+    access.chipset = chipset
+    access.model_verified = True
+    access.model_verification_source = "mf-runtime-stock-web-board-profile"
+    return access
+
+
+def _open_stock_access_interactive() -> pb.StockAccess:
+    """Use the mature family-aware MF stock install access path.
+
+    proven_backend._install_access(MF_INSTALL_PROFILE) deliberately re-reads
+    model/chipset through the live stock Web UI and rejects anything except MF.
+    Unlike the legacy generic ask_credentials model gate, it does not encode
+    AN7581 as the only accepted stock-install family and it still asks for the
+    Nokia IP before touching the device.
+    """
+    access = pb._install_access(pb.MF_INSTALL_PROFILE)
     if getattr(access, "family", "") != "mf":
         access.close_web(announce=False)
-        raise RuntimeError("proven stock backend returned a non-MF family")
+        raise RuntimeError("MF installer requires positively identified MF stock")
     return access
 
 
@@ -295,10 +332,7 @@ def install_from_openwrt(*, host: str, unattended: bool = False, recovery_after:
 
 
 def install_from_stock(*, host: str, unattended: bool = False, skip_full_backup: bool = False, recovery_after: bool = False) -> int:
-    access = _open_stock_access_auto(host) if unattended else pb.ask_credentials(require_model_gate=True, offer_interactive_plain_retry=True)
-    if getattr(access, "family", "") != "mf":
-        access.close_web(announce=False)
-        raise RuntimeError("MF installer requires positively identified MF stock")
+    access = _open_stock_access_auto(host) if unattended else _open_stock_access_interactive()
     bl33_path = require_bl33(); bl33 = bl33_path.read_bytes()
     stamp = _stamp(); root = _root(); work = root / "work"
     private = work / "private" / "mf-runtime-install"; backups = work / "backups"; results = work / "results"
