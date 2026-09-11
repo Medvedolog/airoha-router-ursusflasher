@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-# Importing this layer fixes the legacy MD-only fixed-RI branch for MF stock
-# backups. It is family-gated and does not change MD behavior.
+# Compatibility layers are family-gated: they restore the proven MF fixed-RI
+# identity path and route MF UART RAM recovery to the current TEST62 payloads.
 import mf_backup_compat  # noqa: F401
+import mf_uart_test62_compat  # noqa: F401
 import ui_terms as terms
 
 
