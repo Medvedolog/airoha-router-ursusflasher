@@ -6,6 +6,15 @@ import time
 
 import one_key_multi as base
 
+# Compatibility surface expected by expert.py/expert_multi.py when this guarded
+# ONE-KEY module is rebound as base.one_key. Keep the wrapper thin: helpers stay
+# owned by one_key_multi and only main() is replaced below.
+choose_language = base.choose_language
+tr = base.tr
+say = base.say
+stage = base.stage
+probe_http_identity = base.probe_http_identity
+
 
 def mf_runtime_mode(st: dict) -> str:
     """Classify MF UrsusBoot by explicit write capability, never by version alone."""
