@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+# Importing this layer fixes the legacy MD-only fixed-RI branch for MF stock
+# backups. It is family-gated and does not change MD behavior.
+import mf_backup_compat  # noqa: F401
 import ui_terms as terms
 
 
