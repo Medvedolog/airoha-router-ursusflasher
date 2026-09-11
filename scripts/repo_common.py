@@ -12,13 +12,14 @@ RELEASE_PAYLOADS = (
     # MD / AN7581 runtime + emergency line
     'payloads/md/ursusboot/openwrt-6.18.44-mtd-rw.ko',
     'payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin',
-    'payloads/md/ursusboot/stock_mtd0_reference.bin',
+    'payloads/md/stock/nokia-xg-040g-md-stock-mtd0.bin',
     'payloads/md/ursusboot/ursus-mtd-raw',
     'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-bl2.bin',
     'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-ram-installer.fip',
     'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-update.fip',
     'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip',
     # MF / AN7583 current runtime + recovery + STOCK->UBI BL2
+    'payloads/mf/stock/nokia-xg-040g-mf-stock-mtd0.bin',
     'payloads/mf/ursusboot/u-boot.runtime.lzma',
     'payloads/mf/recovery/ursusboot-mf-0.1.0-TEST61-uart-preloader.bin',
     'payloads/mf/recovery/ursusboot-mf-0.1.0-TEST61-ram.fip',
