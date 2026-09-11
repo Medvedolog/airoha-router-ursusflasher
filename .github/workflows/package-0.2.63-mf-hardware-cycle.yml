@@ -58,6 +58,17 @@ jobs:
           JOBS: '2'
         run: bash ursusboot/scripts/build_mf_runtime.sh
 
+      - name: Retain MF runtime for audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: mf-runtime-preassert-${{ github.run_id }}
+          path: |
+            work/mf-runtime/out/u-boot.runtime.lzma
+            work/mf-runtime/out/MF-RUNTIME-BUILD-INFO.txt
+            work/mf-runtime/out/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 2
+
       - name: Prove MF runtime binary bindings
         run: |
           python3 - <<'PY'
@@ -66,17 +77,18 @@ jobs:
 
           p = Path('work/mf-runtime/out/u-boot.runtime.lzma')
           raw = lzma.decompress(p.read_bytes(), format=lzma.FORMAT_ALONE)
-          md_pre = bytes.fromhex('6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808')
-          mf_pre = bytes.fromhex('778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e')
-          md_bl2 = bytes.fromhex('6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d')
-          mf_bl2 = bytes.fromhex('c655479c4d14b4f6d1a7a5eb8de80bfb204b3cdf46c9e48a5c6f3aea22d98131')
-          assert mf_pre in raw, 'MF preloader comparator digest missing'
-          assert mf_bl2 in raw, 'MF BL2 comparator digest missing'
-          assert md_pre not in raw, 'MD preloader comparator digest leaked into MF runtime'
-          assert md_bl2 not in raw, 'MD BL2 comparator digest leaked into MF runtime'
-          assert b'HDR3' in raw, 'MF HDR3 StockBridge marker missing'
-          assert b'HDR2' not in raw, 'MD HDR2 StockBridge marker leaked into MF runtime'
-          assert b'Nokia XG-040G-MF' in raw
+          checks = {
+              'mf_preloader_digest': bytes.fromhex('778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e') in raw,
+              'mf_bl2_digest': bytes.fromhex('c655479c4d14b4f6d1a7a5eb8de80bfb204b3cdf46c9e48a5c6f3aea22d98131') in raw,
+              'md_preloader_absent': bytes.fromhex('6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808') not in raw,
+              'md_bl2_absent': bytes.fromhex('6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d') not in raw,
+              'hdr3': b'HDR3' in raw,
+              'hdr2_absent': b'HDR2' not in raw,
+              'mf_identity': b'Nokia XG-040G-MF' in raw,
+          }
+          for k,v in checks.items(): print(f'MF_RUNTIME_CHECK {k}={int(v)}')
+          missing=[k for k,v in checks.items() if not v]
+          if missing: raise SystemExit('MF_RUNTIME_BINARY_BINDINGS_FAIL ' + ','.join(missing))
           print('MF_RUNTIME_BINARY_BINDINGS=PASS bytes=' + str(len(raw)))
           PY
 
@@ -92,7 +104,7 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import hashlib, json, os, shutil, zipfile
+          import hashlib, os, shutil, zipfile
 
           def sha256(p: Path) -> str:
               h=hashlib.sha256()
@@ -137,9 +149,6 @@ jobs:
           for name in ('START_UART_RESTORE.cmd','START_UART_RESTORE.sh'):
               (root/name).unlink(missing_ok=True)
 
-          # The only hardware-byte exception to the audited 0.2.62 base is the
-          # MF persistent BL33 runtime rebuilt from current audited source. MD
-          # and every other firmware/payload remain byte-for-byte frozen.
           runtime_rel='data/payloads/mf/ursusboot/u-boot.runtime.lzma'
           runtime_src=Path('work/mf-runtime/out/u-boot.runtime.lzma')
           runtime_dst=root/runtime_rel
@@ -177,14 +186,15 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import hashlib, lzma, zipfile
+          import lzma, zipfile
           zpath=Path('dist/UrsusFlasher-0.2.63.zip')
           with zipfile.ZipFile(zpath) as z:
               r='UrsusFlasher-0.2.63/'
               one=z.read(r+'data/one_key_multi.py').decode()
+              net=z.read(r+'data/network_guidance.py').decode()
               assert 'choose_stock_ip()' in one
-              assert 'не менее 20 секунд' in one
               assert 'unattended=(route == "stock")' in one
+              assert 'не менее 20 секунд' in net
               packed=z.read(r+'data/payloads/mf/ursusboot/u-boot.runtime.lzma')
               raw=lzma.decompress(packed,format=lzma.FORMAT_ALONE)
               assert bytes.fromhex('778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e') in raw
