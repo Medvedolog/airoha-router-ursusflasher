@@ -121,13 +121,11 @@
       "write_capable": true,
       "backend": "AUTO_CUSTOM_OPENWRT"
     },
-    "update_bootloader": {
+    "restore_factory_bootarea": {
       "number": 4,
       "implemented": true,
       "write_capable": true,
-      "backend": "EXPLICIT_OPERATOR_SELECTED_URSUSBOOT_UPDATE_ONLY; NEVER_CALLED_AUTOMATICALLY_FROM_ONEKEY",
-      "visible": false,
-      "alias_of": 2
+      "backend": "UART_BOOTAREA_FACTORY_RESTORE"
     },
     "recover_bootloader": {
       "number": 5,
