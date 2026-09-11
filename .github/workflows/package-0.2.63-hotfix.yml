@@ -249,7 +249,7 @@ jobs:
           assert 'Восстановить заводской загрузчик Nokia' in rendered
           assert 'Восстановить загрузчик через USB-UART' in rendered
           assert 'ЕСЛИ РОУТЕР НЕ ЗАГРУЖАЕТСЯ' in rendered.upper()
-          assert rendered.count('Доступно из установленной OpenWrt или UrsusBoot Recovery') == 1
+          assert rendered.lower().count('доступно из установленной openwrt или ursusboot recovery') == 1
 
           expert_source = (data_dir / 'expert_multi.py').read_text(encoding='utf-8')
           item4_block = expert_source.split('elif number == 4:', 1)[1].split('elif number == 5:', 1)[0]
