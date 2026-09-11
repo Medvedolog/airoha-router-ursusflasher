@@ -7,7 +7,7 @@ import re
 import shutil
 from pathlib import Path
 
-VERSION = "0.1.0-TEST61"
+VERSION = "0.1.0-TEST62"
 MD_PRELOADER_SHA = "6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808"
 MF_PRELOADER_SHA = "778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e"
 MD_BL2_SHA = "6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d"
@@ -53,7 +53,6 @@ def _byte_array(hexstr: str) -> str:
 
 
 def _replace_digest_bytes(text: str, old_hex: str, new_hex: str) -> tuple[str, int]:
-    """Replace a C 32-byte digest even when the source wraps it across lines."""
     old = ["0x" + old_hex[i:i + 2] for i in range(0, len(old_hex), 2)]
     new = _byte_array(new_hex)
     pattern = r"\s*,\s*".join(re.escape(item) for item in old)
@@ -82,14 +81,56 @@ def _restore_file(root: Path, pristine: Path, rel: str) -> Path:
     return dst
 
 
+def _patch_mf_stockbridge(text: str) -> str:
+    hdr2_count = text.count("HDR2")
+    if hdr2_count < 1:
+        raise SystemExit("MF StockBridge HDR2 anchor missing")
+    text = text.replace("HDR2", "HDR3")
+
+    # Nokia tcboot on the real MF supplies all six SerDes arguments. The stock
+    # environment does not necessarily contain pon/ethernet/usb1, so treating
+    # those three as optional passthrough produced a vendor-kernel NULL deref in
+    # ECNT_SERDES_CFG_PROBE. Make the proven MF board contract explicit.
+    old_passthrough = '"serdes_pon", "serdes_ethernet", "serdes_usb1", "board_args",'
+    if old_passthrough not in text:
+        raise SystemExit("MF StockBridge SerDes passthrough anchor missing")
+    text = text.replace(old_passthrough, '"board_args",', 1)
+
+    old_args = '''if (append_arg(out, outsz, "serdes_wifi1", "05") ||
+        append_arg(out, outsz, "serdes_wifi2", "05") ||
+        append_arg(out, outsz, "serdes_usb2", "02"))'''
+    new_args = '''if (append_arg(out, outsz, "serdes_pon", "00") ||
+        append_arg(out, outsz, "serdes_ethernet", "12") ||
+        append_arg(out, outsz, "serdes_wifi1", "05") ||
+        append_arg(out, outsz, "serdes_wifi2", "05") ||
+        append_arg(out, outsz, "serdes_usb1", "00") ||
+        append_arg(out, outsz, "serdes_usb2", "02"))'''
+    if old_args not in text:
+        raise SystemExit("MF StockBridge tcboot SerDes argument anchor missing")
+    text = text.replace(old_args, new_args, 1)
+
+    old_marker = 'URSUS_STOCKBOOT_TCBOOT_MF_ARGS wifi1=05 wifi2=05 usb2=02'
+    new_marker = 'URSUS_STOCKBOOT_TCBOOT_MF_ARGS pon=00 ethernet=12 wifi1=05 wifi2=05 usb1=00 usb2=02'
+    if old_marker not in text:
+        raise SystemExit("MF StockBridge tcboot marker anchor missing")
+    text = text.replace(old_marker, new_marker, 1)
+    print(f"MF_STOCKBRIDGE_FORMAT from=HDR2 to=HDR3 replacements={hdr2_count}")
+    print("MF_STOCKBRIDGE_SERDES pon=00 ethernet=12 wifi1=05 wifi2=05 usb1=00 usb2=02")
+    return text
+
+
 def transform(root: Path, pristine: Path) -> None:
     root = root.resolve()
     pristine = pristine.resolve()
 
+    # Restore all persistent writer entrypoints from TEST61 before applying the
+    # MF board specialization. In particular, do not inherit the RAM-only
+    # FIP_UPDATE rejection into persistent/RAM-repair TEST62.
     restored = (
         "cmd/ursusweb.c",
         "cmd/ursusubi.c",
         "cmd/ursusdispatch.c",
+        "cmd/ursusupdate.c",
         "cmd/Makefile",
     )
     for rel in restored:
@@ -102,21 +143,11 @@ def transform(root: Path, pristine: Path) -> None:
         text, counts = _patch_mf_transition_constants(text)
         transition_counts[rel] = counts
         if rel == "cmd/ursusstock.c":
-            # Hardware proved that both MF stock banks begin with Airoha HDR3,
-            # while the frozen MD StockBridge expects HDR2. Keep MD byte-for-byte
-            # untouched and board-specialize only the generated MF runtime source.
-            hdr2_count = text.count("HDR2")
-            if hdr2_count < 1:
-                raise SystemExit("MF StockBridge HDR2 anchor missing")
-            text = text.replace("HDR2", "HDR3")
-            print(f"MF_STOCKBRIDGE_FORMAT from=HDR2 to=HDR3 replacements={hdr2_count}")
+            text = _patch_mf_stockbridge(text)
         path.write_text(text, encoding="utf-8")
         if rel in ("cmd/ursusweb.c", "cmd/ursusubi.c"):
             print(f"MF_RUNTIME_CONSTANTS file={rel} " + " ".join(f"{k}={v}" for k, v in counts.items()))
 
-    # A stale textual hash is easy to catch, but the hardware failure showed
-    # that the binary comparator digest must be bound too. At least one of the
-    # Web/UBI sources must contain and replace each raw digest.
     for key in ("preloader_sha_bytes", "bl2_sha_bytes"):
         if sum(transition_counts[p][key] for p in ("cmd/ursusweb.c", "cmd/ursusubi.c")) < 1:
             raise SystemExit(f"MF transition raw digest anchor missing: {key}")
@@ -129,6 +160,10 @@ def transform(root: Path, pristine: Path) -> None:
     u = validator.replace_func(u, "ursus_fip_validate_buf", validator.VALIDATE_BUF)
     u = validator.replace_func(u, "ursus_fip_validate", validator.VALIDATE)
     u = u.replace("MF2_STOCK_FIP_VALIDATION_DISABLED", "NOKIA_XG040GMF_STOCK")
+    if "URSUS_MF2_READONLY_REJECT operation=FIP_UPDATE" in u:
+        raise SystemExit("MF FIP self-update read-only gate survived pristine restore")
+    if "URSUS_FIP_SELFUPDATE_ENABLED=1" not in u:
+        raise SystemExit("MF FIP self-update backend marker missing")
     update.write_text(u, encoding="utf-8")
 
     web = root / "cmd/ursusweb.c"
@@ -141,8 +176,6 @@ def transform(root: Path, pristine: Path) -> None:
         raise SystemExit("MF runtime status capability anchor missing")
     web.write_text(w, encoding="utf-8")
 
-    # MF WebFailsafe must expose the preloader picker for the actual status enum
-    # returned by TEST61 and must not tell MF users to select an MD preloader.
     ui_path = root / "include/ursusweb_ui.inc"
     ui = _rewrite_identity(ui_path.read_text(encoding="utf-8"))
     ui = ui.replace("openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-preloader.bin", "nokia-xg-040g-mf-an7583-production-preloader.bin")
@@ -171,8 +204,17 @@ def transform(root: Path, pristine: Path) -> None:
         raise SystemExit("MF RAM-only StockBridge gate survived runtime transform")
 
     stock_text = (root / "cmd/ursusstock.c").read_text(encoding="utf-8")
-    if "HDR3" not in stock_text or "HDR2" in stock_text:
-        raise SystemExit("MF runtime StockBridge is not HDR3-specialized")
+    for marker in (
+        "HDR3",
+        'append_arg(out, outsz, "serdes_pon", "00")',
+        'append_arg(out, outsz, "serdes_ethernet", "12")',
+        'append_arg(out, outsz, "serdes_usb1", "00")',
+        "URSUS_STOCKBOOT_TCBOOT_MF_ARGS pon=00 ethernet=12 wifi1=05 wifi2=05 usb1=00 usb2=02",
+    ):
+        if marker not in stock_text:
+            raise SystemExit(f"MF runtime StockBridge marker missing: {marker}")
+    if "HDR2" in stock_text:
+        raise SystemExit("MF runtime StockBridge still contains HDR2")
 
     web_text = web.read_text(encoding="utf-8")
     ubi_text = (root / "cmd/ursusubi.c").read_text(encoding="utf-8")
@@ -214,7 +256,7 @@ def transform(root: Path, pristine: Path) -> None:
     if leaks:
         raise SystemExit("MF runtime board identity leak: " + ", ".join(leaks))
 
-    print("MF_RUNTIME_ENABLE=PASS writers=ubi/install/reset stockbridge=hdr3 fip-selfupdate=host-only validator=mf-general")
+    print("MF_RUNTIME_ENABLE=PASS writers=ubi/install/reset/fip stockbridge=hdr3+serdes fip-selfupdate=enabled validator=mf-general")
 
 
 def main() -> int:
