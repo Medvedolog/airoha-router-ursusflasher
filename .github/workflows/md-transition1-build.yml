@@ -1,0 +1,22 @@
+name: MD TRANSITION1 build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build MD TRANSITION1
+        run: bash ursusboot/scripts/build_md_transition1.sh
+      - name: Upload engineering artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-md-transition1-${{ github.sha }}
+          path: work/md-transition1/out/
+          if-no-files-found: error
+          retention-days: 14
