@@ -12,6 +12,7 @@ on:
       - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
       - 'toolchains/**'
       - 'ursusflasher/src/stock_ab_transition.py'
+      - 'ursusflasher/src/stock_fit_wrapper.py'
       - 'START_MD_TRANSITION.cmd'
       - 'START_MD_TRANSITION.sh'
       - 'scripts/repo_common.py'
@@ -27,12 +28,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build MD TRANSITION1
+      - name: Build MD TRANSITION1 stock Linux handoff
         run: bash ursusboot/scripts/build_md_transition1.sh
       - name: Upload TRANSITION1 engineering artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ursusboot-md-transition1-${{ github.sha }}
+          name: ursusboot-md-transition1-stockfit-${{ github.sha }}
           path: work/md-transition1/out/
           if-no-files-found: error
           retention-days: 14
@@ -46,19 +47,19 @@ jobs:
             --name ursusflasher-0.2.62-md-mf-minimal-hwtest \
             --dir audited-base
           test -f audited-base/UrsusFlasher-0.2.62.zip
-      - name: Build full UrsusFlasher transition test rollup
+      - name: Build full UrsusFlasher stock-FIT transition test rollup
         run: |
           python3 scripts/build_transition_test_rollup.py \
-            --uimage work/md-transition1/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.uimg \
+            --linux-image work/md-transition1/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg \
             --base-zip audited-base/UrsusFlasher-0.2.62.zip \
             --base-run-id 34589613011 \
             --out-dir dist-transition \
             --source-sha "${GITHUB_SHA}" \
             --run-id "${GITHUB_RUN_ID}"
-      - name: Upload full UrsusFlasher MD A/B test rollup
+      - name: Upload full UrsusFlasher MD A/B stock-FIT test rollup
         uses: actions/upload-artifact@v4
         with:
-          name: ursusflasher-md-ab-transition1-public-test-${{ github.sha }}
+          name: ursusflasher-md-ab-transition1-stockfit-public-test-${{ github.sha }}
           path: dist-transition/
           if-no-files-found: error
           retention-days: 14
