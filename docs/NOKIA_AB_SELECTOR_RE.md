@@ -142,3 +142,29 @@ The physical selector writer remains disabled until:
 5. UART is used only as a passive logger for first hardware acceptance.
 
 `mtd0` and stock `bootcmd` remain untouched in this A/B primary path.
+
+## ONE-CLICK architecture rule
+
+The future public `START_ONECLICK` is a common orchestrator, not a replacement of the existing UrsusBoot installation path.
+
+After hardware acceptance of the Vanilla transition path, ONE-CLICK shall expose an explicit target choice:
+
+```text
+START_ONECLICK
+  -> detect device + common preflight
+  -> choose installation target
+       -> VANILLA
+            -> stock A/B transition backend
+            -> temporary TRANSITION UrsusBoot
+            -> canonical official OpenWrt boot chain
+            -> no persistent UrsusBoot in the final state
+       -> URSUSBOOT
+            -> existing proven persistent UrsusBoot backend
+            -> existing install/update/recovery semantics
+```
+
+The two installation backends remain independent. The Vanilla transition implementation must not replace, wrap, or silently alter the proven persistent UrsusBoot backend.
+
+`START_EXPERT` follows the same additive rule: Vanilla installation and UrsusBoot installation/update are separate write-capable actions. Existing recovery, backup, custom firmware and bootloader actions keep their current backends unless changed for an independently justified reason.
+
+During pre-Gate-C hardware work, `START_MD_TRANSITION` remains an explicit engineering shortcut to the Vanilla transition backend. It is not a substitute for ONE-CLICK and it must not change ONE-CLICK behaviour before hardware acceptance.
