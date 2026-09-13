@@ -17,7 +17,7 @@ _REPO_ROOT = HERE.parent.parent
 REPO_MODE = (_REPO_ROOT / "payloads").is_dir() and (_REPO_ROOT / "config").is_dir()
 ROOT = _REPO_ROOT if REPO_MODE else HERE.parent
 PAYLOAD_ROOT = (ROOT / "payloads" / "md" / "transition") if REPO_MODE else (ROOT / "data" / "payloads" / "md" / "transition")
-PAYLOAD = PAYLOAD_ROOT / "ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.uimg"
+PAYLOAD = PAYLOAD_ROOT / "ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg"
 PAYLOAD_META = PAYLOAD_ROOT / "TRANSITION1.json"
 WORK = ROOT / "work" / "stock-ab-transition"
 
@@ -25,12 +25,12 @@ sys.path.insert(0, str(HERE))
 import proven_backend as pb  # noqa: E402
 import console_ui as ui  # noqa: E402
 import ursusboot_install as ubi  # noqa: E402
+import stock_fit_wrapper as sfw  # noqa: E402
 
 SLOT_SIZE = 0x02880000
 FLAG_SIZE = 0x00040000
 ERASE_SIZE = 0x00020000
 NT_FW_UUID = bytes.fromhex("d6d0eea7fcead54b97829934f234b6e4")
-UIMAGE_MAGIC = 0x27051956
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -56,74 +56,19 @@ def _load_payload() -> tuple[bytes, dict]:
         raise RuntimeError(f"TRANSITION1 payload SHA256 mismatch: {got} != {expected or 'missing'}")
     if str(meta.get("mode")) != "TRANSITION" or str(meta.get("board")) != "MD":
         raise RuntimeError("TRANSITION1 metadata does not identify MD TRANSITION mode")
-    _validate_uimage(data)
+    if str(meta.get("stock_inner_format")) != "ARM64_LINUX_IMAGE_HANDOFF":
+        raise RuntimeError("TRANSITION1 metadata does not identify stock-compatible Linux Image handoff")
+    sfw.validate_linux_image(data)
     return data, meta
 
 
-def _validate_uimage(data: bytes) -> dict:
-    import binascii
-    if len(data) < 64:
-        raise RuntimeError("TRANSITION1 legacy uImage is too short")
-    magic, hcrc, ts, size, load, entry, dcrc, os_id, arch, image_type, comp, name = struct.unpack(
-        ">7I4B32s", data[:64]
+def build_transition_slot(stock_slot: bytes, linux_image: bytes) -> tuple[bytes, dict]:
+    return sfw.build_transition_slot(
+        stock_slot,
+        linux_image,
+        slot_size=SLOT_SIZE,
+        nt_fw_uuid=NT_FW_UUID,
     )
-    if magic != UIMAGE_MAGIC or size != len(data) - 64:
-        raise RuntimeError("TRANSITION1 legacy uImage header is invalid")
-    hdr = bytearray(data[:64]); struct.pack_into(">I", hdr, 4, 0)
-    if (binascii.crc32(hdr) & 0xFFFFFFFF) != hcrc:
-        raise RuntimeError("TRANSITION1 legacy uImage header CRC mismatch")
-    if (binascii.crc32(data[64:]) & 0xFFFFFFFF) != dcrc:
-        raise RuntimeError("TRANSITION1 legacy uImage data CRC mismatch")
-    if (os_id, arch, image_type, comp) != (17, 22, 1, 0):
-        raise RuntimeError(f"TRANSITION1 legacy uImage type mismatch: {(os_id, arch, image_type, comp)}")
-    if load != 0x81E00000 or entry != 0x81E00000:
-        raise RuntimeError(f"TRANSITION1 load/entry mismatch: {load:#x}/{entry:#x}")
-    return {"size": len(data), "load": load, "entry": entry, "name": name.rstrip(b"\0").decode("ascii", "replace")}
-
-
-def _fip_nt_fw(slot: bytes) -> tuple[int, int]:
-    if len(slot) != SLOT_SIZE:
-        raise RuntimeError(f"nsb_slave size mismatch: {len(slot):#x} != {SLOT_SIZE:#x}")
-    if slot[:8] != bytes.fromhex("010064aa78563412"):
-        raise RuntimeError("nsb_slave has no stock Airoha FIP header")
-    pos = 16
-    while pos + 40 <= len(slot):
-        uuid = slot[pos:pos + 16]
-        if uuid == b"\0" * 16:
-            break
-        off, size, _flags = struct.unpack_from("<QQQ", slot, pos + 16)
-        if uuid == NT_FW_UUID:
-            if off + size > len(slot) or size <= 0x100:
-                raise RuntimeError("stock NT-FW range is invalid")
-            return int(off), int(size)
-        pos += 40
-    raise RuntimeError("stock nsb_slave has no Nokia NT-FW FIP entry")
-
-
-def build_transition_slot(stock_slot: bytes, uimage: bytes) -> tuple[bytes, dict]:
-    _validate_uimage(uimage)
-    nt_off, nt_size = _fip_nt_fw(stock_slot)
-    if stock_slot[nt_off:nt_off + 4] != b"HDR2":
-        raise RuntimeError(f"stock NT-FW does not start with HDR2 at {nt_off:#x}")
-    image_off = nt_off + 0x100
-    max_payload = nt_size - 0x100
-    if len(uimage) > max_payload:
-        raise RuntimeError(f"TRANSITION1 payload does not fit stock NT-FW: {len(uimage)} > {max_payload}")
-    out = bytearray(stock_slot)
-    out[image_off:image_off + len(uimage)] = uimage
-    # Keep the stock FIP TOC and HDR2 byte-for-byte.  tcboot still sees the exact
-    # stock outer container; bootm sees IH_MAGIC at the normal inner image offset.
-    if out[:image_off] != stock_slot[:image_off]:
-        raise RuntimeError("stock FIP/HDR2 preservation invariant failed")
-    return bytes(out), {
-        "slot_size": len(out),
-        "nt_fw_offset": nt_off,
-        "nt_fw_size": nt_size,
-        "inner_image_offset": image_off,
-        "transition_uimage_size": len(uimage),
-        "stock_sha256": sha256_bytes(stock_slot),
-        "candidate_sha256": sha256_bytes(out),
-    }
 
 
 def parse_flag(blob: bytes) -> dict:
@@ -143,8 +88,6 @@ def build_activation_flag(flag: bytes, target: int) -> tuple[bytes, dict]:
         raise RuntimeError(f"requested target {target} is already curimg")
     out = bytearray(flag)
     struct.pack_into("<I", out, 0, target)
-    # Stock libupgrade swdl_active() changes active only.  curimg/startok/count
-    # remain untouched; tcboot owns commit/rollback and flagback handling.
     if out[4:] != flag[4:]:
         raise RuntimeError("activation flag changed fields other than active")
     return bytes(out), {"before": state, "after": parse_flag(bytes(out))}
@@ -223,7 +166,7 @@ def _remote_partition_sha(telnet: pb.Telnet, dev: str, timeout: int = 300) -> st
 
 def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = False, reboot: bool = True) -> int:
     ui.enable()
-    uimage, payload_meta = _load_payload()
+    linux_image, payload_meta = _load_payload()
     WORK.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     run_dir = WORK / stamp
@@ -243,7 +186,8 @@ def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = 
 
         flag = flag_path.read_bytes()
         flagback = flagback_path.read_bytes()
-        fs = parse_flag(flag); fbs = parse_flag(flagback)
+        fs = parse_flag(flag)
+        fbs = parse_flag(flagback)
         if fs["curimg"] != 0:
             raise RuntimeError(f"hardware-test gate requires current MAIN/curimg=0, got {fs}")
         if fs["active"] != 0:
@@ -251,7 +195,7 @@ def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = 
         if fbs["curimg"] != fs["curimg"]:
             raise RuntimeError(f"flag/flagback curimg diverged: flag={fs} flagback={fbs}")
 
-        slot_candidate, slot_meta = build_transition_slot(slave_path.read_bytes(), uimage)
+        slot_candidate, slot_meta = build_transition_slot(slave_path.read_bytes(), linux_image)
         slot_candidate_path = run_dir / "mtd15_nsb_slave_transition1.bin"
         slot_candidate_path.write_bytes(slot_candidate)
         flag_candidate, flag_meta = build_activation_flag(flag, 1)
@@ -269,7 +213,8 @@ def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = 
         (run_dir / "TRANSITION_PLAN.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
 
         ui.status("READY", f"SLAVE candidate prepared: SHA256 {slot_meta['candidate_sha256']}")
-        ui.status("READY", f"Selector request: active 0 -> 1; curimg/startok/count preserved")
+        ui.status("READY", "Stock FIP/HDR2/FIT topology preserved; only kernel data/compression/hash changed.")
+        ui.status("READY", "Selector request: active 0 -> 1; curimg/startok/count preserved")
         if dry_run:
             ui.status("READY", "Dry-run complete; NAND was not modified.")
             return 0
@@ -306,11 +251,15 @@ def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = 
         return 0
     finally:
         if telnet:
-            try: telnet.close()
-            except Exception: pass
+            try:
+                telnet.close()
+            except Exception:
+                pass
         if access:
-            try: access.close_web(announce=False)
-            except Exception: pass
+            try:
+                access.close_web(announce=False)
+            except Exception:
+                pass
 
 
 def main(argv: list[str] | None = None) -> int:
