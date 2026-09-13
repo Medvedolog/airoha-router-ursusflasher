@@ -102,11 +102,13 @@ def export_tree(dest: Path) -> Path:
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
 
-    # UART boot-area restore is exposed through EXPERT item 4. Do not duplicate
-    # that operation with standalone root launchers.
+    # UART boot-area restore is exposed through EXPERT item 4. MD stock A/B
+    # transition is exported as a separate hardware-test launcher until Gate C
+    # is accepted, while sharing the same UrsusFlasher runtime/backend tree.
     for name in (
         'START_ONECLICK.cmd', 'START_ONECLICK.sh',
         'START_EXPERT.cmd', 'START_EXPERT.sh',
+        'START_MD_TRANSITION.cmd', 'START_MD_TRANSITION.sh',
         'VERSION',
     ):
         shutil.copy2(ROOT / name, dest / name)
