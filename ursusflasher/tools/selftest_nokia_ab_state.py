@@ -13,33 +13,56 @@ SPEC.loader.exec_module(mod)
 
 
 def blob(active: int, curimg: int, startok: int, count: int, size: int = 0x40000) -> bytes:
-    return struct.pack("<4I", active, curimg, startok, count) + b"\xff" * (size - 16)
+    return struct.pack("<5I", active, curimg, startok, count, 0xFFFFFFFF) + b"\xff" * (size - 20)
 
 
 # Hardware-observed MD post-success state supplied during Vanilla A/B NIOKR.
-flag = mod.parse_blob(blob(0, 0, 1, 15), "flag")
+flag_blob = blob(0, 0, 1, 15)
+flag = mod.parse_blob(flag_blob, "flag")
 flagback = mod.parse_blob(blob(0, 0, 0, 15), "flagback")
 r = mod.reconcile(flag, flagback)
-assert flag["slot"] == "MAIN"
+assert flag["current_slot"] == "MAIN"
+assert flag["requested_slot"] == "MAIN"
+assert flag["switch_pending"] is False
 assert flag["tail_erased_ff"] is True
 assert r["confidence"] == "HIGH_SELECTOR_MATCH_STARTOK_DIVERGED"
-assert r["resolved_slot"] == "MAIN"
+assert r["resolved_current_slot"] == "MAIN"
 assert r["writer_safe"] is False
 
-# Matching selector state is accepted read-only, but writer remains disabled.
-flag2 = mod.parse_blob(blob(0, 1, 0, 7), "flag")
-flagback2 = mod.parse_blob(blob(0, 1, 0, 7), "flagback")
-r2 = mod.reconcile(flag2, flagback2)
-assert r2["confidence"] == "HIGH_MATCH"
-assert r2["resolved_slot"] == "SLAVE"
-assert r2["writer_safe"] is False
+# Offline stock-compatible request to boot SLAVE changes active only.
+p = mod.plan_activation(flag_blob, 1)
+assert p["target_slot"] == "SLAVE"
+assert p["write_required"] is True
+assert p["changed_fields"] == ["active"]
+assert p["old"] == {
+    "active": 0,
+    "curimg": 0,
+    "startok": 1,
+    "count": 15,
+    "reserved": 0xFFFFFFFF,
+}
+assert p["new"] == {
+    "active": 1,
+    "curimg": 0,
+    "startok": 1,
+    "count": 15,
+    "reserved": 0xFFFFFFFF,
+}
+assert bytes.fromhex(p["payload_hex"]) == struct.pack("<5I", 1, 0, 1, 15, 0xFFFFFFFF)
+assert p["flagback_write"] is False
+assert p["device_writer_enabled"] is False
 
-# Selector disagreement must never resolve to a slot.
+# Requesting the already-current image is a no-op, matching stock swdl_active().
+p_same = mod.plan_activation(flag_blob, 0)
+assert p_same["write_required"] is False
+assert p_same["changed_fields"] == []
+
+# Selector disagreement must never resolve to a current slot.
 flag3 = mod.parse_blob(blob(0, 0, 0, 7), "flag")
-flagback3 = mod.parse_blob(blob(0, 1, 0, 7), "flagback")
+flagback3 = mod.parse_blob(blob(1, 1, 0, 7), "flagback")
 r3 = mod.reconcile(flag3, flagback3)
 assert r3["confidence"] == "LOW_SELECTOR_DIVERGED"
-assert r3["resolved_slot"] == "UNKNOWN"
+assert r3["resolved_current_slot"] == "UNKNOWN"
 assert r3["writer_safe"] is False
 
 print("selftest_nokia_ab_state: PASS")
