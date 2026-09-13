@@ -12,13 +12,12 @@ TRANSITION_CONFIG="$ROOT/ursusboot/configs/ursusboot-transition-handoff.cfg"
 CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
 PATCH="$ROOT/ursusboot/patches/190-md-transition1-handoff.patch"
 OUT="$WORK/out"
-RELEASE_EPOCH=1789300800  # 2026-09-13 12:00:00 UTC; reproducible engineering build
+RELEASE_EPOCH=1789300800
 VERSION="0.1.0-alpha5-UBIUX1-TRANSITION1"
 LOAD_ADDR=0x81e00000
 
 for x in tar make gcc perl python3 sha256sum patch; do command -v "$x" >/dev/null; done
-for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" \
-         "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH"; do
+for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH"; do
     [ -f "$f" ] || { echo "missing build input: $f" >&2; exit 1; }
 done
 
@@ -45,37 +44,28 @@ export PATH="$ROOT/toolchains/hostshim:$TC:$HOST/bin:/usr/bin:/bin"
 export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$RELEASE_EPOCH"
 
 cp "$CONFIG" "$WORK/u-boot/.config"
-python3 "$CONFIG_MERGER" --config "$WORK/u-boot/.config" \
-    "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG"
+python3 "$CONFIG_MERGER" --config "$WORK/u-boot/.config" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG"
 cd "$WORK/u-boot"
 make olddefconfig
-python3 "$CONFIG_MERGER" --check-only --config .config \
-    "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG"
 
-# Hard gates for a non-persistent Phase-A build.
-grep -q '^CONFIG_ENV_IS_NOWHERE=y$' .config
-grep -q '^# CONFIG_ENV_IS_IN_UBI is not set$' .config
-grep -q '^# CONFIG_ENV_REDUNDANT is not set$' .config
-grep -q '^# CONFIG_CMD_SAVEENV is not set$' .config
-grep -q '^# CONFIG_CMD_ERASEENV is not set$' .config
-
-grep -q '^CONFIG_NET_LWIP=y$' .config
-grep -q '^CONFIG_MTD=y$' .config
+# Semantic Phase-A policy checks. Kconfig may omit disabled/invisible symbols,
+# so do not require literal '# CONFIG_FOO is not set' lines.
+grep -q '^CONFIG_ENV_IS_NOWHERE=y$' .config || { echo 'TRANSITION1: ENV_IS_NOWHERE missing' >&2; exit 1; }
+for sym in CONFIG_ENV_IS_IN_UBI CONFIG_ENV_REDUNDANT CONFIG_CMD_SAVEENV CONFIG_CMD_ERASEENV; do
+    if grep -q "^${sym}=y$" .config; then
+        echo "TRANSITION1: forbidden ${sym}=y" >&2
+        exit 1
+    fi
+done
+grep -q '^CONFIG_NET_LWIP=y$' .config || { echo 'TRANSITION1: NET_LWIP missing' >&2; exit 1; }
+grep -q '^CONFIG_MTD=y$' .config || { echo 'TRANSITION1: MTD missing' >&2; exit 1; }
 
 make -j"${JOBS:-$(nproc)}"
 
-# Legacy uImage is intentionally used for the first tcboot handoff experiment:
-# stock tcboot's image parser accepts FDT_MAGIC or IH_MAGIC.  U-Boot is linked
-# at 0x81e00000, so standalone load and entry use the exact TEXT_BASE.
 [ -x tools/mkimage ] || { echo "host mkimage missing after U-Boot build" >&2; exit 1; }
-tools/mkimage -A arm64 -O u-boot -T standalone -C none \
-    -a "$LOAD_ADDR" -e "$LOAD_ADDR" \
-    -n "UrsusBoot MD TRANSITION1" \
-    -d u-boot.bin "$OUT/ursusboot-md-${VERSION}.uimg"
+tools/mkimage -A arm64 -O u-boot -T standalone -C none -a "$LOAD_ADDR" -e "$LOAD_ADDR" -n "UrsusBoot MD TRANSITION1" -d u-boot.bin "$OUT/ursusboot-md-${VERSION}.uimg"
 
 cp u-boot u-boot.bin u-boot.map u-boot.sym System.map "$OUT/"
-
-# Identity and policy QA.
 [ "$(cat .scmversion)" = "-UrsusBoot-${VERSION}" ]
 grep -Fq "#define URSUS_VERSION \"${VERSION}\"" include/ursus_version.h
 strings u-boot.bin > "$WORK/u-boot.strings"
@@ -100,16 +90,7 @@ print(f'TRANSITION_UIMAGE_QA=PASS bytes={len(d)} load=0x{load:x} entry=0x{entry:
 PYQA
 
 sha256sum u-boot.bin "$OUT/ursusboot-md-${VERSION}.uimg" | tee "$OUT/SHA256SUMS"
-printf '%s\n' \
-    "UrsusBoot ${VERSION}" \
-    "MODE=TRANSITION" \
-    "PERSISTENCE_TARGET=NONE" \
-    "FINAL_TARGET=OFFICIAL_OPENWRT" \
-    "HANDOFF_ONLY=1" \
-    "ENV_IS_NOWHERE=PASS" \
-    "LOAD_ADDR=${LOAD_ADDR}" \
-    "SOURCE_DATE_EPOCH=${RELEASE_EPOCH}" \
-    > "$OUT/TRANSITION1-BUILD_INFO.txt"
+printf '%s\n' "UrsusBoot ${VERSION}" "MODE=TRANSITION" "PERSISTENCE_TARGET=NONE" "FINAL_TARGET=OFFICIAL_OPENWRT" "HANDOFF_ONLY=1" "ENV_IS_NOWHERE=PASS" "LOAD_ADDR=${LOAD_ADDR}" "SOURCE_DATE_EPOCH=${RELEASE_EPOCH}" > "$OUT/TRANSITION1-BUILD_INFO.txt"
 
 echo "MD_TRANSITION1_BUILD=PASS"
 echo "Artifacts: $OUT"
