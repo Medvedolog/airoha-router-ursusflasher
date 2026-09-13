@@ -11,7 +11,7 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from repo_common import ROOT, export_tree, sha256, write_manifest
+from repo_common import ROOT, sha256, write_manifest
 
 VERSION = "0.1.0-alpha5-UBIUX1-TRANSITION1"
 PAYLOAD_NAME = f"ursusboot-md-{VERSION}.uimg"
@@ -44,15 +44,50 @@ def zip_tree(tree: Path, zpath: Path) -> str:
     return hashlib.sha256(zpath.read_bytes()).hexdigest()
 
 
+def overlay_current_host(tree: Path) -> None:
+    """Overlay current host/runtime code while preserving audited hardware bytes."""
+    for name in (
+        "START_ONECLICK.cmd", "START_ONECLICK.sh",
+        "START_EXPERT.cmd", "START_EXPERT.sh",
+        "START_MD_TRANSITION.cmd", "START_MD_TRANSITION.sh",
+        "VERSION",
+    ):
+        shutil.copy2(ROOT / name, tree / name)
+    shutil.copy2(ROOT / "VERSION", tree / "data" / "VERSION")
+
+    src_root = ROOT / "ursusflasher" / "src"
+    current_top_py = set()
+    for src in sorted(src_root.rglob("*")):
+        if not src.is_file() or src.name.endswith((".pyc", ".pyo")) or "__pycache__" in src.parts:
+            continue
+        rel = src.relative_to(src_root)
+        dst = tree / "data" / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        if len(rel.parts) == 1 and rel.suffix == ".py":
+            current_top_py.add(rel.name)
+    for packed in (tree / "data").glob("*.py"):
+        if packed.name not in current_top_py:
+            packed.unlink()
+
+    for name in ("UI_TERMS.json", "FIRMWARE_CAPABILITIES.json", "BOARD_PROFILES.json", "FIRMWARE_BUNDLES.json"):
+        shutil.copy2(ROOT / "config" / name, tree / "data" / name)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--uimage", type=Path, required=True)
+    ap.add_argument("--base-zip", type=Path, required=True,
+                    help="Audited full UrsusFlasher hardware-kit ZIP from GitHub Actions")
     ap.add_argument("--out-dir", type=Path, default=Path("dist-transition"))
     ap.add_argument("--source-sha", default=os.environ.get("GITHUB_SHA", "UNKNOWN"))
     ap.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", "UNKNOWN"))
+    ap.add_argument("--base-run-id", default="34589613011")
     args = ap.parse_args()
     if not args.uimage.is_file():
         raise SystemExit(f"missing TRANSITION uImage: {args.uimage}")
+    if not args.base_zip.is_file():
+        raise SystemExit(f"missing audited base ZIP: {args.base_zip}")
 
     out = args.out_dir
     out.mkdir(parents=True, exist_ok=True)
@@ -60,7 +95,25 @@ def main() -> None:
     name = f"UrsusFlasher-{package_version}-MD-AB-TRANSITION1-PUBLIC-TEST"
 
     with tempfile.TemporaryDirectory() as td:
-        tree = export_tree(Path(td) / name)
+        tdp = Path(td)
+        with zipfile.ZipFile(args.base_zip) as z:
+            z.extractall(tdp / "base")
+        roots = [p for p in (tdp / "base").iterdir() if p.is_dir()]
+        if len(roots) != 1:
+            raise SystemExit(f"audited base ZIP must contain one root directory, got: {roots}")
+        tree = tdp / name
+        roots[0].rename(tree)
+
+        # Freeze all pre-existing audited payload/fw bytes before overlay.
+        frozen = {}
+        for rel in ("data/payloads", "fw"):
+            base = tree / rel
+            for p in base.rglob("*"):
+                if p.is_file():
+                    frozen[p.relative_to(tree).as_posix()] = sha256(p)
+
+        overlay_current_host(tree)
+
         payload_dir = tree / "data" / "payloads" / "md" / "transition"
         payload_dir.mkdir(parents=True, exist_ok=True)
         dst = payload_dir / PAYLOAD_NAME
@@ -75,6 +128,8 @@ def main() -> None:
             "sha256": sha256(dst),
             "source_commit": args.source_sha,
             "github_actions_run_id": str(args.run_id),
+            "audited_base_actions_run_id": str(args.base_run_id),
+            "audited_base_zip_sha256": sha256(args.base_zip),
             "persistence_target": "NONE",
             "final_target": "OFFICIAL_OPENWRT",
             "hardware_acceptance": "PENDING",
@@ -82,21 +137,35 @@ def main() -> None:
             "selector_contract": "WRITE_INACTIVE_NSB_SLAVE_THEN_MTD8_ACTIVE_0_TO_1; DO_NOT_WRITE_FLAGBACK",
         }
         (payload_dir / "TRANSITION1.json").write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        (tree / "BUILD_COMMIT.txt").write_text(args.source_sha + "\n", encoding="ascii", newline="\n")
         (tree / "TRANSITION1_TEST.txt").write_text(
             "MD A/B TRANSITION1 hardware-test bundle.\n"
             "Run START_MD_TRANSITION.cmd (Windows) or START_MD_TRANSITION.sh (Linux/macOS).\n"
-            "This path preserves stock mtd0/tcboot, writes a device-derived nsb_slave candidate, verifies readback, then requests SLAVE by changing only mtd8.active.\n"
+            "This is the full UrsusFlasher hardware kit derived from the audited 0.2.62 Actions artifact.\n"
+            "All inherited hardware payload/fw bytes are frozen; the only new hardware payload is TRANSITION1.uimg.\n"
+            "The backend preserves stock mtd0/tcboot, writes a device-derived nsb_slave candidate, verifies readback, then requests SLAVE by changing only mtd8.active.\n"
             "mtd9/flagback is read-only. MAIN/nsb_master is not written.\n"
             "Hardware acceptance is PENDING. Keep UART connected for the first run.\n",
             encoding="utf-8", newline="\n",
         )
-        release_note = tree / "PUBLIC_TEST_RELEASE.txt"
-        if release_note.is_file():
-            release_note.write_text(release_note.read_text(encoding="utf-8") + "MD A/B TRANSITION1 is included as an explicit hardware-test launcher; it is not yet part of ONE-CLICK.\n", encoding="utf-8", newline="\n")
+
+        # The inherited hardware corpus must remain byte-identical. New transition
+        # payload lives at a new path and therefore is intentionally not in frozen.
+        for rel, expected in frozen.items():
+            p = tree / rel
+            if not p.is_file() or sha256(p) != expected:
+                raise AssertionError(f"audited hardware byte changed: {rel}")
+
+        # Canonical source parity for the integrated transition backend/launcher.
+        assert (tree / "data" / "stock_ab_transition.py").read_bytes() == (ROOT / "ursusflasher" / "src" / "stock_ab_transition.py").read_bytes()
+        assert (tree / "START_MD_TRANSITION.cmd").read_bytes() == (ROOT / "START_MD_TRANSITION.cmd").read_bytes()
+        assert (tree / "START_MD_TRANSITION.sh").read_bytes() == (ROOT / "START_MD_TRANSITION.sh").read_bytes()
+
         rebuild_payload_manifest(tree)
         zpath = out / f"{name}.zip"
         digest = zip_tree(tree, zpath)
         (out / f"{name}.zip.sha256.txt").write_text(f"{digest}  {zpath.name}\n", encoding="utf-8", newline="\n")
+        print(f"TRANSITION_ROLLUP_QA=PASS frozen_hardware_files={len(frozen)}")
         print(zpath)
 
 
