@@ -1,6 +1,16 @@
 name: MD TRANSITION1 build
 
 on:
+  push:
+    branches:
+      - feature/mf3-an7583-persistent
+    paths:
+      - '.github/workflows/md-transition1-build.yml'
+      - 'ursusboot/scripts/build_md_transition1.sh'
+      - 'ursusboot/patches/190-md-transition1-handoff.patch'
+      - 'ursusboot/configs/ursusboot-transition-handoff.cfg'
+      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
+      - 'toolchains/**'
   workflow_dispatch:
 
 permissions:
