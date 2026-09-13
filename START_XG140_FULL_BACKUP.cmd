@@ -1,0 +1,32 @@
+@echo off
+chcp 65001 >nul 2>nul
+setlocal
+cd /d "%~dp0"
+set "entry=data\xg140_full_backup.py"
+if not exist "%entry%" set "entry=ursusflasher\src\xg140_full_backup.py"
+if not exist "%entry%" (
+  echo XG-140G-MD full-backup backend not found.
+  set "rc=2"
+  goto done
+)
+where py >nul 2>nul
+if not errorlevel 1 goto use_py
+where python >nul 2>nul
+if not errorlevel 1 goto use_python
+echo Python 3 not found.
+set "rc=1"
+goto done
+:use_py
+py -3 "%entry%"
+set "rc=%errorlevel%"
+goto done
+:use_python
+python "%entry%"
+set "rc=%errorlevel%"
+:done
+if not "%rc%"=="0" (
+  echo.
+  echo Press Enter to close / Нажмите Enter для закрытия...
+  pause >nul
+)
+exit /b %rc%
