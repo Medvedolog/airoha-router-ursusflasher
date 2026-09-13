@@ -16,7 +16,7 @@ command -v sha256sum >/dev/null
 command -v curl >/dev/null
 
 if [ ! -f "$SDK_BUNDLE" ]; then
-  "$ROOT/toolchains/openwrt-sdk-r35906/reassemble-sdk.sh" >/dev/null
+  bash "$ROOT/toolchains/openwrt-sdk-r35906/reassemble-sdk.sh" >/dev/null
 fi
 EXPECTED_SDK=$(awk '{print $1}' "$ROOT/toolchains/openwrt-sdk-r35906/SDK_SHA256SUMS")
 ACTUAL_SDK=$(sha256sum "$SDK_BUNDLE" | awk '{print $1}')
@@ -40,19 +40,12 @@ export CROSS_COMPILE=aarch64-openwrt-linux-musl-
 export SOURCE_DATE_EPOCH=1789344000
 
 cd "$WORK/u-boot"
-
-# Reuse the proven AN7581 UrsusBoot TEST61 source, but give it the XG-140G-MD
-# board description and identity. This build is intended to be chain-loaded
-# into already-initialized DRAM from stock tcboot. It does not replace mtd0.
 MD_DTS=$(find . -type f -name 'an7581-nokia-xg-040g-md.dts' | head -n1)
 [ -n "$MD_DTS" ] || { echo "reference AN7581 MD DTS not found" >&2; exit 1; }
 DTS_DIR=$(dirname "$MD_DTS")
 XG_DTS="$DTS_DIR/an7581-bell-xg-140g-md.dts"
 curl -fsSL "$XG140_DTS_URL" -o "$XG_DTS"
 
-# The public XG140 DTS currently advertises an 8 GiB memory node although the
-# production XG140GMC2P5G board tested here has 512 MiB. tcboot already trained
-# DDR4 before this RAM handoff, so keep the DT truthful and bounded to 512 MiB.
 python3 - "$XG_DTS" <<'PY'
 from pathlib import Path
 import sys
@@ -66,12 +59,9 @@ PY
 cp "$CONFIG" .config
 sed -i 's#CONFIG_DEFAULT_DEVICE_TREE="airoha/an7581-nokia-xg-040g-md"#CONFIG_DEFAULT_DEVICE_TREE="airoha/an7581-bell-xg-140g-md"#' .config
 sed -i 's#CONFIG_DEFAULT_FDT_FILE="airoha/an7581-nokia-xg-040g-md.dtb"#CONFIG_DEFAULT_FDT_FILE="airoha/an7581-bell-xg-140g-md.dtb"#' .config
-# RAM recovery must never persist an environment while we are proving this port.
 sed -i 's/^CONFIG_ENV_IS_IN_UBI=y/# CONFIG_ENV_IS_IN_UBI is not set/' .config
 sed -i 's/^# CONFIG_ENV_IS_NOWHERE is not set/CONFIG_ENV_IS_NOWHERE=y/' .config
 
-# Dedicated branch: retarget board identity and sysupgrade supported-device
-# checks from XG-040G-MD to Bell XG-140G-MD. Do not touch SoC identity AN7581.
 while IFS= read -r -d '' f; do
   sed -i \
     -e 's/Nokia XG-040G-MD/Bell XG-140G-MD/g' \
@@ -79,7 +69,6 @@ while IFS= read -r -d '' f; do
     "$f"
 done < <(grep -RIlZ --exclude-dir=.git -e 'Nokia XG-040G-MD' -e 'nokia,xg-040g-md' cmd include board drivers defenvs 2>/dev/null || true)
 
-# Make the experimental identity unambiguous on UART/Web.
 if [ -f include/ursus_version.h ]; then
   sed -i 's/#define URSUS_VERSION ".*"/#define URSUS_VERSION "0.1.0-xg140-ram1"/' include/ursus_version.h
 fi
@@ -88,15 +77,11 @@ printf '%s\n' '-UrsusBoot-0.1.0-xg140-ram1' > .scmversion
 make olddefconfig
 make -j"${JOBS:-$(nproc)}"
 
-# Raw position-independent U-Boot is the primary tcboot chain-load payload.
 cp -av u-boot.bin u-boot u-boot.map u-boot.sym System.map "$OUT/"
 [ -f u-boot.dtb ] && cp -av u-boot.dtb "$OUT/" || true
 [ -f "$XG_DTS" ] && cp -av "$XG_DTS" "$OUT/"
 cp -av .config "$OUT/u-boot.xg140-ram.config"
 
-# Also emit a legacy standalone wrapper for a bootm experiment. The raw image
-# remains authoritative; the wrapper is provided only as an alternate RAM-only
-# entry path and is never written to NAND.
 MKIMAGE=$(command -v mkimage || true)
 if [ -z "$MKIMAGE" ] && [ -x tools/mkimage ]; then MKIMAGE="$PWD/tools/mkimage"; fi
 if [ -n "$MKIMAGE" ]; then
