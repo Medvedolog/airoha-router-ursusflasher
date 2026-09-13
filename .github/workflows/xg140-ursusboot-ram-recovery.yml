@@ -35,6 +35,7 @@ jobs:
 
       - name: Build XG140 RAM UrsusBoot
         run: |
+          set -o pipefail
           chmod +x ursusboot/scripts/build_xg140_ram_recovery.sh
           JOBS="$(nproc)" ursusboot/scripts/build_xg140_ram_recovery.sh 2>&1 | tee xg140-ursusboot-build.log
 
