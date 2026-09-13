@@ -1,0 +1,59 @@
+name: Build XG140 UrsusBoot RAM Recovery
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/xg140-ursusboot-ram-recovery
+    paths:
+      - .github/workflows/xg140-ursusboot-ram-recovery.yml
+      - ursusboot/scripts/build_xg140_ram_recovery.sh
+      - ursusboot/configs/u-boot.TEST61.full.config
+      - ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst
+      - toolchains/openwrt-sdk-r35906/**
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc g++ make perl python3 curl xz-utils zstd liblzma-dev device-tree-compiler
+
+      - name: Build XG140 RAM UrsusBoot
+        run: |
+          chmod +x ursusboot/scripts/build_xg140_ram_recovery.sh
+          JOBS="$(nproc)" ursusboot/scripts/build_xg140_ram_recovery.sh 2>&1 | tee xg140-ursusboot-build.log
+
+      - name: Collect artifact
+        run: |
+          set -e
+          OUT=work/xg140-ram-recovery/out
+          test -s "$OUT/u-boot.bin"
+          grep -q 'CONFIG_DEFAULT_DEVICE_TREE="airoha/an7581-bell-xg-140g-md"' "$OUT/u-boot.xg140-ram.config"
+          grep -q '^CONFIG_ENV_IS_NOWHERE=y' "$OUT/u-boot.xg140-ram.config"
+          mkdir -p artifact
+          cp -av "$OUT"/* artifact/
+          cp -av xg140-ursusboot-build.log artifact/
+          git rev-parse HEAD > artifact/ursusflasher.commit
+          printf '%s\n' 'hzyitc/openwrt-redmi-ax3000@b27424f28a034ee1d18409b7952616ba9a40cca4' > artifact/xg140-dts-source.txt
+          (cd artifact && sha256sum ./* > ARTIFACT_SHA256SUMS.txt)
+          find artifact -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-xg140-ram-recovery-${{ github.sha }}
+          path: artifact
+          if-no-files-found: error
+          retention-days: 14
