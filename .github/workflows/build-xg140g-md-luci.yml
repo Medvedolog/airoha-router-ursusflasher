@@ -7,6 +7,8 @@ on:
       - feature/mf3-an7583-persistent
     paths:
       - .github/workflows/build-xg140g-md-luci.yml
+      - START_XG140_INITRAMFS_TEST.cmd
+      - ursusflasher/src/xg140_initramfs_test.py
 
 permissions:
   contents: read
@@ -20,6 +22,12 @@ jobs:
       OPENWRT_REF: b27424f28a034ee1d18409b7952616ba9a40cca4
       PROFILE: bell_xg-140g-md
     steps:
+      - name: Checkout UrsusFlasher tester
+        uses: actions/checkout@v4
+        with:
+          path: ursusflasher-kit
+          fetch-depth: 1
+
       - name: Checkout XG-140G-MD OpenWrt tree
         uses: actions/checkout@v4
         with:
@@ -101,6 +109,43 @@ jobs:
           (cd ../artifact && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
           echo '--- artifact contents ---'
           find ../artifact -maxdepth 3 -type f -printf '%P\n' | sort
+
+      - name: Build ready-to-run XG140 UART initramfs test kit
+        run: |
+          set -e
+          TARGET_DIR="openwrt/bin/targets/airoha/an7581"
+          INITRAMFS="$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*bell_xg-140g-md-initramfs-uImage.itb' -print -quit)"
+          test -n "$INITRAMFS"
+          test -f "$INITRAMFS"
+
+          mkdir -p artifact/tester/ursusflasher/src artifact/tester/ursusflasher/results
+          cp -av ursusflasher-kit/START_XG140_INITRAMFS_TEST.cmd artifact/tester/
+          cp -av ursusflasher-kit/ursusflasher/src/xg140_initramfs_test.py artifact/tester/ursusflasher/src/
+          cp -av ursusflasher-kit/ursusflasher/src/console_ui.py artifact/tester/ursusflasher/src/
+          cp -av ursusflasher-kit/ursusflasher/src/proven_backend.py artifact/tester/ursusflasher/src/
+          cp -av ursusflasher-kit/ursusflasher/src/uart_bootarea_restore.py artifact/tester/ursusflasher/src/
+          cp -av "$INITRAMFS" artifact/tester/
+
+          cat > artifact/tester/README-XG140-RAM-TEST.txt <<'EOF'
+          XG-140G-MD / XG140GMC2P5G initramfs RAM test
+
+          1. Connect 3.3V UART: TX/RX/GND, 115200 8N1. Do not connect VCC.
+          2. Close MobaXterm/PuTTY so the COM port is free.
+          3. Run START_XG140_INITRAMFS_TEST.cmd.
+          4. Select the COM port. The bundled initramfs is auto-detected; press Enter for it.
+          5. Power-cycle the ONU when prompted.
+
+          The tester stops stock tcboot autoboot, logs in, checks boardid XG140GMC2P5G,
+          PCDDR4/512 MiB and stock tcboot fingerprint, transfers the FIT to RAM at 0x85000000,
+          validates it with iminfo and boots it with bootm.
+
+          This test does not issue NAND/flash write/erase, saveenv, bootflag swap, swimg or chpart.
+          Power-cycle the ONU to return to the stock firmware.
+          EOF
+
+          (cd artifact/tester && sha256sum ./*initramfs*.itb > SHA256SUMS.txt)
+          echo '--- tester contents ---'
+          find artifact/tester -maxdepth 4 -type f -printf '%P\n' | sort
 
       - name: Upload XG-140G-MD LuCI artifact
         uses: actions/upload-artifact@v4
