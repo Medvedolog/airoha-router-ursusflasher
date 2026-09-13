@@ -1,0 +1,72 @@
+--- a/include/ursus_version.h
++++ b/include/ursus_version.h
+@@ -3,7 +3,11 @@
+ #define __URSUS_VERSION_H
+ 
+ #define URSUS_PRODUCT_NAME "UrsusBoot"
+-#define URSUS_VERSION "0.1.0-alpha5-UBIUX1-TEST61"
++#define URSUS_VERSION "0.1.0-alpha5-UBIUX1-TRANSITION1"
+ #define URSUS_PRODUCT_VERSION URSUS_PRODUCT_NAME " " URSUS_VERSION
++#define URSUS_MODE "TRANSITION"
++#define URSUS_PERSISTENCE_TARGET "NONE"
++#define URSUS_FINAL_TARGET "OFFICIAL_OPENWRT"
++#define URSUS_TRANSITION_HANDOFF_ONLY 1
+ 
+ #endif
+--- a/.scmversion
++++ b/.scmversion
+@@ -1 +1 @@
+--UrsusBoot-0.1.0-alpha5-UBIUX1-TEST61
++-UrsusBoot-0.1.0-alpha5-UBIUX1-TRANSITION1
+--- a/cmd/ursusweb.c
++++ b/cmd/ursusweb.c
+@@ -1593,6 +1593,7 @@
+ 
+     snprintf(ursus_status_body, sizeof(ursus_status_body),
+              "{\"product\":\"%s\",\"version\":\"%s\"," 
++             "\"mode\":\"%s\",\"persistence_target\":\"%s\",\"final_target\":\"%s\"," 
+              "\"build\":\"%s %s\",\"target\":\"Nokia XG-040G-MD\",\"board\":\"Nokia XG-040G-MD\"," 
+              "\"soc\":\"Airoha AN7581\",\"boot_fdt_compatible\":\"%s\",\"dram_mib\":%u,"
+              "\"current_layout\":\"%s\",\"recovery_latched\":true,\"boot_reason\":\"%s\",\"recovery_reason\":\"%s\"," 
+@@ -1626,7 +1627,8 @@
+              "\"operation_failed_at_stage\":\"%s\",\"operation_last_success_stage\":\"%s\","
+              "\"operation_error_code\":\"%s\",\"operation_transaction_state\":\"%s\","
+              "\"api_version\":200}\n",
+-             URSUS_PRODUCT_NAME, URSUS_VERSION, U_BOOT_DATE, U_BOOT_TIME, profile_compatible,
++             URSUS_PRODUCT_NAME, URSUS_VERSION, URSUS_MODE, URSUS_PERSISTENCE_TARGET, URSUS_FINAL_TARGET,
++             U_BOOT_DATE, U_BOOT_TIME, profile_compatible,
+              (unsigned int)(gd->ram_size >> 20), ursus_current_layout,
+              ursus_dispatch_boot_reason(), ursus_dispatch_recovery_reason(),
+              ursus_boot_fip ? "true" : "false", ursus_stock_fip ? "true" : "false",
+@@ -2056,6 +2058,18 @@
+     if (URSUS_REQ_MATCH(c->reqhdr, "GET /api/log ") ||
+         URSUS_REQ_MATCH(c->reqhdr, "GET /api/operation-log "))
+         return ursus_http_start_response(pcb, c, 200, "text/plain; charset=utf-8", ursus_web_log);
++#if URSUS_TRANSITION_HANDOFF_ONLY
++    if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/install-openwrt-stock-layout ") ||
++        URSUS_REQ_MATCH(c->reqhdr, "POST /api/install-ubi ") ||
++        URSUS_REQ_MATCH(c->reqhdr, "POST /api/reset-openwrt-settings ") ||
++        URSUS_REQ_MATCH(c->reqhdr, "POST /api/update-ursusboot ") ||
++        URSUS_REQ_MATCH(c->reqhdr, "POST /api/ubi-preloader-begin ") ||
++        URSUS_REQ_MATCH(c->reqhdr, "POST /api/ubi-preloader-chunk ") ||
++        URSUS_REQ_MATCH(c->reqhdr, "POST /api/ursus-fip-begin ") ||
++        URSUS_REQ_MATCH(c->reqhdr, "POST /api/ursus-fip-chunk "))
++        return ursus_http_start_response(pcb, c, 409, "application/json",
++            "{\"result\":\"REJECTED\",\"reason_class\":\"TRANSITION_HANDOFF_ONLY\",\"reason\":\"persistent NAND writes are disabled in TRANSITION1\"}\n");
++#endif
+     if (URSUS_REQ_MATCH(c->reqhdr, "POST /api/console ")) {
+         char encoded[512], cmd[256];
+ 
+@@ -2065,6 +2079,12 @@
+             !ursus_decode_filename(encoded, cmd, sizeof(cmd)) || !cmd[0])
+             return ursus_http_start_response(pcb, c, 400, "application/json",
+                 "{\"result\":\"REJECTED\",\"reason\":\"empty or invalid command\"}\n");
++#if URSUS_TRANSITION_HANDOFF_ONLY
++        if (strcmp(cmd, "version") && strcmp(cmd, "bdinfo") && strcmp(cmd, "printenv") &&
++            strcmp(cmd, "mtd list") && strcmp(cmd, "help"))
++            return ursus_http_start_response(pcb, c, 409, "application/json",
++                "{\"result\":\"REJECTED\",\"reason_class\":\"TRANSITION_HANDOFF_ONLY\",\"reason\":\"console command is not in the read-only handoff allowlist\"}\n");
++#endif
+         ursus_console_capture(cmd);
+         return ursus_http_start_response(pcb, c, 200, "text/plain; charset=utf-8", ursus_console_body);
+     }
