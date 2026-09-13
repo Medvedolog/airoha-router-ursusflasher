@@ -14,7 +14,7 @@ from pathlib import Path
 from repo_common import ROOT, sha256, write_manifest
 
 VERSION = "0.1.0-alpha5-UBIUX1-TRANSITION1"
-PAYLOAD_NAME = f"ursusboot-md-{VERSION}.uimg"
+PAYLOAD_NAME = f"ursusboot-md-{VERSION}.linuximg"
 
 
 def rebuild_payload_manifest(tree: Path) -> None:
@@ -45,7 +45,6 @@ def zip_tree(tree: Path, zpath: Path) -> str:
 
 
 def overlay_current_host(tree: Path) -> None:
-    """Overlay current host/runtime code while preserving audited hardware bytes."""
     for name in (
         "START_ONECLICK.cmd", "START_ONECLICK.sh",
         "START_EXPERT.cmd", "START_EXPERT.sh",
@@ -76,7 +75,7 @@ def overlay_current_host(tree: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--uimage", type=Path, required=True)
+    ap.add_argument("--linux-image", type=Path, required=True)
     ap.add_argument("--base-zip", type=Path, required=True,
                     help="Audited full UrsusFlasher hardware-kit ZIP from GitHub Actions")
     ap.add_argument("--out-dir", type=Path, default=Path("dist-transition"))
@@ -84,15 +83,15 @@ def main() -> None:
     ap.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", "UNKNOWN"))
     ap.add_argument("--base-run-id", default="34589613011")
     args = ap.parse_args()
-    if not args.uimage.is_file():
-        raise SystemExit(f"missing TRANSITION uImage: {args.uimage}")
+    if not args.linux_image.is_file():
+        raise SystemExit(f"missing TRANSITION Linux Image: {args.linux_image}")
     if not args.base_zip.is_file():
         raise SystemExit(f"missing audited base ZIP: {args.base_zip}")
 
     out = args.out_dir
     out.mkdir(parents=True, exist_ok=True)
     package_version = (ROOT / "VERSION").read_text(encoding="utf-8").strip().split("-", 1)[0]
-    name = f"UrsusFlasher-{package_version}-MD-AB-TRANSITION1-PUBLIC-TEST"
+    name = f"UrsusFlasher-{package_version}-MD-AB-TRANSITION1-STOCKFIT-PUBLIC-TEST"
 
     with tempfile.TemporaryDirectory() as td:
         tdp = Path(td)
@@ -104,7 +103,6 @@ def main() -> None:
         tree = tdp / name
         roots[0].rename(tree)
 
-        # Freeze all pre-existing audited payload/fw bytes before overlay.
         frozen = {}
         for rel in ("data/payloads", "fw"):
             base = tree / rel
@@ -117,9 +115,9 @@ def main() -> None:
         payload_dir = tree / "data" / "payloads" / "md" / "transition"
         payload_dir.mkdir(parents=True, exist_ok=True)
         dst = payload_dir / PAYLOAD_NAME
-        shutil.copy2(args.uimage, dst)
+        shutil.copy2(args.linux_image, dst)
         meta = {
-            "schema": 1,
+            "schema": 2,
             "mode": "TRANSITION",
             "board": "MD",
             "soc": "AN7581",
@@ -133,31 +131,33 @@ def main() -> None:
             "persistence_target": "NONE",
             "final_target": "OFFICIAL_OPENWRT",
             "hardware_acceptance": "PENDING",
+            "stock_inner_format": "ARM64_LINUX_IMAGE_HANDOFF",
+            "stock_wrapper_contract": "PRESERVE_FIP_HDR2_FIT_FDT_ROOTFS_AND_KERNEL_SIZE; PATCH_KERNEL_DATA_COMPRESSION_HASH_ONLY",
+            "stock_kernel_load_entry": "0x80088000",
+            "ursusboot_text_base": "0x81e00000",
             "stock_bootloader_policy": "KEEP_MTD0_TCBOOT_UNCHANGED",
             "selector_contract": "WRITE_INACTIVE_NSB_SLAVE_THEN_MTD8_ACTIVE_0_TO_1; DO_NOT_WRITE_FLAGBACK",
         }
         (payload_dir / "TRANSITION1.json").write_text(json.dumps(meta, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         (tree / "BUILD_COMMIT.txt").write_text(args.source_sha + "\n", encoding="ascii", newline="\n")
         (tree / "TRANSITION1_TEST.txt").write_text(
-            "MD A/B TRANSITION1 hardware-test bundle.\n"
+            "MD A/B TRANSITION1 stock-FIT hardware-test bundle.\n"
             "Run START_MD_TRANSITION.cmd (Windows) or START_MD_TRANSITION.sh (Linux/macOS).\n"
-            "This is the full UrsusFlasher hardware kit derived from the audited 0.2.62 Actions artifact.\n"
-            "All inherited hardware payload/fw bytes are frozen; the only new hardware payload is TRANSITION1.uimg.\n"
-            "The backend preserves stock mtd0/tcboot, writes a device-derived nsb_slave candidate, verifies readback, then requests SLAVE by changing only mtd8.active.\n"
-            "mtd9/flagback is read-only. MAIN/nsb_master is not written.\n"
-            "Hardware acceptance is PENDING. Keep UART connected for the first run.\n",
+            "This full UrsusFlasher kit is derived from the audited 0.2.62 Actions artifact.\n"
+            "The live nsb_slave is used as the stock template. FIP, HDR2, FIT topology, fdt@1, filesystem@1, kernel type/os/load/entry and all declared sizes are preserved.\n"
+            "Only kernel@1 data, compression (lzma->none), and the existing SHA1 value are changed.\n"
+            "kernel@1 remains an ARM64 Linux Image at stock 0x80088000; its handoff shim copies TRANSITION U-Boot to 0x81e00000 and branches there.\n"
+            "mtd0/tcboot, mtd9/flagback and MAIN/nsb_master are not written. Hardware acceptance is PENDING.\n",
             encoding="utf-8", newline="\n",
         )
 
-        # The inherited hardware corpus must remain byte-identical. New transition
-        # payload lives at a new path and therefore is intentionally not in frozen.
         for rel, expected in frozen.items():
             p = tree / rel
             if not p.is_file() or sha256(p) != expected:
                 raise AssertionError(f"audited hardware byte changed: {rel}")
 
-        # Canonical source parity for the integrated transition backend/launcher.
         assert (tree / "data" / "stock_ab_transition.py").read_bytes() == (ROOT / "ursusflasher" / "src" / "stock_ab_transition.py").read_bytes()
+        assert (tree / "data" / "stock_fit_wrapper.py").read_bytes() == (ROOT / "ursusflasher" / "src" / "stock_fit_wrapper.py").read_bytes()
         assert (tree / "START_MD_TRANSITION.cmd").read_bytes() == (ROOT / "START_MD_TRANSITION.cmd").read_bytes()
         assert (tree / "START_MD_TRANSITION.sh").read_bytes() == (ROOT / "START_MD_TRANSITION.sh").read_bytes()
 
