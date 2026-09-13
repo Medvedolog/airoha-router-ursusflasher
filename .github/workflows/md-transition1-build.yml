@@ -11,6 +11,11 @@ on:
       - 'ursusboot/configs/ursusboot-transition-handoff.cfg'
       - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
       - 'toolchains/**'
+      - 'ursusflasher/src/stock_ab_transition.py'
+      - 'START_MD_TRANSITION.cmd'
+      - 'START_MD_TRANSITION.sh'
+      - 'scripts/repo_common.py'
+      - 'scripts/build_transition_test_rollup.py'
   workflow_dispatch:
 
 permissions:
@@ -23,10 +28,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build MD TRANSITION1
         run: bash ursusboot/scripts/build_md_transition1.sh
-      - name: Upload engineering artifact
+      - name: Build full UrsusFlasher transition test rollup
+        run: |
+          python3 scripts/build_transition_test_rollup.py \
+            --uimage work/md-transition1/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.uimg \
+            --out-dir dist-transition \
+            --source-sha "${GITHUB_SHA}" \
+            --run-id "${GITHUB_RUN_ID}"
+      - name: Upload TRANSITION1 engineering artifact
         uses: actions/upload-artifact@v4
         with:
           name: ursusboot-md-transition1-${{ github.sha }}
           path: work/md-transition1/out/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload full UrsusFlasher MD A/B test rollup
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusflasher-md-ab-transition1-public-test-${{ github.sha }}
+          path: dist-transition/
           if-no-files-found: error
           retention-days: 14
