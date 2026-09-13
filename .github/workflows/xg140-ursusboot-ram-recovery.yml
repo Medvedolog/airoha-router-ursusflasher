@@ -8,6 +8,9 @@ on:
     paths:
       - .github/workflows/xg140-ursusboot-ram-recovery.yml
       - ursusboot/scripts/build_xg140_ram_recovery.sh
+      - ursusflasher/src/xg140_ursusboot_web_recovery.py
+      - ursusflasher/src/ursus_web_client.py
+      - ursusflasher/src/ui_terms.py
       - ursusboot/configs/u-boot.TEST61.full.config
       - ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst
       - toolchains/openwrt-sdk-r35906/**
@@ -42,13 +45,23 @@ jobs:
           test -s "$OUT/u-boot.bin"
           grep -q 'CONFIG_DEFAULT_DEVICE_TREE="airoha/an7581-bell-xg-140g-md"' "$OUT/u-boot.xg140-ram.config"
           grep -q '^CONFIG_ENV_IS_NOWHERE=y' "$OUT/u-boot.xg140-ram.config"
-          mkdir -p artifact
+          mkdir -p artifact/web-helper
           cp -av "$OUT"/* artifact/
           cp -av xg140-ursusboot-build.log artifact/
+          cp -av ursusflasher/src/xg140_ursusboot_web_recovery.py artifact/web-helper/
+          cp -av ursusflasher/src/ursus_web_client.py artifact/web-helper/
+          cp -av ursusflasher/src/ui_terms.py artifact/web-helper/
+          cat > artifact/START_WEB_RECOVERY.cmd <<'EOF'
+          @echo off
+          setlocal
+          cd /d "%~dp0web-helper"
+          py -3 xg140_ursusboot_web_recovery.py
+          if errorlevel 1 pause
+          EOF
           git rev-parse HEAD > artifact/ursusflasher.commit
           printf '%s\n' 'hzyitc/openwrt-redmi-ax3000@b27424f28a034ee1d18409b7952616ba9a40cca4' > artifact/xg140-dts-source.txt
-          (cd artifact && sha256sum ./* > ARTIFACT_SHA256SUMS.txt)
-          find artifact -maxdepth 1 -type f -printf '%f\n' | sort
+          (cd artifact && find . -type f ! -name ARTIFACT_SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > ARTIFACT_SHA256SUMS.txt)
+          find artifact -maxdepth 2 -type f -printf '%P\n' | sort
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
