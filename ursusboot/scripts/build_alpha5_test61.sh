@@ -9,6 +9,7 @@ PROFILE="xg040-md"
 PROFILE_REGISTRY="$ROOT/ursusboot/configs/board-profiles.json"
 PROFILE_RESOLVER="$ROOT/ursusboot/scripts/resolve_board_profile.py"
 CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
+POLICY_APPLIER="$ROOT/ursusboot/scripts/apply_board_policy.py"
 DONOR="$ROOT/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip"
 PATCH1="$ROOT/ursusboot/patches/130-webfailsafe-webreboot1.patch"
 PATCH2="$ROOT/ursusboot/patches/140-test57-diagcap-resetnet1.patch"
@@ -19,9 +20,12 @@ PATCH6="$ROOT/ursusboot/patches/180-test61-safetyreg1.patch"
 OUT="$WORK/out"
 RELEASE_EPOCH=1788888600  # 2026-09-08 17:30:00 UTC
 for x in tar make gcc perl python3 sha256sum patch; do command -v "$x" >/dev/null; done
-for f in "$PROFILE_REGISTRY" "$PROFILE_RESOLVER" "$CONFIG_MERGER"; do [ -f "$f" ] || { echo "shared UrsusBoot profile input missing: $f" >&2; exit 1; }; done
+for f in "$PROFILE_REGISTRY" "$PROFILE_RESOLVER" "$CONFIG_MERGER" "$POLICY_APPLIER"; do [ -f "$f" ] || { echo "shared UrsusBoot profile input missing: $f" >&2; exit 1; }; done
 mapfile -t PROFILE_CONFIGS < <(python3 "$PROFILE_RESOLVER" --registry "$PROFILE_REGISTRY" --profile "$PROFILE" --config-dir "$ROOT/ursusboot/configs")
 [ "${#PROFILE_CONFIGS[@]}" -ge 3 ] || { echo "UrsusBoot profile did not resolve: $PROFILE" >&2; exit 1; }
+POLICY_HEADER=$(python3 "$PROFILE_RESOLVER" --registry "$PROFILE_REGISTRY" --profile "$PROFILE" --field board_policy_header)
+BOARD_POLICY="$ROOT/ursusboot/board-policies/$POLICY_HEADER"
+[ -f "$BOARD_POLICY" ] || { echo "UrsusBoot board policy missing: $BOARD_POLICY" >&2; exit 1; }
 if [ ! -f "$SDK_BUNDLE" ]; then bash "$ROOT/toolchains/openwrt-sdk-r35906/reassemble-sdk.sh" >/dev/null; fi
 EXPECTED_SDK=$(awk '{print $1}' "$ROOT/toolchains/openwrt-sdk-r35906/SDK_SHA256SUMS")
 ACTUAL_SDK=$(sha256sum "$SDK_BUNDLE" | awk '{print $1}')
@@ -35,6 +39,7 @@ patch -d "$WORK/u-boot" -p1 < "$PATCH3"
 patch -d "$WORK/u-boot" -p1 < "$PATCH4"
 patch -d "$WORK/u-boot" -p1 < "$PATCH5"
 patch -d "$WORK/u-boot" -p1 < "$PATCH6"
+python3 "$POLICY_APPLIER" "$WORK/u-boot" "$BOARD_POLICY"
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
 [ -n "$SDK_ROOT" ] || { echo "SDK root not found" >&2; exit 1; }
 TC="$SDK_ROOT/staging_dir/toolchain-aarch64_cortex-a53_gcc-14.4.0_musl/bin"
@@ -68,6 +73,7 @@ SCM_EXPECTED="-UrsusBoot-${EXPECTED_VERSION}"
 grep -Fq "#define URSUS_VERSION \"${EXPECTED_VERSION}\"" include/ursus_version.h || { echo "IDENTITY1 header mismatch" >&2; exit 1; }
 strings u-boot.bin > "$WORK/u-boot.strings"
 grep -Fq "$EXPECTED_VERSION" "$WORK/u-boot.strings" || { echo "IDENTITY1 binary version missing" >&2; exit 1; }
+grep -Fq 'URSUS_BOARD_PROFILE=xg040-md' "$WORK/u-boot.strings" || { echo "MD board policy marker missing" >&2; exit 1; }
 python3 - "$OUT/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip" <<'PYQA'
 import struct,sys
 p=sys.argv[1]; d=open(p,'rb').read(); assert len(d)<0x7b800
@@ -82,6 +88,6 @@ assert nt and nt[0]+nt[1] <= 0x77800, nt
 print(f'FIP_BOUNDARY_QA=PASS size={len(d)} nt_end=0x{nt[0]+nt[1]:x} margin={0x77800-(nt[0]+nt[1])}')
 PYQA
 sha256sum u-boot.bin u-boot.lzma ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip | tee "$OUT/SHA256SUMS"
-printf 'UrsusBoot 0.1.0-alpha5-UBIUX1-TEST61\nSOURCE_DATE_EPOCH=%s\nBUILD_UTC=2026-09-08 17:30:00 UTC\nIDENTITY1=PASS\nPROFILE=xg040-md\nSOC=AN7581\nDERIVATION=native-md\nPROFILE_KCONFIG=PASS\nNOAUTOFIP1=HOST\nUBIATTACH2=NO_DETACH_ON_ACTIVE_EXPECTED_UBI\nSESSIONRECOVERY1=PASS_SOURCE\nDIAGSTATE1=PASS\n' "$RELEASE_EPOCH" > "$OUT/TEST61-BUILD_INFO.txt"
-echo "ALPHA5_TEST61_BUILD=PASS profile=${PROFILE}"
+printf 'UrsusBoot 0.1.0-alpha5-UBIUX1-TEST61\nSOURCE_DATE_EPOCH=%s\nBUILD_UTC=2026-09-08 17:30:00 UTC\nIDENTITY1=PASS\nPROFILE=xg040-md\nSOC=AN7581\nDERIVATION=native-md\nBOARD_POLICY=%s\nPROFILE_KCONFIG=PASS\nNOAUTOFIP1=HOST\nUBIATTACH2=NO_DETACH_ON_ACTIVE_EXPECTED_UBI\nSESSIONRECOVERY1=PASS_SOURCE\nDIAGSTATE1=PASS\n' "$RELEASE_EPOCH" "$POLICY_HEADER" > "$OUT/TEST61-BUILD_INFO.txt"
+echo "ALPHA5_TEST61_BUILD=PASS profile=${PROFILE} policy=${POLICY_HEADER}"
 echo "Artifacts: $OUT"
