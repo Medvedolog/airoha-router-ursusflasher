@@ -7,10 +7,27 @@ from pathlib import Path
 
 VERSION = "0.1.0-xg140-profile1"
 
-# XG140 is intentionally derived from the proven MD implementation.  Identity
-# changes are therefore allowed broadly across source/config text, while board
-# behaviour remains isolated in the selected board-policy header and DTS.
-IDENTITY_ROOTS = (
+# XG140 is intentionally derived from the proven MD implementation. Strong
+# identity tokens may be rewritten across the complete temporary source tree.
+# Do not globally rewrite generic filename fragments such as "xg-040g-md":
+# those can be legitimate source-path anchors and are handled only in the
+# selected runtime/identity directories below.
+STRONG_REPLACEMENTS = (
+    ("Nokia XG-040G-MD", "Bell XG-140G-MD"),
+    ("Nokia_XG-040G-MD", "Bell_XG-140G-MD"),
+    ("nokia,xg-040g-md-ubi", "bell,xg-140g-md"),
+    ("nokia,xg-040g-md", "bell,xg-140g-md"),
+    ("NOKIA_XG040GMD_STOCK", "BELL_XG140GMD_STOCK"),
+    ("XG040GMC2P5G", "XG140GMC2P5G"),
+)
+
+SCOPED_REPLACEMENTS = (
+    ("nokia_xg-040g-md", "bell_xg-140g-md"),
+    ("nokia-xg-040g-md", "bell-xg-140g-md"),
+    ("xg-040g-md", "xg-140g-md"),
+)
+
+SCOPED_ROOTS = (
     "arch/arm/dts",
     "board",
     "cmd",
@@ -19,43 +36,49 @@ IDENTITY_ROOTS = (
     "include",
 )
 
-REPLACEMENTS = (
-    ("Nokia XG-040G-MD", "Bell XG-140G-MD"),
-    ("Nokia_XG-040G-MD", "Bell_XG-140G-MD"),
-    ("nokia_xg-040g-md", "bell_xg-140g-md"),
-    ("nokia,xg-040g-md-ubi", "bell,xg-140g-md"),
-    ("nokia,xg-040g-md", "bell,xg-140g-md"),
-    ("nokia-xg-040g-md", "bell-xg-140g-md"),
-    ("xg-040g-md", "xg-140g-md"),
-    ("NOKIA_XG040GMD_STOCK", "BELL_XG140GMD_STOCK"),
-    ("XG040GMC2P5G", "XG140GMC2P5G"),
-)
-
-LEAK_TOKENS = tuple(old for old, _new in REPLACEMENTS)
+STRONG_LEAK_TOKENS = tuple(old for old, _new in STRONG_REPLACEMENTS)
+SCOPED_LEAK_TOKENS = tuple(old for old, _new in SCOPED_REPLACEMENTS)
 
 
-def rewrite_identity(text: str) -> str:
-    for old, new in REPLACEMENTS:
+def rewrite(text: str, replacements: tuple[tuple[str, str], ...]) -> str:
+    for old, new in replacements:
         text = text.replace(old, new)
     return text
 
 
-def rewrite_tree(root: Path) -> tuple[int, int]:
+def iter_text_files(base: Path):
+    for path in base.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        yield path, text
+
+
+def rewrite_full_tree(root: Path) -> tuple[int, int]:
     scanned = 0
     changed = 0
-    for dirname in IDENTITY_ROOTS:
+    for path, raw in iter_text_files(root):
+        scanned += 1
+        new = rewrite(raw, STRONG_REPLACEMENTS)
+        if new != raw:
+            path.write_text(new, encoding="utf-8")
+            changed += 1
+    return scanned, changed
+
+
+def rewrite_scoped_tree(root: Path) -> tuple[int, int]:
+    scanned = 0
+    changed = 0
+    for dirname in SCOPED_ROOTS:
         base = root / dirname
         if not base.exists():
             continue
-        for path in base.rglob("*"):
-            if not path.is_file():
-                continue
-            try:
-                raw = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
+        for path, raw in iter_text_files(base):
             scanned += 1
-            new = rewrite_identity(raw)
+            new = rewrite(raw, SCOPED_REPLACEMENTS)
             if new != raw:
                 path.write_text(new, encoding="utf-8")
                 changed += 1
@@ -64,21 +87,19 @@ def rewrite_tree(root: Path) -> tuple[int, int]:
 
 def find_leaks(root: Path) -> list[str]:
     leaks: list[str] = []
-    for dirname in IDENTITY_ROOTS:
+    for path, data in iter_text_files(root):
+        for token in STRONG_LEAK_TOKENS:
+            if token in data:
+                leaks.append(f"{path.relative_to(root)}:{token}")
+    for dirname in SCOPED_ROOTS:
         base = root / dirname
         if not base.exists():
             continue
-        for path in base.rglob("*"):
-            if not path.is_file():
-                continue
-            try:
-                data = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
-            for token in LEAK_TOKENS:
+        for path, data in iter_text_files(base):
+            for token in SCOPED_LEAK_TOKENS:
                 if token in data:
                     leaks.append(f"{path.relative_to(root)}:{token}")
-    return leaks
+    return sorted(set(leaks))
 
 
 def transform(root: Path) -> None:
@@ -94,7 +115,8 @@ def transform(root: Path) -> None:
         if not (root / rel).is_file():
             raise SystemExit(f"XG140 MD-derived source missing: {rel}")
 
-    scanned, changed = rewrite_tree(root)
+    all_scanned, all_changed = rewrite_full_tree(root)
+    scoped_scanned, scoped_changed = rewrite_scoped_tree(root)
 
     dispatch = (root / "cmd/ursusdispatch.c").read_text(encoding="utf-8")
     stock = (root / "cmd/ursusstock.c").read_text(encoding="utf-8")
@@ -119,8 +141,9 @@ def transform(root: Path) -> None:
 
     print(
         "XG140_MD_DERIVATION=PASS "
-        f"core=MD stockbridge=preserved identity_files_scanned={scanned} "
-        f"identity_files_changed={changed} policy_delta=identity+dts+profile"
+        f"core=MD stockbridge=preserved full_text_scanned={all_scanned} "
+        f"full_text_changed={all_changed} scoped_text_scanned={scoped_scanned} "
+        f"scoped_text_changed={scoped_changed} policy_delta=identity+dts+profile"
     )
 
 
