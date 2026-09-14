@@ -15,9 +15,8 @@ def replace_once(text: str, old: str, new: str, label: str) -> str:
 
 
 def sub_once(text: str, pattern: str, repl: str, label: str, flags: int = 0) -> str:
-    # Use a callable replacement so backslashes in generated C strings are copied
-    # literally. A plain replacement string would let re.sub() reinterpret \\n,
-    # backreferences and other escapes, corrupting source such as printf("%s\\n").
+    # Callable replacement preserves backslashes in generated C strings literally.
+    # Plain re.sub replacement strings reinterpret escapes and backreferences.
     text, count = re.subn(pattern, lambda _m: repl, text, count=1, flags=flags)
     if count != 1:
         raise SystemExit(f"board policy regex anchor {label!r}: expected 1, found {count}")
