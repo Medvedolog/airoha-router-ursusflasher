@@ -5,8 +5,9 @@ WORK=${URSUS_BUILD_DIR:-"$ROOT/work/mf-runtime"}
 SDK_BUNDLE="$ROOT/toolchains/openwrt-sdk-r35906/openwrt-sdk-r35906.tar.zst"
 SOURCE_BUNDLE="$ROOT/ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst"
 SEED_CONFIG="$ROOT/ursusboot/configs/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig"
-COMMON_CONFIG="$ROOT/ursusboot/configs/ursusboot-common.cfg"
-BOARD_CONFIG="$ROOT/ursusboot/configs/ursusboot-board-mf.cfg"
+PROFILE="xg040-mf"
+PROFILE_REGISTRY="$ROOT/ursusboot/configs/board-profiles.json"
+PROFILE_RESOLVER="$ROOT/ursusboot/scripts/resolve_board_profile.py"
 MODE_CONFIG="$ROOT/ursusboot/configs/ursusboot-runtime-mf.cfg"
 CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
 ENVFILE="$ROOT/ursusboot/configs/an7583_nokia_xg-040g-mf_RUNTIME_env"
@@ -20,8 +21,6 @@ PRELOADER="$MEDVE_DIR/data/payloads/nokia-xg-040g-mf-an7583-uart-preloader.bin"
 DONOR="$MEDVE_DIR/data/payloads/nokia-xg-040g-mf-an7583-uart-recovery-safe-bl31-uboot.fip"
 OUT="$WORK/out"
 VERSION="0.1.0-TEST62"
-# By default tie the visible U-Boot build date to the source commit instead of
-# the old fixed Sep-09 epoch. CI/repro builds may override explicitly.
 BUILD_EPOCH=${MF_RUNTIME_BUILD_EPOCH:-$(git -C "$ROOT" show -s --format=%ct HEAD 2>/dev/null || date +%s)}
 BUILD_COMMIT=$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 
@@ -31,9 +30,11 @@ EXPECTED_DONOR_SIZE=339010
 EXPECTED_DONOR_SHA=8bfe8870e44923a463a3ed66c8b1906214f5c820fd8c15865c63430185de8bb2
 
 for x in tar make gcc perl python3 sha256sum strings patch stat sed; do command -v "$x" >/dev/null; done
-for f in "$SOURCE_BUNDLE" "$SEED_CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$MODE_CONFIG" "$CONFIG_MERGER" "$ENVFILE" "$MF_BASE_TRANSFORM" "$RUNTIME_ENABLE" "$BOARD_HW" "$REPACK" "$MEDVE_PATCHER" "$PRELOADER" "$DONOR"; do
+for f in "$SOURCE_BUNDLE" "$SEED_CONFIG" "$PROFILE_REGISTRY" "$PROFILE_RESOLVER" "$MODE_CONFIG" "$CONFIG_MERGER" "$ENVFILE" "$MF_BASE_TRANSFORM" "$RUNTIME_ENABLE" "$BOARD_HW" "$REPACK" "$MEDVE_PATCHER" "$PRELOADER" "$DONOR"; do
     [ -f "$f" ] || { echo "MF runtime build input missing: $f" >&2; exit 1; }
 done
+mapfile -t PROFILE_CONFIGS < <(python3 "$PROFILE_RESOLVER" --registry "$PROFILE_REGISTRY" --profile "$PROFILE" --config-dir "$ROOT/ursusboot/configs")
+[ "${#PROFILE_CONFIGS[@]}" -ge 3 ] || { echo "UrsusBoot profile did not resolve: $PROFILE" >&2; exit 1; }
 [ "$(stat -c %s "$PRELOADER")" = "$EXPECTED_PRELOADER_SIZE" ] || { echo "MF recovery preloader size mismatch" >&2; exit 1; }
 [ "$(sha256sum "$PRELOADER" | awk '{print $1}')" = "$EXPECTED_PRELOADER_SHA" ] || { echo "MF recovery preloader SHA mismatch" >&2; exit 1; }
 [ "$(stat -c %s "$DONOR")" = "$EXPECTED_DONOR_SIZE" ] || { echo "MF donor size mismatch" >&2; exit 1; }
@@ -50,7 +51,6 @@ tar --zstd -xf "$SDK_BUNDLE" -C "$WORK/sdk"
 tar --zstd -xf "$SOURCE_BUNDLE" -C "$WORK/u-boot"
 cp -a "$WORK/u-boot" "$WORK/u-boot-pristine"
 
-# TEST62 is a board-specialized derivative of the exact TEST61 source snapshot.
 python3 "$MF_BASE_TRANSFORM" "$WORK/u-boot"
 python3 "$RUNTIME_ENABLE" "$WORK/u-boot" "$WORK/u-boot-pristine"
 python3 "$BOARD_HW" "$WORK/u-boot"
@@ -58,7 +58,7 @@ printf '%s\n' "-UrsusBoot-${VERSION}" > "$WORK/u-boot/.scmversion"
 sed -E -i "s/^#define URSUS_VERSION \"[^\"]+\"/#define URSUS_VERSION \"${VERSION}\"/" "$WORK/u-boot/include/ursus_version.h"
 cp "$ENVFILE" "$WORK/u-boot/defenvs/an7583_nokia_xg-040g-mf_runtime_env"
 cp "$SEED_CONFIG" "$WORK/u-boot/.config"
-python3 "$CONFIG_MERGER" --config "$WORK/u-boot/.config" "$COMMON_CONFIG" "$BOARD_CONFIG" "$MODE_CONFIG"
+python3 "$CONFIG_MERGER" --config "$WORK/u-boot/.config" "${PROFILE_CONFIGS[@]}" "$MODE_CONFIG"
 
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
 [ -n "$SDK_ROOT" ] || { echo "SDK root not found" >&2; exit 1; }
@@ -71,7 +71,7 @@ export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$BUILD_EPOCH
 
 cd "$WORK/u-boot"
 make olddefconfig
-python3 "$CONFIG_MERGER" --check-only --config .config "$COMMON_CONFIG" "$BOARD_CONFIG" "$MODE_CONFIG"
+python3 "$CONFIG_MERGER" --check-only --config .config "${PROFILE_CONFIGS[@]}" "$MODE_CONFIG"
 
 for sym in CONFIG_TARGET_AN7583 CONFIG_MTD CONFIG_DM_MTD CONFIG_MTD_SPI_NAND CONFIG_MTD_UBI CONFIG_CMD_MTD CONFIG_CMD_UBI CONFIG_CMD_TFTPBOOT CONFIG_NET_LWIP CONFIG_AIROHA_ETH CONFIG_PCS_AIROHA_AN7583 CONFIG_PINCTRL_AIROHA_AN7583 CONFIG_ENV_IS_IN_UBI CONFIG_ENV_REDUNDANT CONFIG_CONSOLE_RECORD; do
     grep -q "^${sym}=y" .config || { echo "Required MF runtime symbol missing: ${sym}" >&2; exit 1; }
@@ -149,6 +149,9 @@ sha256sum "$OUT/ursusboot-mf-${VERSION}-uart-preloader.bin" "$OUT/ursusboot-mf-$
 printf '%s\n' \
   "UrsusBoot ${VERSION}" \
   "TARGET=Nokia XG-040G-MF / Airoha AN7583" \
+  "PROFILE=${PROFILE}" \
+  "SOC=AN7583" \
+  "DERIVATION=native-mf" \
   "MODE=PERSISTENT_RUNTIME" \
   "SOURCE=TEST61 exact source snapshot + TEST62 MF fixes" \
   "BUILD_COMMIT=${BUILD_COMMIT}" \
@@ -161,9 +164,8 @@ printf '%s\n' \
   "STOCK_BOOT=ENABLED_SERDES_COMPLETE" \
   "FIP_SELFUPDATE=ENABLED_DEVICE_DERIVED_CANDIDATE_REQUIRED_BY_HOST" \
   "LAN234_LED=HWTEST8_NATIVE_C45" \
-  "COMMON_KCONFIG=PASS" \
-  "BOARD_KCONFIG=MF" \
+  "PROFILE_KCONFIG=PASS" \
   "MODE_KCONFIG=RUNTIME" > "$OUT/MF-RUNTIME-BUILD-INFO.txt"
 
-echo "MF_RUNTIME_BUILD=PASS version=${VERSION} commit=${BUILD_COMMIT} epoch=${BUILD_EPOCH}"
+echo "MF_RUNTIME_BUILD=PASS version=${VERSION} profile=${PROFILE} commit=${BUILD_COMMIT} epoch=${BUILD_EPOCH}"
 echo "Artifacts: $OUT"
