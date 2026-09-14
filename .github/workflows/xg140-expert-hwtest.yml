@@ -147,14 +147,15 @@ jobs:
           CONFIG_TARGET_airoha=y
           CONFIG_TARGET_airoha_an7581=y
           CONFIG_TARGET_airoha_an7581_DEVICE_bell_xg-140g-md=y
-          CONFIG_PACKAGE_lrzsz=y
           CONFIG_PACKAGE_mtd=y
+          CONFIG_BUSYBOX_CUSTOM=y
+          CONFIG_BUSYBOX_CONFIG_RX=y
           EOF
-          ./scripts/feeds update -a
-          ./scripts/feeds install -a
           make defconfig
           grep -q '^CONFIG_TARGET_airoha_an7581_DEVICE_bell_xg-140g-md=y' .config
           grep -q '^CONFIG_PACKAGE_mtd=y' .config
+          grep -q '^CONFIG_BUSYBOX_CUSTOM=y' .config
+          grep -q '^CONFIG_BUSYBOX_CONFIG_RX=y' .config
 
       - name: Download OpenWrt sources
         working-directory: openwrt
