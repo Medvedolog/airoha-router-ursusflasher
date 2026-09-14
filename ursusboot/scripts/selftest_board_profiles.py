@@ -34,6 +34,13 @@ if data.get("schema") != 1:
 profiles = data.get("profiles")
 if not isinstance(profiles, dict) or not profiles:
     fail("profiles missing")
+runtime_roles = data.get("runtime_roles")
+if not isinstance(runtime_roles, dict) or not runtime_roles:
+    fail("runtime_roles missing")
+for required_role, bootcmd in (("persistent", "ursusdispatch"), ("ram-recovery", "ursusweb;true")):
+    role = runtime_roles.get(required_role)
+    if not isinstance(role, dict) or role.get("bootcmd") != bootcmd:
+        fail(f"runtime role {required_role}: expected bootcmd={bootcmd}")
 
 required = {"xg040-md", "xg040-mf", "xg140-md"}
 if not required.issubset(profiles):
@@ -55,6 +62,16 @@ for name, profile in profiles.items():
     if fragments[0] != "ursusboot-common.cfg":
         fail(f"{name}: common fragment must be first")
 
+    default_role = profile.get("default_role")
+    allowed_roles = profile.get("allowed_roles")
+    if default_role != "persistent":
+        fail(f"{name}: persistent must remain the default runtime role")
+    if not isinstance(allowed_roles, list) or default_role not in allowed_roles:
+        fail(f"{name}: invalid allowed_roles")
+    for role in allowed_roles:
+        if role not in runtime_roles:
+            fail(f"{name}: unknown allowed runtime role {role}")
+
     policy_name = profile.get("board_policy_header")
     if not isinstance(policy_name, str) or not policy_name.endswith(".h"):
         fail(f"{name}: board_policy_header missing")
@@ -64,6 +81,8 @@ for name, profile in profiles.items():
     pdata = policy_path.read_text(encoding="utf-8")
     for marker in (
         f'#define URSUS_BOARD_POLICY_ID              "{name}"',
+        "URSUS_BOARD_MODEL",
+        "URSUS_BOARD_COMPATIBLE",
         "URSUS_BOARD_STOCK_MASTER_BASE",
         "URSUS_BOARD_STOCK_SLAVE_BASE",
         "URSUS_BOARD_STOCK_ENV_BASE",
@@ -115,4 +134,9 @@ if "#define URSUS_BOARD_APPEND_SERDES_ARGS(dst, cap) 0" not in xgp:
 print("URSUS_PROFILE_SELFTEST=PASS")
 for name in sorted(profiles):
     p = profiles[name]
-    print(f"PROFILE {name}: soc={p['soc']} derivation={p['derivation']} env={p['environment_policy']} policy={p['board_policy_header']} fragments={','.join(p['fragments'])}")
+    print(
+        f"PROFILE {name}: soc={p['soc']} derivation={p['derivation']} "
+        f"env={p['environment_policy']} policy={p['board_policy_header']} "
+        f"default_role={p['default_role']} allowed_roles={','.join(p['allowed_roles'])} "
+        f"fragments={','.join(p['fragments'])}"
+    )
