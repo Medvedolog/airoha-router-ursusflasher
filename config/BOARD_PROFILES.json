@@ -7,6 +7,7 @@
       "soc": "Airoha AN7581",
       "soc_tokens": ["AN7581", "7581"],
       "openwrt_board_tokens": ["xg-040g-md"],
+      "ursusboot_profile": "xg040-md",
       "stock": {
         "web_supported": true
       },
@@ -30,6 +31,7 @@
       "soc": "Airoha AN7583",
       "soc_tokens": ["AN7583", "7583"],
       "openwrt_board_tokens": ["xg-040g-mf"],
+      "ursusboot_profile": "xg040-mf",
       "stock": {
         "web_supported": true,
         "boot_area_size": 524288,
@@ -104,6 +106,75 @@
         "ursusboot_persist2": "HW_REJECTED_DO_NOT_FLASH",
         "stock_boot_area_sample_sha256": "144d63272049eeb7122a01f2f3a0192b874ca4c68c10a5b4726fa4c2e84ac1bf",
         "device_derived_candidate_sample_sha256": "bdfde09356d9f2e8697e9bda6871b6a1583f7085dc26ef3a80b5d775b3d81b11"
+      }
+    },
+    "xg140": {
+      "model": "Bell/Nokia XG-140G-MD",
+      "model_tokens": ["XG-140G-MD", "XG140GMC2P5G", "bell_xg-140g-md", "bell-xg-140g-md"],
+      "soc": "Airoha AN7581DT",
+      "soc_tokens": ["AN7581DT", "AN7581", "7581"],
+      "openwrt_board_tokens": ["bell,xg-140g-md", "xg-140g-md"],
+      "ursusboot_profile": "xg140-md",
+      "stock": {
+        "web_supported": true,
+        "boot_area_size": 524288,
+        "fip_offset": 2048,
+        "environment_offset": 507904,
+        "environment_size": 16384,
+        "observed_fip_entries": 9,
+        "ab_selector_format": "NOKIA_FLAG20",
+        "geometry_status": "SINGLE_DEVICE_HW_EVIDENCE"
+      },
+      "flash": {
+        "nand_size": 268435456,
+        "erase_size": 131072,
+        "bootloader_offset": 0,
+        "bootloader_size": 524288,
+        "romfile_offset": 524288,
+        "romfile_size": 262144,
+        "nsb_master_offset": 786432,
+        "nsb_master_size": 42467328,
+        "nsb_slave_offset": 43253760,
+        "nsb_slave_size": 42467328,
+        "bosa_offset": 85721088,
+        "bosa_size": 262144,
+        "ri_offset": 85983232,
+        "ri_size": 262144,
+        "flag_offset": 86245376,
+        "flag_size": 262144,
+        "flagback_offset": 86507520,
+        "flagback_size": 262144,
+        "config_offset": 86769664,
+        "config_size": 10485760,
+        "data_offset": 97255424,
+        "data_size": 135135232,
+        "oopsfs_offset": 232390656,
+        "oopsfs_size": 4194304,
+        "log_offset": 236584960,
+        "log_size": 10485760
+      },
+      "network": {
+        "recovery_preferred_ports": ["LAN"],
+        "recovery_excluded_ports": [],
+        "ethernet_status": "RAM_INITRAMFS_HW_PASS_EN8811H"
+      },
+      "write_policy": {
+        "persistent_write_enabled": false,
+        "engineering_only": true,
+        "backend": "XG140_NATIVE_DEVICE_DERIVED_PRE_HW",
+        "persistent_install_contract": "HOST_DEVICE_DERIVED_NATIVE_FIP_FINAL_NTFW_PATCH",
+        "boot_area_readback_required": true,
+        "automatic_alternate_writer": false
+      },
+      "evidence": {
+        "full_backup": "HW_PROVEN",
+        "ram_openwrt": "HW_PROVEN",
+        "native_fip_repack_real_donor": "OFFLINE_PASS",
+        "raw_uboot_go_from_tcboot": "HW_REJECTED_APPLICATION_RETURN_RC1",
+        "persistent_ursusboot_write_readback": "HW_PENDING",
+        "persistent_ursusboot_cold_boot": "HW_PENDING",
+        "stock_master_from_ursusboot": "HW_PENDING",
+        "stock_slave_from_ursusboot": "HW_PENDING"
       }
     }
   }
