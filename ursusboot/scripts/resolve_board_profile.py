@@ -15,6 +15,8 @@ FIELDS = (
     "layout_policy",
     "environment_policy",
     "derivation",
+    "default_role",
+    "runtime_role",
 )
 
 
@@ -22,6 +24,8 @@ def load_registry(path: Path) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
     if data.get("schema") != 1 or not isinstance(data.get("profiles"), dict):
         raise SystemExit(f"unsupported board profile registry: {path}")
+    if not isinstance(data.get("runtime_roles"), dict):
+        raise SystemExit(f"board profile registry has no runtime_roles: {path}")
     return data
 
 
@@ -29,6 +33,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Resolve modular UrsusBoot Airoha board profiles")
     ap.add_argument("--registry", type=Path, required=True)
     ap.add_argument("--profile", required=True)
+    ap.add_argument("--role", help="orthogonal runtime role; defaults to profile default_role")
     ap.add_argument("--config-dir", type=Path)
     ap.add_argument("--field", choices=FIELDS)
     ap.add_argument("--json", action="store_true")
@@ -36,7 +41,7 @@ def main() -> int:
 
     data = load_registry(args.registry)
     try:
-        profile = data["profiles"][args.profile]
+        profile = dict(data["profiles"][args.profile])
     except KeyError:
         known = ", ".join(sorted(data["profiles"]))
         raise SystemExit(f"unknown UrsusBoot board profile {args.profile!r}; known: {known}")
@@ -45,6 +50,22 @@ def main() -> int:
     if not isinstance(fragments, list) or not fragments:
         raise SystemExit(f"profile {args.profile!r} has no fragments")
 
+    default_role = profile.get("default_role")
+    allowed_roles = profile.get("allowed_roles")
+    if not isinstance(default_role, str) or not isinstance(allowed_roles, list) or not allowed_roles:
+        raise SystemExit(f"profile {args.profile!r} has invalid runtime role contract")
+    role = args.role or default_role
+    if role not in allowed_roles:
+        raise SystemExit(
+            f"profile {args.profile!r} does not allow runtime role {role!r}; "
+            f"allowed: {', '.join(allowed_roles)}"
+        )
+    if role not in data["runtime_roles"]:
+        raise SystemExit(f"profile {args.profile!r} references unknown runtime role {role!r}")
+
+    profile["runtime_role"] = role
+    profile["runtime_role_config"] = data["runtime_roles"][role]
+
     if args.config_dir:
         resolved = []
         for name in fragments:
@@ -52,7 +73,6 @@ def main() -> int:
             if not path.is_file():
                 raise SystemExit(f"profile {args.profile!r}: missing fragment {path}")
             resolved.append(str(path))
-        profile = dict(profile)
         profile["fragments"] = resolved
 
     if args.field:
