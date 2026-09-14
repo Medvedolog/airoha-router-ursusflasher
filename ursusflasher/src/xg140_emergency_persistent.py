@@ -2,12 +2,15 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -214,8 +217,33 @@ def _wait_ursus(host: str, timeout: float, label: str) -> dict | None:
     return None
 
 
+def _read_emergency_backup(path: Path) -> bytes:
+    # Emergency mode intentionally does NOT require one pre-recorded 0x0..0x7ff
+    # prefix SHA. The first 0x800 bytes are device/firmware specific and are not
+    # used as the FIP donor. The device-side STOCK writer preserves the LIVE
+    # prefix byte-for-byte. Keep structural gates that prove this is still an
+    # XG140-style mtd0 donor: exact size, valid stock env CRC and Airoha FIP.
+    if path.suffix.lower() == ".gz":
+        with gzip.open(path, "rb") as f:
+            boot = f.read()
+    else:
+        boot = path.read_bytes()
+    if len(boot) != native.MTD0_SIZE:
+        raise EmergencyError(f"mtd0 size mismatch: 0x{len(boot):x}, expected 0x{native.MTD0_SIZE:x}")
+    prefix_sha = native.sha(boot[:native.FIP_OFF])
+    print(f"[AUTO] donor BootROM prefix SHA256={prefix_sha} (informational; exact-match gate disabled in emergency mode)")
+    env = boot[native.ENV_OFF:native.MTD0_SIZE]
+    stored = struct.unpack_from("<I", env, 0)[0]
+    calc = zlib.crc32(env[4:]) & 0xffffffff
+    if stored != calc:
+        raise EmergencyError(f"stock env CRC mismatch: stored={stored:08x} calc={calc:08x}")
+    if boot[native.FIP_OFF:native.FIP_OFF + 8] != bytes.fromhex("010064aa78563412"):
+        raise EmergencyError("Airoha FIP header not found at physical 0x800")
+    return boot
+
+
 def _build_hybrid(backup_path: Path, repacker: Path, lzma_path: Path, out_path: Path) -> None:
-    boot = native.read_backup(backup_path)
+    boot = _read_emergency_backup(backup_path)
     donor, entries = native.validate_native_donor(boot)
     _check_entries, end = native.parse_fip(donor)
     print(f"[AUTO] mtd0 SHA256={native.sha(boot)}")
