@@ -5,12 +5,10 @@ import argparse
 import gzip
 import json
 import os
-import struct
 import subprocess
 import sys
 import tempfile
 import time
-import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -156,7 +154,6 @@ def _acquire_tcboot(sp, log, username: str | None, password: str | None, timeout
             sent_password = False
             continue
 
-        # tcboot firmware has used both UserName: and Username: spellings.
         if ("username:" in low or "user name:" in low) and not sent_user:
             if not username:
                 raise EmergencyError("tcboot requested a username but no local emergency credential is configured")
@@ -177,8 +174,6 @@ def _acquire_tcboot(sp, log, username: str | None, password: str | None, timeout
             print("\n[AUTO] Stock Linux started before tcboot was captured. Script remains armed; power-cycle once and it will catch autoboot.")
             announced_linux = True
 
-        # A blank CR is harmless at stock console and exposes tcboot auth on builds
-        # which do not print it until input arrives.
         now = time.time()
         if now - last_cr > 0.75:
             sp.write(b"\r")
@@ -197,7 +192,6 @@ def _ram_boot_ursus(sp, log, image: Path) -> None:
     proven._uboot_read_until_prompt(sp, log, 900, f"loadx {image.name}")
     print(f"[AUTO] Jumping to UrsusBoot at 0x{LOADADDR:x}")
     proven._uboot_send_line(sp, f"go 0x{LOADADDR:x}")
-    # Do not wait for an ECNT prompt: control has intentionally left stock tcboot.
     time.sleep(2.0)
 
 
@@ -218,11 +212,9 @@ def _wait_ursus(host: str, timeout: float, label: str) -> dict | None:
 
 
 def _read_emergency_backup(path: Path) -> bytes:
-    # Emergency mode intentionally does NOT require one pre-recorded 0x0..0x7ff
-    # prefix SHA. The first 0x800 bytes are device/firmware specific and are not
-    # used as the FIP donor. The device-side STOCK writer preserves the LIVE
-    # prefix byte-for-byte. Keep structural gates that prove this is still an
-    # XG140-style mtd0 donor: exact size, valid stock env CRC and Airoha FIP.
+    # Emergency mode accepts this unit's complete mtd0 as the authority.
+    # Prefix/env are NOT copied from the backup by the device-side writer, so
+    # their lab-reference hashes/CRC must not block disaster recovery.
     if path.suffix.lower() == ".gz":
         with gzip.open(path, "rb") as f:
             boot = f.read()
@@ -230,21 +222,30 @@ def _read_emergency_backup(path: Path) -> bytes:
         boot = path.read_bytes()
     if len(boot) != native.MTD0_SIZE:
         raise EmergencyError(f"mtd0 size mismatch: 0x{len(boot):x}, expected 0x{native.MTD0_SIZE:x}")
-    prefix_sha = native.sha(boot[:native.FIP_OFF])
-    print(f"[AUTO] donor BootROM prefix SHA256={prefix_sha} (informational; exact-match gate disabled in emergency mode)")
-    env = boot[native.ENV_OFF:native.MTD0_SIZE]
-    stored = struct.unpack_from("<I", env, 0)[0]
-    calc = zlib.crc32(env[4:]) & 0xffffffff
-    if stored != calc:
-        raise EmergencyError(f"stock env CRC mismatch: stored={stored:08x} calc={calc:08x}")
+    print(f"[AUTO] donor BootROM prefix SHA256={native.sha(boot[:native.FIP_OFF])} (informational only)")
     if boot[native.FIP_OFF:native.FIP_OFF + 8] != bytes.fromhex("010064aa78563412"):
         raise EmergencyError("Airoha FIP header not found at physical 0x800")
     return boot
 
 
+def _validate_emergency_native_donor(boot: bytes) -> tuple[bytes, list]:
+    window = boot[native.FIP_OFF:native.ENV_OFF]
+    entries, end = native.parse_fip(window)
+    donor = window[:end]
+    if end >= native.ENV_OFF - native.FIP_OFF:
+        raise EmergencyError(f"native FIP overlaps stock env: end=0x{end:x}")
+    tb = [e for e in entries if e[0] == native.TB_FW_UUID]
+    nt = [e for e in entries if e[0] == native.NT_FW_UUID]
+    if len(tb) != 1 or len(nt) != 1:
+        raise EmergencyError("native FIP must contain exactly one TB_FW and one NT_FW")
+    _, off, size, _ = tb[0]
+    print(f"[AUTO] donor TB_FW SHA256={native.sha(donor[off:off + size])} (informational only)")
+    return donor, entries
+
+
 def _build_hybrid(backup_path: Path, repacker: Path, lzma_path: Path, out_path: Path) -> None:
     boot = _read_emergency_backup(backup_path)
-    donor, entries = native.validate_native_donor(boot)
+    donor, entries = _validate_emergency_native_donor(boot)
     _check_entries, end = native.parse_fip(donor)
     print(f"[AUTO] mtd0 SHA256={native.sha(boot)}")
     print(f"[AUTO] donor FIP entries={len(entries)} size=0x{len(donor):x} declared_end=0x{end:x}")
@@ -301,8 +302,6 @@ def main() -> int:
         hybrid = td / "ursusboot-xg140-native-persistent.fip"
         _build_hybrid(backup, repacker, lzma_path, hybrid)
 
-        # Fast path: if the correct RAM/persistent UrsusBoot is already alive,
-        # do not touch UART at all.
         st = _wait_ursus(host, 3.0, "probe")
         if st is None:
             port = _auto_port(str(port_raw) if port_raw is not None else None)
@@ -325,10 +324,6 @@ def main() -> int:
             if st is None:
                 raise EmergencyError("UrsusBoot HTTP did not appear after automatic RAM boot; persistent flash was not touched")
 
-        # Deliberately no operator confirmation and no host-side model/version
-        # ceremony here. update_bootloader still performs the bootloader's own
-        # candidate validation, starts exactly one STOCK writer and waits until
-        # its full readback operation reports complete or failed.
         print("[AUTO] Uploading native-hybrid FIP and starting persistent mtd0 transaction")
         final = uw.update_bootloader(host, hybrid, confirm=False)
         stage = final.get("operation_stage")
