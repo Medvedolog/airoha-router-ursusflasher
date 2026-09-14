@@ -78,13 +78,13 @@ make olddefconfig
 make -j"${JOBS:-$(nproc)}"
 
 # Produce only the board-specific BL33 payload here. The persistent FIP is built
-# on the operator PC from that unit's own stock mtd0 backup, preserving the
-# native XG140 FIP lineage instead of using an XG040 donor.
+# on the operator PC from that unit's own stock mtd0 backup by the dedicated
+# XG140 native repacker packaged by CI. Do not export the legacy MD/MF checksum
+# repacker from the U-Boot source tree.
 gcc -O2 -Wall -Wextra lzma1ext_noeopm.c -llzma -o "$WORK/lzma1ext_noeopm"
 "$WORK/lzma1ext_noeopm" u-boot.bin u-boot.lzma 1048576
 
-test -s repack_persistent_fip.py
-cp -av u-boot.bin u-boot u-boot.map u-boot.sym System.map u-boot.lzma repack_persistent_fip.py "$OUT/"
+cp -av u-boot.bin u-boot u-boot.map u-boot.sym System.map u-boot.lzma "$OUT/"
 [ -f u-boot.dtb ] && cp -av u-boot.dtb "$OUT/" || true
 cp -av "$XG_DTS" "$OUT/"
 cp -av "$XG_UBOOT_DTSI" "$OUT/"
@@ -107,13 +107,16 @@ Bell/Nokia XG-140G-MD / XG140GMC2P5G / AN7581DT / 512 MiB.
 
 PERSISTENT FIP POLICY
 - CI does NOT use any XG-040G-MD donor FIP.
-- The artifact contains the XG140 BL33 as u-boot.lzma plus the proven FIP repacker.
+- The artifact contains XG140 BL33 as u-boot.lzma; CI packages the dedicated XG140 native repacker.
 - START_INSTALL_PERSISTENT.cmd asks for this router's own mtd0_bootloader.bin(.gz).
 - The host extracts the native XG140 FIP from physical 0x800 up to its declared end.
-- Every native FIP entry except NT_FW/BL33 and checksum remains byte-for-byte unchanged.
-- The checksum entry is rebuilt by the same repacker used for MD/MF persistent builds.
-- BootROM prefix 0x0..0x7ff and stock env 0x7c000..0x7ffff are never supplied by CI;
-  the device-side STOCK updater preserves them from the live mtd0 and performs readback.
+- For the checksum-free Nokia stock lineage, every native FIP entry is preserved byte-for-byte;
+  only final NT_FW/BL33 payload and its size are changed, plus the FIP terminator end.
+- No Routerich/MTK checksum entry is synthesized when the native donor does not contain one.
+- The repacker refuses a donor where NT_FW is not the final payload instead of relocating unknown native entries.
+- Final FIP physical end must remain below the stock env at 0x7c000.
+- BootROM prefix 0x0..0x7ff and stock env 0x7c000..0x7ffff are preserved by the
+  device-side STOCK updater from live mtd0; full 512 KiB readback is required.
 - One ordinary y/N is required immediately before the persistent write.
 
 FLOW
@@ -122,10 +125,10 @@ FLOW
 3. Run START_INSTALL_PERSISTENT.cmd.
 4. Select your own XG140 mtd0_bootloader.bin or mtd0_bootloader.bin.gz backup.
 5. Host validates 0x80000 size, BootROM prefix SHA256, stock env CRC, native FIP,
-   and TB_FW SHA256; then builds a native-hybrid FIP by replacing only BL33.
+   and TB_FW SHA256; then builds a native-hybrid FIP by replacing only final BL33/NT_FW.
 6. One y/N.
-7. WebFailsafe STOCK updater writes the hybrid FIP and verifies readback.
-8. Reboot into persistent XG140 UrsusBoot.
+7. WebFailsafe STOCK updater writes the 512 KiB reconstructed boot area and verifies full readback.
+8. Reboot into persistent XG140 UrsusBoot only after readback PASS.
 9. Flash only the correct Bell XG-140G-MD sysupgrade.
 
 Airoha BootROM UART recovery remains the emergency escape path.
