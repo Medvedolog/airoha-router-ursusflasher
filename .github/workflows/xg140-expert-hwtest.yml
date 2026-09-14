@@ -1,0 +1,134 @@
+name: XG140 UrsusFlasher EXPERT HW test
+
+on:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - 'START_EXPERT.cmd'
+      - 'START_EXPERT.sh'
+      - 'config/BOARD_PROFILES.json'
+      - 'ursusflasher/src/bootloader_install_menu.py'
+      - 'ursusflasher/src/expert_airoha.py'
+      - 'ursusflasher/src/xg140_profile.py'
+      - 'ursusflasher/src/xg140_stock_transport.py'
+      - 'ursusflasher/src/xg140_runtime_install.py'
+      - 'ursusflasher/src/ursusboot_install.py'
+      - 'ursusflasher/tools/repack_xg140_native_fip.py'
+      - 'ursusflasher/tools/selftest_xg140_native_fip_repack.py'
+      - 'ursusboot/configs/**'
+      - 'ursusboot/board-policies/**'
+      - 'ursusboot/scripts/**'
+      - '.github/workflows/xg140-expert-hwtest.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc g++ make perl python3 xz-utils zstd liblzma-dev device-tree-compiler rsync
+
+      - name: Validate host-side multimodel modules
+        run: |
+          python3 -m py_compile \
+            ursusflasher/src/bootloader_install_menu.py \
+            ursusflasher/src/expert_airoha.py \
+            ursusflasher/src/xg140_profile.py \
+            ursusflasher/src/xg140_stock_transport.py \
+            ursusflasher/src/xg140_runtime_install.py
+          python3 ursusflasher/tools/selftest_xg140_native_fip_repack.py
+          bash -n START_EXPERT.sh
+
+      - name: Build XG140 persistent modular BL33
+        env:
+          URSUS_RUNTIME_ROLE: persistent
+        run: |
+          set -euxo pipefail
+          chmod +x ursusboot/scripts/build_xg140_native_profile.sh
+          JOBS="$(nproc)" ursusboot/scripts/build_xg140_native_profile.sh 2>&1 | tee xg140-persistent-build.log
+          OUT=work/xg140-native-profile-persistent/out
+          test -s "$OUT/u-boot.bin"
+          test -s "$OUT/u-boot.lzma"
+          strings "$OUT/u-boot.bin" | grep -F 'URSUS_BOARD_PROFILE=xg140-md'
+          strings "$OUT/u-boot.bin" | grep -F 'bootcmd=ursusdispatch'
+          ! strings "$OUT/u-boot.bin" | grep -F 'bootcmd=ursusweb;true'
+
+      - name: Stage XG140 payload for UrsusFlasher
+        run: |
+          set -eux
+          OUT=work/xg140-native-profile-persistent/out
+          DST=payloads/xg140/ursusboot
+          mkdir -p "$DST"
+          cp "$OUT/u-boot.lzma" "$DST/u-boot.persistent.lzma"
+          cp "$OUT/u-boot.bin" "$DST/u-boot.persistent.bin"
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          p = pathlib.Path('payloads/xg140/ursusboot/u-boot.persistent.lzma')
+          raw = p.read_bytes()
+          info = {
+              'schema': 1,
+              'board_profile': 'xg140-md',
+              'runtime_role': 'persistent',
+              'size': len(raw),
+              'sha256': hashlib.sha256(raw).hexdigest(),
+              'source_commit': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(),
+              'hardware_status': 'HW_PENDING_PERSISTENT_COLD_BOOT',
+          }
+          pathlib.Path('payloads/xg140/ursusboot/BUILD_INFO.json').write_text(
+              json.dumps(info, indent=2) + '\n', encoding='utf-8')
+          print(json.dumps(info, indent=2))
+          PY
+          PYTHONPATH=ursusflasher/src python3 - <<'PY'
+          import xg140_profile
+          p, info = xg140_profile.require_bl33()
+          print('XG140_PAYLOAD_GATE=PASS', p, info['sha256'])
+          PY
+
+      - name: Build operator kit
+        run: |
+          set -eux
+          ART=/tmp/xg140-ursusflasher-expert
+          rm -rf "$ART"
+          mkdir -p "$ART"
+          rsync -a ./ "$ART/" \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'work/' \
+            --exclude 'results/' \
+            --exclude 'ursusboot/source/'
+          cat > "$ART/README-XG140-HWTEST.txt" <<'EOF'
+          XG140 UrsusBoot persistent hardware test
+
+          Run: START_EXPERT.cmd
+          Choose: 2 - Install/update UrsusBoot
+          Model: 1 - Auto (XG140) or 4 - Bell/Nokia XG-140G-MD
+          Transport: 1 - Telnet / Nokia stock
+
+          The installer reads the live 512-KiB mtd0 first, rebuilds THIS DEVICE'S
+          native FIP by replacing only NT_FW/BL33, preserves the live 0x000..0x7ff
+          prefix and 0x7c000..0x7ffff vendor env, writes once, then requires a full
+          512-KiB SHA256 readback before offering reboot.
+
+          XG140 UART persistent install is intentionally disabled in this kit:
+          tcboot -> go raw u-boot has already been rejected on real hardware.
+          EOF
+          git rev-parse HEAD > "$ART/URSUSFLASHER_COMMIT.txt"
+          cp xg140-persistent-build.log "$ART/"
+          (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+
+      - name: Upload operator kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: XG140-UrsusFlasher-EXPERT-${{ github.sha }}
+          path: /tmp/xg140-ursusflasher-expert
+          if-no-files-found: error
+          retention-days: 14
