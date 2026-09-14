@@ -10,20 +10,29 @@ _original_applicability = base.action_applicability
 
 
 def action_applicability(state: ds.DeviceState):
+    """Engineering UI: never grey an action out from a probe/policy result.
+
+    Menu applicability is advisory only in this HWTEST composition. Concrete
+    backends still enforce their immediate write invariants (target geometry,
+    candidate structure and post-write readback), but stale/absent network state,
+    HW_PENDING profile flags and transport heuristics do not hide operations.
+    """
     out = _original_applicability(state)
-    family = bootmenu.family_from_state(state)
-    # XG140 persistent write remains engineering-only in BOARD_PROFILES until
-    # this hardware cycle passes. Item 2 is nevertheless exposed here because
-    # the selected Telnet backend performs its own live identity, geometry,
-    # candidate and full-readback gates before the single destructive y/N.
-    if family == "xg140" and state.current_system == "NOKIA_STOCK":
-        old = out[2]
-        out[2] = ds.ActionApplicability(
-            old.number, old.key, True, "",
-            "XG140 engineering: native device-derived mtd0; full readback mandatory",
-            True, "XG140_NATIVE_TELNET_ENGINEERING",
+    forced = {}
+    for number, old in out.items():
+        note = old.note
+        if not old.enabled and old.reason:
+            note = (note + " · " if note else "") + "EXPERT: " + old.reason
+        forced[number] = ds.ActionApplicability(
+            old.number,
+            old.key,
+            True,
+            "",
+            note,
+            old.write_capable,
+            old.resolved_backend,
         )
-    return out
+    return forced
 
 
 base.action_applicability = action_applicability
