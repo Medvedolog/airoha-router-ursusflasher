@@ -7,13 +7,16 @@ from pathlib import Path
 
 VERSION = "0.1.0-xg140-profile1"
 
-IDENTITY_FILES = (
-    "cmd/ursusweb.c",
-    "cmd/ursusubi.c",
-    "cmd/ursusdispatch.c",
-    "cmd/ursusstock.c",
-    "cmd/ursusupdate.c",
-    "include/ursusweb_ui.inc",
+# XG140 is intentionally derived from the proven MD implementation.  Identity
+# changes are therefore allowed broadly across source/config text, while board
+# behaviour remains isolated in the selected board-policy header and DTS.
+IDENTITY_ROOTS = (
+    "arch/arm/dts",
+    "board",
+    "cmd",
+    "defenvs",
+    "drivers",
+    "include",
 )
 
 REPLACEMENTS = (
@@ -22,10 +25,13 @@ REPLACEMENTS = (
     ("nokia_xg-040g-md", "bell_xg-140g-md"),
     ("nokia,xg-040g-md-ubi", "bell,xg-140g-md"),
     ("nokia,xg-040g-md", "bell,xg-140g-md"),
+    ("nokia-xg-040g-md", "bell-xg-140g-md"),
     ("xg-040g-md", "xg-140g-md"),
     ("NOKIA_XG040GMD_STOCK", "BELL_XG140GMD_STOCK"),
     ("XG040GMC2P5G", "XG140GMC2P5G"),
 )
+
+LEAK_TOKENS = tuple(old for old, _new in REPLACEMENTS)
 
 
 def rewrite_identity(text: str) -> str:
@@ -34,13 +40,61 @@ def rewrite_identity(text: str) -> str:
     return text
 
 
+def rewrite_tree(root: Path) -> tuple[int, int]:
+    scanned = 0
+    changed = 0
+    for dirname in IDENTITY_ROOTS:
+        base = root / dirname
+        if not base.exists():
+            continue
+        for path in base.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                raw = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            scanned += 1
+            new = rewrite_identity(raw)
+            if new != raw:
+                path.write_text(new, encoding="utf-8")
+                changed += 1
+    return scanned, changed
+
+
+def find_leaks(root: Path) -> list[str]:
+    leaks: list[str] = []
+    for dirname in IDENTITY_ROOTS:
+        base = root / dirname
+        if not base.exists():
+            continue
+        for path in base.rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                data = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+            for token in LEAK_TOKENS:
+                if token in data:
+                    leaks.append(f"{path.relative_to(root)}:{token}")
+    return leaks
+
+
 def transform(root: Path) -> None:
     root = root.resolve()
-    for rel in IDENTITY_FILES:
-        path = root / rel
-        if not path.is_file():
+    required = (
+        "cmd/ursusweb.c",
+        "cmd/ursusdispatch.c",
+        "cmd/ursusstock.c",
+        "include/ursusweb_ui.inc",
+        "include/ursus_version.h",
+    )
+    for rel in required:
+        if not (root / rel).is_file():
             raise SystemExit(f"XG140 MD-derived source missing: {rel}")
-        path.write_text(rewrite_identity(path.read_text(encoding="utf-8")), encoding="utf-8")
+
+    scanned, changed = rewrite_tree(root)
 
     dispatch = (root / "cmd/ursusdispatch.c").read_text(encoding="utf-8")
     stock = (root / "cmd/ursusstock.c").read_text(encoding="utf-8")
@@ -57,16 +111,17 @@ def transform(root: Path) -> None:
     version_h.write_text(text, encoding="utf-8")
     (root / ".scmversion").write_text(f"-UrsusBoot-{VERSION}\n", encoding="ascii")
 
-    leaks: list[str] = []
-    for rel in IDENTITY_FILES:
-        data = (root / rel).read_text(encoding="utf-8")
-        for token in ("Nokia XG-040G-MD", "nokia,xg-040g-md", "nokia_xg-040g-md", "XG040GMC2P5G"):
-            if token in data:
-                leaks.append(f"{rel}:{token}")
+    leaks = find_leaks(root)
     if leaks:
-        raise SystemExit("XG140 MD identity leak: " + ", ".join(leaks))
+        preview = ", ".join(leaks[:20])
+        more = f" (+{len(leaks) - 20} more)" if len(leaks) > 20 else ""
+        raise SystemExit("XG140 MD identity leak: " + preview + more)
 
-    print("XG140_MD_DERIVATION=PASS core=MD stockbridge=preserved policy_delta=identity+dts+profile")
+    print(
+        "XG140_MD_DERIVATION=PASS "
+        f"core=MD stockbridge=preserved identity_files_scanned={scanned} "
+        f"identity_files_changed={changed} policy_delta=identity+dts+profile"
+    )
 
 
 def main() -> int:
