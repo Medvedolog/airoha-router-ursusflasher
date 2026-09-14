@@ -16,6 +16,7 @@ OUT="$WORK/out"
 VERSION="0.1.0-xg140-profile1"
 BUILD_EPOCH=${XG140_BUILD_EPOCH:-$(git -C "$ROOT" show -s --format=%ct HEAD 2>/dev/null || date +%s)}
 BUILD_COMMIT=$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+OLD_MD_IDENTITY='Nokia XG-040G-MD'
 
 for x in tar make gcc perl python3 sha256sum strings patch stat sed; do command -v "$x" >/dev/null; done
 for f in "$SOURCE_BUNDLE" "$SEED_CONFIG" "$PROFILE_REGISTRY" "$PROFILE_RESOLVER" "$CONFIG_MERGER" "$POLICY_APPLIER" "$DERIVE" "$DTS_PATCH"; do
@@ -72,6 +73,15 @@ grep -Fq '#define URSUS_BOARD_POLICY_ID              "xg140-md"' include/ursus_b
 grep -Fq '#define URSUS_BOARD_ALLOW_UBI_BOOT          0' include/ursus_board_policy.h
 grep -Fq '#define URSUS_BOARD_APPEND_SERDES_ARGS(dst, cap) 0' include/ursus_board_policy.h
 
+# Identity must also remain clean after Kconfig generated headers/environment are created.
+if grep -RIlF --exclude-dir=.git -- "$OLD_MD_IDENTITY" . > "$WORK/md-identity-prebuild-files.txt"; then
+    echo "XG140_PREBUILD_MD_IDENTITY_LEAK=1" >&2
+    cat "$WORK/md-identity-prebuild-files.txt" >&2
+    while IFS= read -r f; do grep -nF -- "$OLD_MD_IDENTITY" "$f" >&2 || true; done < "$WORK/md-identity-prebuild-files.txt"
+    exit 1
+fi
+
+echo "XG140_PREBUILD_IDENTITY=PASS"
 make -j"${JOBS:-$(nproc)}"
 
 gcc -O2 -Wall -Wextra lzma1ext_noeopm.c -llzma -o "$WORK/lzma1ext_noeopm"
@@ -103,7 +113,23 @@ for forbidden in \
     'XG040GMC2P5G' \
     'URSUS_STOCKBOOT_TCBOOT_MD_ARGS' \
     'bootcmd=ursusweb;true'; do
-    ! grep -Fq "$forbidden" "$WORK/u-boot.strings" || { echo "XG140 profile forbidden marker survived: $forbidden" >&2; exit 1; }
+    if grep -Fq "$forbidden" "$WORK/u-boot.strings"; then
+        echo "XG140 profile forbidden marker survived: $forbidden" >&2
+        echo "=== binary offsets ===" >&2
+        strings -t x u-boot.bin | grep -F "$forbidden" >&2 || true
+        echo "=== linked ELF offsets ===" >&2
+        strings -t x u-boot | grep -F "$forbidden" >&2 || true
+        echo "=== object producers ===" >&2
+        while IFS= read -r -d '' obj; do
+            if strings "$obj" | grep -Fq "$forbidden"; then
+                echo "$obj" >&2
+                strings -t x "$obj" | grep -F "$forbidden" >&2 || true
+            fi
+        done < <(find . -type f \( -name '*.o' -o -name '*.a' -o -name '*.dtb' \) -print0)
+        echo "=== post-build text/generated sources ===" >&2
+        grep -RInF --binary-files=without-match --exclude-dir=.git -- "$forbidden" . >&2 || true
+        exit 1
+    fi
 done
 
 sha256sum "$OUT/u-boot.bin" "$OUT/u-boot.lzma" | tee "$OUT/SHA256SUMS"
