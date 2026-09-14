@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import re
 import struct
 import subprocess
 import sys
@@ -19,7 +20,7 @@ HOST = "192.168.1.1"
 MTD0_SIZE = 0x80000
 FIP_OFF = 0x800
 ENV_OFF = 0x7C000
-EXPECTED_PREFIX_SHA256 = "82830140f4f8842702d0569065c27071b7cc24e0876e6c487cb4d9d81c294dd7"
+EXPECTED_PREFIX_SHA256 = "82830140f4f8842702d0569065c27071b7cc24e0876e6c487cb4d9d81c73f0a"
 TB_FW_UUID = bytes.fromhex("5ff9ec0b4d223e4da544c39d81c73f0a")
 NT_FW_UUID = bytes.fromhex("d6d0eea7fcead54b97829934f234b6e4")
 CHECKSUM_UUID = bytes.fromhex("a2cceab7f8254b279704633a6fd69ad8")
@@ -114,6 +115,62 @@ def compare_lineage(old: bytes, new: bytes) -> None:
             raise SystemExit(f"native FIP payload changed for UUID {u.hex()}")
 
 
+def require_xg140_ursusboot(host: str) -> dict:
+    """Require the live XG140 UrsusBoot API before exposing the write prompt.
+
+    192.168.1.1 is also commonly used by the Nokia/Bell stock web UI.  A plain
+    HTTP success therefore proves only reachability, not that UrsusBoot is the
+    active execution environment.  Classify the wrong-endpoint case explicitly
+    and stop before any upload or flash transaction.
+    """
+    try:
+        st = uw.status(host)
+    except Exception as status_exc:
+        root_code = None
+        root_headers: dict[str, str] = {}
+        root_body = b""
+        try:
+            root_code, root_headers, root_body = uw._request(host, "GET", "/", timeout=5)
+        except Exception:
+            pass
+
+        text = root_body.decode("utf-8", "replace")
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+        title = re.sub(r"\s+", " ", title_match.group(1)).strip() if title_match else ""
+        server = root_headers.get("server", "")
+        root_has_ursus = "ursusboot" in text.lower()
+
+        print("[STOP] XG140 runtime identity gate failed before any flash write.")
+        print(f"[STOP] http://{host}/api/status did not return the UrsusBoot JSON API.")
+        if root_code is not None:
+            details = [f"GET / -> HTTP {root_code}"]
+            if title:
+                details.append(f"title={title!r}")
+            if server:
+                details.append(f"server={server!r}")
+            print("[HTTP] " + "; ".join(details))
+        if root_has_ursus:
+            print("[DIAG] The root page says UrsusBoot, but /api/status is missing: wrong/old UrsusBoot build or route mismatch.")
+        elif root_code is not None:
+            print("[DIAG] 192.168.1.1 is reachable, but the responder is not this FIX build of UrsusBoot.")
+            print("[DIAG] Most likely stock Nokia/Bell Web is running again, or another device owns 192.168.1.1.")
+        else:
+            print("[DIAG] No usable UrsusBoot HTTP endpoint was reachable at 192.168.1.1.")
+        print("[ACTION] UART must currently show UrsusBoot 0.1.0-xg140-native1 and the WebFailsafe URL http://192.168.1.1/.")
+        print("[ACTION] If stock/tcboot is running, RAM-boot this package's u-boot.bin again: loadx 0x81e00000 ; go 0x81e00000.")
+        print("[ACTION] Then verify http://192.168.1.1/api/status returns JSON with product=UrsusBoot before rerunning this helper.")
+        raise SystemExit(f"WRONG_HTTP_ENDPOINT: {status_exc}") from None
+
+    version = str(st.get("version") or "")
+    model = str(st.get("model") or st.get("board") or "")
+    product = str(st.get("product") or "")
+    target = str(st.get("target") or "")
+    print(f"UrsusBoot: product={product!r} version={version!r} model={model!r} target={target!r} layout={st.get('current_layout')!r}")
+    if product != "UrsusBoot" or ("xg140" not in version.lower() and "140g" not in model.lower() and "140g" not in target.lower()):
+        raise SystemExit("XG140 UrsusBoot identity not confirmed; nothing written")
+    return st
+
+
 def main() -> int:
     root = HERE.parent
     lzma_path = root / "u-boot.lzma"
@@ -150,12 +207,7 @@ def main() -> int:
         print("Preserved: BootROM prefix, stock env, and every native FIP entry except NT_FW payload/size.")
         print("No foreign checksum entry is synthesized when the native Nokia donor does not contain one.")
 
-        st = uw.status(HOST)
-        version = str(st.get("version") or "")
-        model = str(st.get("model") or st.get("board") or "")
-        print(f"UrsusBoot: version={version!r} model={model!r} layout={st.get('current_layout')!r}")
-        if "xg140" not in version.lower() and "140g" not in model.lower():
-            raise SystemExit("XG140 UrsusBoot identity not confirmed; nothing written")
+        require_xg140_ursusboot(HOST)
 
         ans = input("Write native-hybrid UrsusBoot to XG140 bootloader area? [y/N]: ").strip().lower()
         if ans not in ("y", "yes"):
