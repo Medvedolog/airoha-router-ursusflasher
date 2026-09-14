@@ -5,8 +5,9 @@ WORK=${URSUS_BUILD_DIR:-"$ROOT/work/alpha5-test61-rebuild"}
 SDK_BUNDLE="$ROOT/toolchains/openwrt-sdk-r35906/openwrt-sdk-r35906.tar.zst"
 SOURCE_BUNDLE="$ROOT/ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-source.tar.zst"
 CONFIG="$ROOT/ursusboot/configs/u-boot.TEST61.full.config"
-COMMON_CONFIG="$ROOT/ursusboot/configs/ursusboot-common.cfg"
-BOARD_CONFIG="$ROOT/ursusboot/configs/ursusboot-board-md.cfg"
+PROFILE="xg040-md"
+PROFILE_REGISTRY="$ROOT/ursusboot/configs/board-profiles.json"
+PROFILE_RESOLVER="$ROOT/ursusboot/scripts/resolve_board_profile.py"
 CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
 DONOR="$ROOT/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-FUDAN1-update.fip"
 PATCH1="$ROOT/ursusboot/patches/130-webfailsafe-webreboot1.patch"
@@ -18,7 +19,9 @@ PATCH6="$ROOT/ursusboot/patches/180-test61-safetyreg1.patch"
 OUT="$WORK/out"
 RELEASE_EPOCH=1788888600  # 2026-09-08 17:30:00 UTC
 for x in tar make gcc perl python3 sha256sum patch; do command -v "$x" >/dev/null; done
-for f in "$COMMON_CONFIG" "$BOARD_CONFIG" "$CONFIG_MERGER"; do [ -f "$f" ] || { echo "shared UrsusBoot config input missing: $f" >&2; exit 1; }; done
+for f in "$PROFILE_REGISTRY" "$PROFILE_RESOLVER" "$CONFIG_MERGER"; do [ -f "$f" ] || { echo "shared UrsusBoot profile input missing: $f" >&2; exit 1; }; done
+mapfile -t PROFILE_CONFIGS < <(python3 "$PROFILE_RESOLVER" --registry "$PROFILE_REGISTRY" --profile "$PROFILE" --config-dir "$ROOT/ursusboot/configs")
+[ "${#PROFILE_CONFIGS[@]}" -ge 3 ] || { echo "UrsusBoot profile did not resolve: $PROFILE" >&2; exit 1; }
 if [ ! -f "$SDK_BUNDLE" ]; then bash "$ROOT/toolchains/openwrt-sdk-r35906/reassemble-sdk.sh" >/dev/null; fi
 EXPECTED_SDK=$(awk '{print $1}' "$ROOT/toolchains/openwrt-sdk-r35906/SDK_SHA256SUMS")
 ACTUAL_SDK=$(sha256sum "$SDK_BUNDLE" | awk '{print $1}')
@@ -41,17 +44,17 @@ export URSUS_SDK_ROOT="$SDK_ROOT" STAGING_DIR="$SDK_ROOT/staging_dir" STAGING_DI
 export PATH="$ROOT/toolchains/hostshim:$TC:$HOST/bin:/usr/bin:/bin"
 export CROSS_COMPILE=aarch64-openwrt-linux-musl- SOURCE_DATE_EPOCH="$RELEASE_EPOCH"
 cp "$CONFIG" "$WORK/u-boot/.config"
-python3 "$CONFIG_MERGER" --config "$WORK/u-boot/.config" "$COMMON_CONFIG" "$BOARD_CONFIG"
+python3 "$CONFIG_MERGER" --config "$WORK/u-boot/.config" "${PROFILE_CONFIGS[@]}"
 cd "$WORK/u-boot"
 make olddefconfig
-python3 "$CONFIG_MERGER" --check-only --config .config "$COMMON_CONFIG" "$BOARD_CONFIG"
+python3 "$CONFIG_MERGER" --check-only --config .config "${PROFILE_CONFIGS[@]}"
 for sym in CONFIG_CMD_UBIFS CONFIG_CMD_PXE CONFIG_BOOTMETH_EXTLINUX CONFIG_BOOTMETH_EXTLINUX_PXE CONFIG_PXE_UTILS; do
     if grep -q "^${sym}=y" .config; then
         echo "CONFIGTRIM1 failed: ${sym}=y" >&2
         exit 1
     fi
 done
-for sym in CONFIG_CMD_UBI CONFIG_MTD_UBI CONFIG_CMD_TFTPBOOT CONFIG_CMD_WGET; do
+for sym in CONFIG_TARGET_AN7581 CONFIG_PCS_AIROHA_AN7581 CONFIG_PINCTRL_AIROHA_AN7581 CONFIG_ENV_IS_IN_UBI CONFIG_ENV_REDUNDANT CONFIG_CMD_UBI CONFIG_MTD_UBI CONFIG_CMD_TFTPBOOT CONFIG_CMD_WGET; do
     grep -q "^${sym}=y" .config || { echo "Required ${sym} is not enabled" >&2; exit 1; }
 done
 make -j"${JOBS:-$(nproc)}"
@@ -79,6 +82,6 @@ assert nt and nt[0]+nt[1] <= 0x77800, nt
 print(f'FIP_BOUNDARY_QA=PASS size={len(d)} nt_end=0x{nt[0]+nt[1]:x} margin={0x77800-(nt[0]+nt[1])}')
 PYQA
 sha256sum u-boot.bin u-boot.lzma ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip | tee "$OUT/SHA256SUMS"
-printf 'UrsusBoot 0.1.0-alpha5-UBIUX1-TEST61\nSOURCE_DATE_EPOCH=%s\nBUILD_UTC=2026-09-08 17:30:00 UTC\nIDENTITY1=PASS\nCOMMON_KCONFIG=PASS\nBOARD_KCONFIG=MD\nNOAUTOFIP1=HOST\nUBIATTACH2=NO_DETACH_ON_ACTIVE_EXPECTED_UBI\nSESSIONRECOVERY1=PASS_SOURCE\nDIAGSTATE1=PASS\n' "$RELEASE_EPOCH" > "$OUT/TEST61-BUILD_INFO.txt"
-echo "ALPHA5_TEST61_BUILD=PASS"
+printf 'UrsusBoot 0.1.0-alpha5-UBIUX1-TEST61\nSOURCE_DATE_EPOCH=%s\nBUILD_UTC=2026-09-08 17:30:00 UTC\nIDENTITY1=PASS\nPROFILE=xg040-md\nSOC=AN7581\nDERIVATION=native-md\nPROFILE_KCONFIG=PASS\nNOAUTOFIP1=HOST\nUBIATTACH2=NO_DETACH_ON_ACTIVE_EXPECTED_UBI\nSESSIONRECOVERY1=PASS_SOURCE\nDIAGSTATE1=PASS\n' "$RELEASE_EPOCH" > "$OUT/TEST61-BUILD_INFO.txt"
+echo "ALPHA5_TEST61_BUILD=PASS profile=${PROFILE}"
 echo "Artifacts: $OUT"
