@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import gzip
 import hashlib
-import importlib.util
-import os
 import struct
 import subprocess
 import sys
@@ -47,7 +45,7 @@ def read_backup(path: Path) -> bytes:
     calc = zlib.crc32(env[4:]) & 0xFFFFFFFF
     if stored != calc:
         raise SystemExit(f"stock env CRC mismatch: stored={stored:08x} calc={calc:08x}")
-    if data[FIP_OFF:FIP_OFF+8] != bytes.fromhex("010064aa78563412"):
+    if data[FIP_OFF:FIP_OFF + 8] != bytes.fromhex("010064aa78563412"):
         raise SystemExit("Airoha FIP header not found at physical 0x800")
     return data
 
@@ -59,8 +57,8 @@ def parse_fip(fip: bytes):
     for _ in range(64):
         if pos + 40 > len(fip):
             raise SystemExit("FIP TOC truncated")
-        uuid = fip[pos:pos+16]
-        off, size, flags = struct.unpack_from("<QQQ", fip, pos+16)
+        uuid = fip[pos:pos + 16]
+        off, size, flags = struct.unpack_from("<QQQ", fip, pos + 16)
         if uuid == b"\0" * 16:
             declared_end = off
             break
@@ -84,10 +82,17 @@ def validate_native_donor(boot: bytes) -> tuple[bytes, list]:
     if len(tb) != 1 or len(nt) != 1:
         raise SystemExit("native XG140 FIP must contain exactly one TB_FW and one NT_FW")
     _, off, size, _ = tb[0]
-    got = sha(donor[off:off+size])
+    got = sha(donor[off:off + size])
     if got != EXPECTED_TB_SHA256:
         raise SystemExit(f"native XG140 TB_FW SHA256 mismatch: {got}")
     return donor, entries
+
+
+def print_native_toc(entries: list, end: int) -> None:
+    print(f"Native XG140 FIP TOC: {len(entries)} entries, declared_end=0x{end:x}")
+    for idx, (uuid, off, size, flags) in enumerate(entries):
+        role = "TB_FW" if uuid == TB_FW_UUID else "NT_FW" if uuid == NT_FW_UUID else "checksum" if uuid == CHECKSUM_UUID else "native"
+        print(f"  [{idx}] {role:8s} uuid={uuid.hex()} off=0x{off:x} size=0x{size:x} flags=0x{flags:x}")
 
 
 def compare_lineage(old: bytes, new: bytes) -> None:
@@ -99,20 +104,22 @@ def compare_lineage(old: bytes, new: bytes) -> None:
         raise SystemExit("repacked FIP entry set differs from native XG140 donor")
     for u, (oo, osz, of) in om.items():
         no, nsz, nf = nm[u]
-        if u in (NT_FW_UUID, CHECKSUM_UUID):
+        if u == NT_FW_UUID:
+            if no != oo or nf != of:
+                raise SystemExit("NT_FW native offset/flags changed")
             continue
         if (oo, osz, of) != (no, nsz, nf):
             raise SystemExit(f"native FIP metadata changed for UUID {u.hex()}")
-        if old[oo:oo+osz] != new[no:no+nsz]:
+        if old[oo:oo + osz] != new[no:no + nsz]:
             raise SystemExit(f"native FIP payload changed for UUID {u.hex()}")
 
 
 def main() -> int:
     root = HERE.parent
     lzma_path = root / "u-boot.lzma"
-    repacker = root / "repack_persistent_fip.py"
+    repacker = root / "repack_xg140_native_fip.py"
     if not lzma_path.is_file() or not repacker.is_file():
-        raise SystemExit("artifact is incomplete: u-boot.lzma/repack_persistent_fip.py missing")
+        raise SystemExit("artifact is incomplete: u-boot.lzma/repack_xg140_native_fip.py missing")
 
     raw = input("Path to your XG140 mtd0_bootloader.bin or .bin.gz backup: ").strip().strip('"')
     backup_path = Path(raw).expanduser().resolve()
@@ -120,22 +127,28 @@ def main() -> int:
         raise SystemExit(f"backup not found: {backup_path}")
 
     boot = read_backup(backup_path)
-    donor, _ = validate_native_donor(boot)
+    donor, entries = validate_native_donor(boot)
+    _entries_check, end = parse_fip(donor)
     print(f"Native XG140 mtd0 SHA256: {sha(boot)}")
     print(f"Native XG140 donor FIP: size=0x{len(donor):x} SHA256={sha(donor)}")
+    print_native_toc(entries, end)
 
     with tempfile.TemporaryDirectory(prefix="xg140-native-fip-") as td:
         td = Path(td)
         donor_path = td / "xg140-stock-native.fip"
         output_path = td / "ursusboot-xg140-native-persistent.fip"
         donor_path.write_bytes(donor)
-        subprocess.run([sys.executable, str(repacker), str(donor_path), str(lzma_path), str(output_path)], check=True)
+        subprocess.run(
+            [sys.executable, str(repacker), str(donor_path), str(lzma_path), str(output_path)],
+            check=True,
+        )
         new = output_path.read_bytes()
         if len(new) >= ENV_OFF - FIP_OFF:
             raise SystemExit(f"repacked FIP reaches protected env: size=0x{len(new):x}")
         compare_lineage(donor, new)
         print(f"Native-hybrid FIP: size=0x{len(new):x} SHA256={sha(new)}")
-        print("Preserved: BootROM prefix, stock env, and every native FIP entry except NT_FW/checksum.")
+        print("Preserved: BootROM prefix, stock env, and every native FIP entry except NT_FW payload/size.")
+        print("No foreign checksum entry is synthesized when the native Nokia donor does not contain one.")
 
         st = uw.status(HOST)
         version = str(st.get("version") or "")
@@ -149,7 +162,9 @@ def main() -> int:
             print("Cancelled before write.")
             return 0
 
-        final = uw.update_bootloader(HOST, output_path, confirm=True)
+        # The operator already confirmed this exact destructive transaction above.
+        # Do not ask a second y/N inside the transport helper.
+        final = uw.update_bootloader(HOST, output_path, confirm=False)
         print(f"Completed: stage={final.get('operation_stage')} transaction={final.get('operation_transaction_state')}")
         print("Reboot only after the updater reports successful readback.")
     return 0
