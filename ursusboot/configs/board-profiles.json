@@ -12,6 +12,7 @@
         "ursusboot-board-md.cfg",
         "ursusboot-storage-ubi-redundant.cfg"
       ],
+      "board_policy_header": "xg040-md.h",
       "boot_policy": "md-stock-openwrt",
       "layout_policy": "md-ubi",
       "environment_policy": "ubi-redundant",
@@ -28,6 +29,7 @@
         "ursusboot-board-mf.cfg",
         "ursusboot-storage-ubi-redundant.cfg"
       ],
+      "board_policy_header": "xg040-mf.h",
       "boot_policy": "mf-stock-openwrt",
       "layout_policy": "mf-ubi",
       "environment_policy": "ubi-redundant",
@@ -44,6 +46,7 @@
         "ursusboot-board-xg140.cfg",
         "ursusboot-storage-env-nowhere.cfg"
       ],
+      "board_policy_header": "xg140-md.h",
       "boot_policy": "xg140-stock-ab-openwrt",
       "layout_policy": "xg140-native-stock",
       "environment_policy": "vendor-env-preserved",
