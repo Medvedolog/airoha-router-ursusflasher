@@ -1,3 +1,17 @@
+# Development checkpoint — XG140 NATIVE1 / stock access RE (2026-09-14)
+
+- Добавлен отдельный XG-140G-MD development path на ветке `feature/xg140-ursusboot-ram-recovery`; `main` и опубликованный MD/MF production contract не менялись.
+- На физическом Bell/Nokia XG-140G-MD подтверждены `XG140GMC2P5G`, AN7581DT, 512 MiB DDR4-2666 и SkyHigh S35ML02G3 256 MiB; снят полный restore-grade backup до persistent XG140 экспериментов.
+- OpenWrt XG140 initramfs уже загружен на железе: `bell,xg-140g-md`, target `airoha/an7581`, Linux 6.18.36; EN8811H 2.5G Ethernet и USB xHCI работают. Production MAC/voice support остаются отдельными задачами.
+- После ошибочной записи XG-040G-MD образа stock tcboot XG140 остаётся живым, но stock slot payload validation падает; поэтому recovery architecture — tcboot UART/XMODEM -> XG140 UrsusBoot RAM -> persistent UrsusBoot -> правильный XG140 OpenWrt.
+- Forensics native `mtd0`: размер `0x80000`, FIP начинается с physical `0x800`, protected stock env — `0x7c000..0x7ffff`; BootROM prefix SHA256 `82830140f4f8842702d0569065c27071b7cc24e0876e6c487cb4d9d81c294dd7`, TB_FW SHA256 `07c9e1542a3de845055faa2244bbd07adc8c5a136811a61a0d678ec8fff5ee5e`.
+- Persistent field FIP переведён на **native donor**: `xg140_native_persistent_install.py` строит hybrid из `mtd0_bootloader.bin(.gz)` этого же аппарата, заменяя только NT_FW/BL33 и checksum; остальные native FIP entries проверяются byte-for-byte. XG-040 donor для field FIP больше не нужен.
+- GitHub Actions run `34786299472` завершился `SUCCESS`; artifact `ursusboot-xg140-native1-4fb0dc93a044e1b87d92ad0f80f545ffdcfa9bce`, digest `sha256:49a17e1de24ab55ac82547e2946a9ac2d45d84758a320e2371efd18a49d5de47`.
+- Разобран XG140 stock config/service path: `TeleComAccount` хранит privileged Web identity, `ServiceManage` — Telnet/FactoryTelnet/SSH/su/vtysh fields; `system.cgi` credential-gated factory path проверяет `flag/au/ap` через OID 59 и переключает `FactoryTelnetEnable` через OID 74. Plaintext device credentials намеренно не заносятся в публичный Git/логи.
+- Текущий прямой XG140 stock bootstrap target: privileged Web -> Factory Telnet -> обычный Telnet shell -> доказанный `su` в фактический UID0 -> `id -u == 0`. XG040 FTP/Samba escalation остаётся fallback, а не обязательным шагом.
+- Перед первой persistent hardware write остаются blockers: убрать двойной `[y/N]` в native helper + `update_bootloader(confirm=True)`; проверить STOCK `/api/update-ursusboot` на XG040-only hardcoding и full mtd0 readback/env preservation; ужесточить persistent-identity gate перед sysupgrade; проверить XG140 stock-layout geometry и UrsusBoot Ethernet на железе.
+- Статус XG140 NATIVE1: **CI PASS / PERSISTENT HW WRITE PENDING**. CI success не является hardware acceptance.
+
 # Development checkpoint — `feature/mf-an7583` / MF2 HWTEST4 / STOCKRESTORE1 (2026-09-09)
 
 - Добавлен слой `BoardProfile` для MD/MF и family-aware политика применимости/записи. MD остаётся reference production/HW baseline; широкие persistent writers для MF по-прежнему отключены.
@@ -51,13 +65,12 @@
 - UBIOPT1: выбор сохранения/сброса настроек OpenWrt снова виден для новой UBI-операции после предыдущего COMPLETE/FAILED; backend по-прежнему получает `X-Ursus-Keep-Settings: 1/0`.
 - WEBREBOOT2: `/api/reboot` разрешён после `ursus_ubi_update_complete()` наряду с migration/self-update; Web UI проверяет HTTP status и показывает reject вместо молчаливого игнорирования.
 - UARTASCII1: удалены русские runtime-строки из `cmd/ursus*.c`; machine/UART log — English printable ASCII.
-- UBIHEADROOM2: direct Recovery-safe update больше не требует искусственно восстановить абсолютные 16 свободных LEB, если до операции их уже меньше. Политика сохраняет существующий headroom и учитывает `projected_free`; кейс `free=7, current_fit=82, candidate=76` даёт `projected_free=13` и допускается.
+- UBIHEADROOM2: direct Recovery-safe update больше не требует искусственно восстановить абсолютные 16 свободных LEB, если до операции уже меньше. Политика сохраняет существующий headroom и учитывает `projected_free`; кейс `free=7, current_fit=82, candidate=76` даёт `projected_free=13` и допускается.
 - FIP safety gate сохранён: TEST59 NT_FW заканчивается за 30 байт до первого certificate block; physical FIP end `0x7b800`, protected env начинается `0x7c000`.
 - Build identity: `UrsusBoot 0.1.0-alpha5-UBIUX1-TEST59`, `SOURCE_DATE_EPOCH=1788864300`, `2026-09-08 10:45:00 UTC`.
 - Основной аппаратный ONE-CLICK stock→UrsusBoot→OpenWrt UBI ранее пройден на TEST57/SkyHigh S35ML02G300; TEST59 требует focused regression только новых corrective paths.
 
 # Журнал изменений
-
 ## 0.2.58 PUBLIC TEST — TEST58 / DIAGCAP2 / REBOOTWAIT1 / BUILDDATE1 / WAITUI1
 
 - DIAGCAP2: каждая write-capable операция создаёт `work/diagnostics/<timestamp>-<operation>/` с `status-before.json`, `status-after.json`, `/api/operation-log`, Web log, безопасным console snapshot и `operation.json`; raw JSON/log/snapshot также попадают в полный `session-*.log`.
@@ -117,7 +130,6 @@
 - Установка UrsusBoot из OpenWrt больше не требует утилиту `base64` на роутере для чтения `fip`/boot block. Бинарное обратное чтение выполняется напрямую через stdout системного OpenSSH, а stderr остаётся отдельным каналом.
 - Исправлен обнаруженный на китайской OpenWrt отказ `ash: line 0: base64: not found` до начала записи FIP.
 - FUDAN1 и образы OpenWrt не изменены.
-
 ## 0.2.52 — STATEUI6 / ACTIONPREFLIGHT1
 
 - Пассивный `DeviceState` больше не является глобальным запретом для операций записи.
