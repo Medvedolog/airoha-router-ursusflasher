@@ -13,6 +13,7 @@ on:
       - ursusflasher/src/xg140_ursusboot_web_recovery.py
       - ursusflasher/src/ursus_web_client.py
       - ursusflasher/src/ui_terms.py
+      - config/UI_TERMS.json
       - ursusboot/configs/u-boot.TEST61.full.config
       - ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst
       - toolchains/openwrt-sdk-r35906/**
@@ -58,8 +59,15 @@ jobs:
           cp -av ursusflasher/src/xg140_ursusboot_web_recovery.py artifact/web-helper/
           cp -av ursusflasher/src/ursus_web_client.py artifact/web-helper/
           cp -av ursusflasher/src/ui_terms.py artifact/web-helper/
+          cp -av config/UI_TERMS.json artifact/web-helper/
           cp -av "$OUT/u-boot.lzma" artifact/
           cp -av "$OUT/repack_persistent_fip.py" artifact/
+
+          test -s artifact/web-helper/UI_TERMS.json
+          (
+            cd artifact/web-helper
+            python3 -c 'import ui_terms, ursus_web_client, xg140_native_persistent_install, xg140_ursusboot_web_recovery'
+          )
 
           cat > artifact/START_INSTALL_PERSISTENT.cmd <<'EOF'
           @echo off
