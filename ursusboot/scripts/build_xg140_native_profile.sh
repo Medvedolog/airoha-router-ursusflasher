@@ -1,15 +1,21 @@
 #!/bin/bash
 set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-WORK=${URSUS_BUILD_DIR:-"$ROOT/work/xg140-native-profile"}
+PROFILE="xg140-md"
+ROLE=${URSUS_RUNTIME_ROLE:-persistent}
+case "$ROLE" in
+    persistent|ram-recovery) ;;
+    *) echo "Unsupported XG140 runtime role: $ROLE" >&2; exit 2 ;;
+esac
+WORK=${URSUS_BUILD_DIR:-"$ROOT/work/xg140-native-profile-$ROLE"}
 SDK_BUNDLE="$ROOT/toolchains/openwrt-sdk-r35906/openwrt-sdk-r35906.tar.zst"
 SOURCE_BUNDLE="$ROOT/ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst"
 SEED_CONFIG="$ROOT/ursusboot/configs/u-boot.TEST61.full.config"
-PROFILE="xg140-md"
 PROFILE_REGISTRY="$ROOT/ursusboot/configs/board-profiles.json"
 PROFILE_RESOLVER="$ROOT/ursusboot/scripts/resolve_board_profile.py"
 CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
 POLICY_APPLIER="$ROOT/ursusboot/scripts/apply_board_policy.py"
+ROLE_APPLIER="$ROOT/ursusboot/scripts/apply_runtime_role.py"
 DERIVE="$ROOT/ursusboot/scripts/xg140_md_derive.py"
 DTS_PATCH="$ROOT/ursusboot/patches/140-xg140-ram1-dts.patch"
 OUT="$WORK/out"
@@ -18,13 +24,25 @@ BUILD_EPOCH=${XG140_BUILD_EPOCH:-$(git -C "$ROOT" show -s --format=%ct HEAD 2>/d
 BUILD_COMMIT=$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 OLD_MD_IDENTITY='Nokia XG-040G-MD'
 
+if [ "$ROLE" = persistent ]; then
+    EXPECT_BOOTCMD='bootcmd=ursusdispatch'
+    FORBID_BOOTCMD='bootcmd=ursusweb;true'
+    MODE='PERSISTENT_NATIVE_BL33'
+else
+    EXPECT_BOOTCMD='bootcmd=ursusweb;true'
+    FORBID_BOOTCMD='bootcmd=ursusdispatch'
+    MODE='RAM_RECOVERY_WEBFAILSAFE'
+fi
+
 for x in tar make gcc perl python3 sha256sum strings patch stat sed; do command -v "$x" >/dev/null; done
-for f in "$SOURCE_BUNDLE" "$SEED_CONFIG" "$PROFILE_REGISTRY" "$PROFILE_RESOLVER" "$CONFIG_MERGER" "$POLICY_APPLIER" "$DERIVE" "$DTS_PATCH"; do
+for f in "$SOURCE_BUNDLE" "$SEED_CONFIG" "$PROFILE_REGISTRY" "$PROFILE_RESOLVER" "$CONFIG_MERGER" "$POLICY_APPLIER" "$ROLE_APPLIER" "$DERIVE" "$DTS_PATCH"; do
     [ -f "$f" ] || { echo "XG140 native profile build input missing: $f" >&2; exit 1; }
 done
-mapfile -t PROFILE_CONFIGS < <(python3 "$PROFILE_RESOLVER" --registry "$PROFILE_REGISTRY" --profile "$PROFILE" --config-dir "$ROOT/ursusboot/configs")
-[ "${#PROFILE_CONFIGS[@]}" -ge 3 ] || { echo "UrsusBoot profile did not resolve: $PROFILE" >&2; exit 1; }
-POLICY_HEADER=$(python3 "$PROFILE_RESOLVER" --registry "$PROFILE_REGISTRY" --profile "$PROFILE" --field board_policy_header)
+mapfile -t PROFILE_CONFIGS < <(python3 "$PROFILE_RESOLVER" --registry "$PROFILE_REGISTRY" --profile "$PROFILE" --role "$ROLE" --config-dir "$ROOT/ursusboot/configs")
+[ "${#PROFILE_CONFIGS[@]}" -ge 3 ] || { echo "UrsusBoot profile did not resolve: $PROFILE/$ROLE" >&2; exit 1; }
+RESOLVED_ROLE=$(python3 "$PROFILE_RESOLVER" --registry "$PROFILE_REGISTRY" --profile "$PROFILE" --role "$ROLE" --field runtime_role)
+[ "$RESOLVED_ROLE" = "$ROLE" ] || { echo "Runtime role resolver mismatch: requested=$ROLE resolved=$RESOLVED_ROLE" >&2; exit 1; }
+POLICY_HEADER=$(python3 "$PROFILE_RESOLVER" --registry "$PROFILE_REGISTRY" --profile "$PROFILE" --role "$ROLE" --field board_policy_header)
 BOARD_POLICY="$ROOT/ursusboot/board-policies/$POLICY_HEADER"
 [ -f "$BOARD_POLICY" ] || { echo "UrsusBoot board policy missing: $BOARD_POLICY" >&2; exit 1; }
 
@@ -42,6 +60,7 @@ cd "$WORK/u-boot"
 patch -p1 < "$DTS_PATCH"
 python3 "$DERIVE" "$WORK/u-boot"
 python3 "$POLICY_APPLIER" "$WORK/u-boot" "$BOARD_POLICY"
+python3 "$ROLE_APPLIER" "$WORK/u-boot" --role "$ROLE"
 cp "$SEED_CONFIG" .config
 python3 "$CONFIG_MERGER" --config .config "${PROFILE_CONFIGS[@]}"
 
@@ -72,6 +91,8 @@ grep -q 'label = "flagback"' dts/upstream/src/arm64/airoha/an7581-bell-xg-140g-m
 grep -Fq '#define URSUS_BOARD_POLICY_ID              "xg140-md"' include/ursus_board_policy.h
 grep -Fq '#define URSUS_BOARD_ALLOW_UBI_BOOT          0' include/ursus_board_policy.h
 grep -Fq '#define URSUS_BOARD_APPEND_SERDES_ARGS(dst, cap) 0' include/ursus_board_policy.h
+grep -Fq "#define URSUS_RUNTIME_ROLE_ID \"$ROLE\"" include/ursus_runtime_role.h
+grep -Fq "#define URSUS_RUNTIME_BOOTCMD \"$EXPECT_BOOTCMD\"" include/ursus_runtime_role.h
 
 # Identity must also remain clean after Kconfig generated headers/environment are created.
 if grep -RIlF --exclude-dir=.git -- "$OLD_MD_IDENTITY" . > "$WORK/md-identity-prebuild-files.txt"; then
@@ -81,7 +102,7 @@ if grep -RIlF --exclude-dir=.git -- "$OLD_MD_IDENTITY" . > "$WORK/md-identity-pr
     exit 1
 fi
 
-echo "XG140_PREBUILD_IDENTITY=PASS"
+echo "XG140_PREBUILD_IDENTITY=PASS role=$ROLE"
 make -j"${JOBS:-$(nproc)}"
 
 gcc -O2 -Wall -Wextra lzma1ext_noeopm.c -llzma -o "$WORK/lzma1ext_noeopm"
@@ -91,6 +112,7 @@ cp u-boot u-boot.bin u-boot.map u-boot.sym System.map u-boot.lzma "$OUT/"
 [ -f u-boot.dtb ] && cp u-boot.dtb "$OUT/" || true
 cp .config "$OUT/u-boot.XG140_PROFILE.full.config"
 cp include/ursus_board_policy.h "$OUT/"
+cp include/ursus_runtime_role.h "$OUT/"
 cp dts/upstream/src/arm64/airoha/an7581-bell-xg-140g-md.dts "$OUT/"
 cp arch/arm/dts/an7581-bell-xg-140g-md-u-boot.dtsi "$OUT/"
 cp "$ROOT/ursusflasher/tools/repack_xg140_native_fip.py" "$OUT/"
@@ -103,18 +125,18 @@ for marker in \
     'XG140GMC2P5G' \
     'URSUS_BOARD_PROFILE=xg140-md' \
     'URSUS_STOCKBOOT_TCBOOT_XG140_ARGS source=vendor_env' \
-    'bootcmd=ursusdispatch' \
+    "$EXPECT_BOOTCMD" \
     'ursusstockboot'; do
-    grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "XG140 profile binary marker missing: $marker" >&2; exit 1; }
+    grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "XG140 profile binary marker missing role=$ROLE: $marker" >&2; exit 1; }
 done
 for forbidden in \
     'Nokia XG-040G-MD' \
     'nokia,xg-040g-md' \
     'XG040GMC2P5G' \
     'URSUS_STOCKBOOT_TCBOOT_MD_ARGS' \
-    'bootcmd=ursusweb;true'; do
+    "$FORBID_BOOTCMD"; do
     if grep -Fq "$forbidden" "$WORK/u-boot.strings"; then
-        echo "XG140 profile forbidden marker survived: $forbidden" >&2
+        echo "XG140 profile forbidden marker survived role=$ROLE: $forbidden" >&2
         echo "=== binary offsets ===" >&2
         strings -t x u-boot.bin | grep -F "$forbidden" >&2 || true
         echo "=== linked ELF offsets ===" >&2
@@ -137,20 +159,21 @@ printf '%s\n' \
   "UrsusBoot ${VERSION}" \
   "TARGET=Bell/Nokia XG-140G-MD / Airoha AN7581" \
   "PROFILE=${PROFILE}" \
+  "RUNTIME_ROLE=${ROLE}" \
   "SOC=AN7581" \
   "DERIVATION=md-derived" \
   "BOARD_POLICY=${POLICY_HEADER}" \
-  "MODE=PERSISTENT_NATIVE_BL33" \
+  "MODE=${MODE}" \
   "ENV=NOWHERE_VENDOR_ENV_PRESERVED" \
-  "BOOTCMD=ursusdispatch" \
+  "BOOTCMD=${EXPECT_BOOTCMD#bootcmd=}" \
   "STOCK_BOOT_CORE=COMMON_MD_DERIVED" \
   "STOCK_SERDES=VENDOR_ENV_NO_MD_OVERRIDE" \
   "UBI_AUTODETECT=DISABLED_BY_BOARD_POLICY" \
-  "FIP=DEVICE_NATIVE_DONOR_REQUIRED" \
+  "FIP=DEVICE_NATIVE_DONOR_REQUIRED_FOR_PERSISTENT" \
   "FIP_REPACKER=repack_xg140_native_fip.py" \
   "BUILD_COMMIT=${BUILD_COMMIT}" \
   "SOURCE_DATE_EPOCH=${BUILD_EPOCH}" \
   "PROFILE_KCONFIG=PASS" > "$OUT/XG140-PROFILE-BUILD-INFO.txt"
 
-echo "XG140_NATIVE_PROFILE_BUILD=PASS version=${VERSION} profile=${PROFILE} policy=${POLICY_HEADER} commit=${BUILD_COMMIT} epoch=${BUILD_EPOCH}"
+echo "XG140_NATIVE_PROFILE_BUILD=PASS version=${VERSION} profile=${PROFILE} role=${ROLE} policy=${POLICY_HEADER} commit=${BUILD_COMMIT} epoch=${BUILD_EPOCH}"
 echo "Artifacts: $OUT"
