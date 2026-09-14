@@ -5,6 +5,7 @@ on:
     branches:
       - feature/ursusboot-modular-airoha
     paths:
+      - 'config/BOARD_PROFILES.json'
       - 'ursusboot/configs/**'
       - 'ursusboot/board-policies/**'
       - 'ursusboot/scripts/**'
@@ -28,12 +29,14 @@ jobs:
           python3 -m py_compile \
             ursusboot/scripts/resolve_board_profile.py \
             ursusboot/scripts/selftest_board_profiles.py \
+            ursusboot/scripts/selftest_profile_catalog_bridge.py \
             ursusboot/scripts/apply_board_policy.py \
             ursusboot/scripts/xg140_md_derive.py
           bash -n ursusboot/scripts/build_alpha5_test61.sh
           bash -n ursusboot/scripts/build_mf_runtime.sh
           bash -n ursusboot/scripts/build_xg140_native_profile.sh
           python3 ursusboot/scripts/selftest_board_profiles.py
+          python3 ursusboot/scripts/selftest_profile_catalog_bridge.py
           for p in xg040-md xg040-mf xg140-md; do
             echo "=== $p ==="
             python3 ursusboot/scripts/resolve_board_profile.py \
@@ -133,7 +136,8 @@ jobs:
           mkdir -p artifact
           cp -av "$OUT"/* artifact/
           cp -av xg140-profile-build.log artifact/
-          cp -av ursusboot/configs/board-profiles.json artifact/
+          cp -av config/BOARD_PROFILES.json artifact/URSUSFLASHER_BOARD_PROFILES.json
+          cp -av ursusboot/configs/board-profiles.json artifact/URSUSBOOT_BOARD_PROFILES.json
           cp -av ursusboot/board-policies/xg140-md.h artifact/
           cp -av ursusflasher/tools/repack_xg140_native_fip.py artifact/
           cat > artifact/STATUS.txt <<'EOF'
