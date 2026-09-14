@@ -1,5 +1,15 @@
 {
   "schema": 1,
+  "runtime_roles": {
+    "persistent": {
+      "bootcmd": "ursusdispatch",
+      "purpose": "normal persistent supervisor boot"
+    },
+    "ram-recovery": {
+      "bootcmd": "ursusweb;true",
+      "purpose": "RAM-only WebFailsafe recovery"
+    }
+  },
   "profiles": {
     "xg040-md": {
       "vendor": "Nokia",
@@ -16,7 +26,9 @@
       "boot_policy": "md-stock-openwrt",
       "layout_policy": "md-ubi",
       "environment_policy": "ubi-redundant",
-      "derivation": "native-md"
+      "derivation": "native-md",
+      "default_role": "persistent",
+      "allowed_roles": ["persistent", "ram-recovery"]
     },
     "xg040-mf": {
       "vendor": "Nokia",
@@ -33,7 +45,9 @@
       "boot_policy": "mf-stock-openwrt",
       "layout_policy": "mf-ubi",
       "environment_policy": "ubi-redundant",
-      "derivation": "native-mf"
+      "derivation": "native-mf",
+      "default_role": "persistent",
+      "allowed_roles": ["persistent", "ram-recovery"]
     },
     "xg140-md": {
       "vendor": "Bell/Nokia",
@@ -50,7 +64,9 @@
       "boot_policy": "xg140-stock-ab-openwrt",
       "layout_policy": "xg140-native-stock",
       "environment_policy": "vendor-env-preserved",
-      "derivation": "md-derived"
+      "derivation": "md-derived",
+      "default_role": "persistent",
+      "allowed_roles": ["persistent", "ram-recovery"]
     }
   }
 }
