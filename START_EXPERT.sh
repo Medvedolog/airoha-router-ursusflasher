@@ -1,6 +1,8 @@
 #!/bin/sh
 cd "$(dirname "$0")" || exit 1
-entry=data/expert_multi.py
+entry=data/expert_airoha.py
+[ -f "$entry" ] || entry=ursusflasher/src/expert_airoha.py
+[ -f "$entry" ] || entry=data/expert_multi.py
 [ -f "$entry" ] || entry=ursusflasher/src/expert_multi.py
 python3 "$entry" "$@"
 rc=$?
