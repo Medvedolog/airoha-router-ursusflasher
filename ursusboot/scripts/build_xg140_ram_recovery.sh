@@ -77,25 +77,58 @@ printf '%s\n' '-UrsusBoot-0.1.0-xg140-native1' > .scmversion
 make olddefconfig
 make -j"${JOBS:-$(nproc)}"
 
-# Produce only the board-specific BL33 payload here. The persistent FIP is built
-# on the operator PC from that unit's own stock mtd0 backup by the dedicated
-# XG140 native repacker packaged by CI. Do not export the legacy MD/MF checksum
-# repacker from the U-Boot source tree.
+# Persistent BL33 must retain the normal ursusdispatch policy. Compress it before
+# deriving the RAM-only emergency image.
 gcc -O2 -Wall -Wextra lzma1ext_noeopm.c -llzma -o "$WORK/lzma1ext_noeopm"
 "$WORK/lzma1ext_noeopm" u-boot.bin u-boot.lzma 1048576
+cp -av u-boot.bin u-boot-normal.bin
 
-cp -av u-boot.bin u-boot u-boot.map u-boot.sym System.map u-boot.lzma "$OUT/"
+# RAM recovery must not race into stock Linux. CONFIG_ENV_IS_NOWHERE means the
+# compiled default environment is authoritative. Replace the one fixed-length
+# bootcmd value only in the RAM raw binary: 13-byte command -> 13-byte command.
+# Persistent u-boot.lzma above remains byte-for-byte the normal ursusdispatch BL33.
+python3 - <<'PY'
+from pathlib import Path
+p = Path('u-boot.bin')
+data = p.read_bytes()
+old = b'bootcmd=ursusdispatch'
+new = b'bootcmd=ursusweb;true'
+assert len(old) == len(new)
+count = data.count(old)
+if count != 1:
+    raise SystemExit(f'expected exactly one default bootcmd in u-boot.bin, found {count}')
+data = data.replace(old, new, 1)
+if old in data or data.count(new) != 1:
+    raise SystemExit('RAM emergency bootcmd patch verification failed')
+p.write_bytes(data)
+print('XG140_RAM_BOOTCMD=ursusweb;true')
+PY
+
+cp -av u-boot.bin u-boot-normal.bin u-boot u-boot.map u-boot.sym System.map u-boot.lzma "$OUT/"
 [ -f u-boot.dtb ] && cp -av u-boot.dtb "$OUT/" || true
 cp -av "$XG_DTS" "$OUT/"
 cp -av "$XG_UBOOT_DTSI" "$OUT/"
 cp -av .config "$OUT/u-boot.xg140-native.config"
+
+python3 - <<'PY'
+from pathlib import Path
+ram = Path('u-boot.bin').read_bytes()
+normal = Path('u-boot-normal.bin').read_bytes()
+if b'bootcmd=ursusweb;true' not in ram or b'bootcmd=ursusdispatch' in ram:
+    raise SystemExit('RAM u-boot.bin is not forced to WebFailsafe')
+if b'bootcmd=ursusdispatch' not in normal or b'bootcmd=ursusweb;true' in normal:
+    raise SystemExit('normal reference u-boot-normal.bin lost ursusdispatch')
+if ram == normal:
+    raise SystemExit('RAM and normal binaries unexpectedly identical')
+print('XG140_RAM_WEBFAILSAFE_FORCE=PASS')
+PY
 
 MKIMAGE=$(command -v mkimage || true)
 if [ -z "$MKIMAGE" ] && [ -x tools/mkimage ]; then MKIMAGE="$PWD/tools/mkimage"; fi
 if [ -n "$MKIMAGE" ]; then
   "$MKIMAGE" -A arm64 -O u-boot -T standalone -C none \
     -a 0x81e00000 -e 0x81e00000 \
-    -n 'UrsusBoot XG140 RAM recovery' \
+    -n 'UrsusBoot XG140 RAM emergency WebFailsafe' \
     -d u-boot.bin "$OUT/ursusboot-xg140-ram.uimg" || true
 fi
 
@@ -105,9 +138,16 @@ UrsusBoot XG-140G-MD NATIVE1
 TARGET
 Bell/Nokia XG-140G-MD / XG140GMC2P5G / AN7581DT / 512 MiB.
 
+RAM EMERGENCY POLICY
+- u-boot.bin is RAM-only and has default bootcmd forced to `ursusweb;true`.
+- After tcboot `go 0x81e00000`, it enters UrsusBoot WebFailsafe directly; Reset 5s is not required.
+- u-boot-normal.bin is the unmodified normal-dispatch raw reference.
+- u-boot.lzma was generated from the NORMAL binary before the RAM-only bootcmd patch.
+- Therefore the persistent BL33 retains normal `ursusdispatch`; only the RAM rescue image is forced to WebFailsafe.
+
 PERSISTENT FIP POLICY
 - CI does NOT use any XG-040G-MD donor FIP.
-- The artifact contains XG140 BL33 as u-boot.lzma; CI packages the dedicated XG140 native repacker.
+- The artifact contains XG140 persistent BL33 as u-boot.lzma; CI packages the dedicated XG140 native repacker.
 - START_INSTALL_PERSISTENT.cmd asks for this router's own mtd0_bootloader.bin(.gz).
 - The host extracts the native XG140 FIP from physical 0x800 up to its declared end.
 - For the checksum-free Nokia stock lineage, every native FIP entry is preserved byte-for-byte;
@@ -117,19 +157,24 @@ PERSISTENT FIP POLICY
 - Final FIP physical end must remain below the stock env at 0x7c000.
 - BootROM prefix 0x0..0x7ff and stock env 0x7c000..0x7ffff are preserved by the
   device-side STOCK updater from live mtd0; full 512 KiB readback is required.
-- One ordinary y/N is required immediately before the persistent write.
 
-FLOW
-1. RAM-start u-boot.bin at 0x81e00000 from stock tcboot UART.
-2. Verify UrsusBoot/WebFailsafe at 192.168.1.1.
-3. Run START_INSTALL_PERSISTENT.cmd.
-4. Select your own XG140 mtd0_bootloader.bin or mtd0_bootloader.bin.gz backup.
-5. Host validates 0x80000 size, BootROM prefix SHA256, stock env CRC, native FIP,
-   and TB_FW SHA256; then builds a native-hybrid FIP by replacing only final BL33/NT_FW.
-6. One y/N.
-7. WebFailsafe STOCK updater writes the 512 KiB reconstructed boot area and verifies full readback.
-8. Reboot into persistent XG140 UrsusBoot only after readback PASS.
-9. Flash only the correct Bell XG-140G-MD sysupgrade.
+EMERGENCY FLOW
+1. START_EMERGENCY_XG140.cmd builds the native hybrid from this unit's own backup.
+2. If UrsusBoot HTTP is not already alive, it auto-selects the USB/VCP UART and waits for tcboot.
+3. It stops autoboot/authenticates, XMODEM-loads RAM-only u-boot.bin to 0x81e00000 and runs it.
+4. RAM u-boot.bin enters WebFailsafe directly, without Reset hold.
+5. Host waits for /api/status, uploads the candidate, starts one STOCK writer with no y/N,
+   waits for full readback PASS, then requests reboot.
+
+NORMAL ENGINEERING FLOW
+1. RAM-start u-boot.bin at 0x81e00000 from stock tcboot UART; it enters WebFailsafe directly.
+2. Run START_INSTALL_PERSISTENT.cmd.
+3. Select your own XG140 mtd0_bootloader.bin or mtd0_bootloader.bin.gz backup.
+4. Host validates and builds a native-hybrid FIP by replacing only final BL33/NT_FW.
+5. One y/N in the normal helper.
+6. WebFailsafe STOCK updater writes the 512 KiB reconstructed boot area and verifies full readback.
+7. Reboot into persistent XG140 UrsusBoot only after readback PASS.
+8. Flash only the correct Bell XG-140G-MD sysupgrade.
 
 Airoha BootROM UART recovery remains the emergency escape path.
 EOF
