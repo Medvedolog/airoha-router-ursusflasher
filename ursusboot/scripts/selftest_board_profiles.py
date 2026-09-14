@@ -7,6 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CFG = ROOT / "ursusboot" / "configs"
+POLICY = ROOT / "ursusboot" / "board-policies"
 REGISTRY = CFG / "board-profiles.json"
 
 ASSIGN_RE = re.compile(r"^(CONFIG_[A-Za-z0-9_]+)=")
@@ -51,9 +52,28 @@ for name, profile in profiles.items():
         if not path.is_file():
             fail(f"{name}: missing fragment {frag}")
 
-    common = fragments[0]
-    if common != "ursusboot-common.cfg":
+    if fragments[0] != "ursusboot-common.cfg":
         fail(f"{name}: common fragment must be first")
+
+    policy_name = profile.get("board_policy_header")
+    if not isinstance(policy_name, str) or not policy_name.endswith(".h"):
+        fail(f"{name}: board_policy_header missing")
+    policy_path = POLICY / policy_name
+    if not policy_path.is_file():
+        fail(f"{name}: board policy header missing: {policy_name}")
+    pdata = policy_path.read_text(encoding="utf-8")
+    for marker in (
+        f'#define URSUS_BOARD_POLICY_ID              "{name}"',
+        "URSUS_BOARD_STOCK_MASTER_BASE",
+        "URSUS_BOARD_STOCK_SLAVE_BASE",
+        "URSUS_BOARD_STOCK_ENV_BASE",
+        "URSUS_BOARD_STOCK_HDR_MAGIC",
+        "URSUS_BOARD_APPEND_SERDES_ARGS",
+        "URSUS_BOARD_ALLOW_UBI_BOOT",
+        "URSUS_BOARD_ALLOW_FACTORY_FIT",
+    ):
+        if marker not in pdata:
+            fail(f"{name}: policy marker missing: {marker}")
 
 md = profiles["xg040-md"]
 mf = profiles["xg040-mf"]
@@ -86,7 +106,13 @@ ubi = (CFG / "ursusboot-storage-ubi-redundant.cfg").read_text(encoding="utf-8")
 if "CONFIG_ENV_IS_IN_UBI=y" not in ubi or "CONFIG_ENV_REDUNDANT=y" not in ubi:
     fail("UBI redundant storage policy invalid")
 
+xgp = (POLICY / xg["board_policy_header"]).read_text(encoding="utf-8")
+if "#define URSUS_BOARD_ALLOW_UBI_BOOT          0" not in xgp:
+    fail("XG140 must not inherit MD UBI boot detection implicitly")
+if "#define URSUS_BOARD_APPEND_SERDES_ARGS(dst, cap) 0" not in xgp:
+    fail("XG140 must not inherit unproven MD SerDes overrides")
+
 print("URSUS_PROFILE_SELFTEST=PASS")
 for name in sorted(profiles):
     p = profiles[name]
-    print(f"PROFILE {name}: soc={p['soc']} derivation={p['derivation']} env={p['environment_policy']} fragments={','.join(p['fragments'])}")
+    print(f"PROFILE {name}: soc={p['soc']} derivation={p['derivation']} env={p['environment_policy']} policy={p['board_policy_header']} fragments={','.join(p['fragments'])}")
