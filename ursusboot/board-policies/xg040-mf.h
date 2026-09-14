@@ -3,6 +3,7 @@
 #define __URSUS_BOARD_POLICY_H__
 
 #define URSUS_BOARD_POLICY_ID              "xg040-mf"
+#define URSUS_BOARD_PROFILE_MARKER         "URSUS_BOARD_PROFILE=xg040-mf"
 #define URSUS_BOARD_MODEL                  "Nokia XG-040G-MF"
 #define URSUS_BOARD_COMPATIBLE             "nokia,xg-040g-mf"
 
