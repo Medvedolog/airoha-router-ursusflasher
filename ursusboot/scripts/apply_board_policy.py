@@ -23,6 +23,48 @@ def sub_once(text: str, pattern: str, repl: str, label: str, flags: int = 0) -> 
     return text
 
 
+def split_c_literal_pattern(value: str) -> str:
+    """Match an ASCII token even when a generated C string splits it across literals."""
+    parts: list[str] = []
+    for idx, ch in enumerate(value):
+        parts.append(re.escape(ch))
+        if idx != len(value) - 1:
+            parts.append(r'(?:(?:"\s*")?)')
+    return "".join(parts)
+
+
+def patch_web_ui(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    include = "#include <ursus_board_policy.h>\n"
+    if include not in text:
+        text = include + text
+
+    # The generated UI source historically split model names at arbitrary C-string
+    # boundaries (for example XG-040G-M"\n"D), so ordinary text replacement is not
+    # sufficient. Collapse every known inherited board name into the policy macro.
+    known_models = (
+        "Nokia XG-040G-MD",
+        "Nokia XG-040G-MF",
+        "Bell XG-140G-MD",
+    )
+    replaced = 0
+    for model in known_models:
+        pattern = split_c_literal_pattern(model)
+        text, count = re.subn(pattern, lambda _m: '" URSUS_BOARD_MODEL "', text)
+        replaced += count
+
+    if replaced < 1:
+        raise SystemExit("board policy WebFailsafe model anchor missing")
+    if "URSUS_BOARD_MODEL" not in text:
+        raise SystemExit("board policy WebFailsafe model macro missing after transform")
+
+    for model in known_models:
+        if re.search(split_c_literal_pattern(model), text):
+            raise SystemExit(f"hard-coded WebFailsafe board model survived: {model}")
+
+    path.write_text(text, encoding="utf-8")
+
+
 def patch_dispatch(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
     if "#include <ursus_board_policy.h>" not in text:
@@ -118,6 +160,7 @@ def patch_stock(path: Path) -> None:
 def verify(root: Path) -> None:
     dispatch = (root / "cmd/ursusdispatch.c").read_text(encoding="utf-8")
     stock = (root / "cmd/ursusstock.c").read_text(encoding="utf-8")
+    ui = (root / "include/ursusweb_ui.inc").read_text(encoding="utf-8")
     for token in (
         "URSUS_BOARD_PROFILE_MARKER",
         "URSUS_BOARD_ALLOW_UBI_BOOT",
@@ -138,6 +181,8 @@ def verify(root: Path) -> None:
     ):
         if token not in stock:
             raise SystemExit(f"board policy stock marker missing: {token}")
+    if "URSUS_BOARD_MODEL" not in ui or "#include <ursus_board_policy.h>" not in ui:
+        raise SystemExit("board policy WebFailsafe identity transform missing")
     for forbidden in (
         "#define STOCK_MASTER_BASE     0x",
         "#define STOCK_SLAVE_BASE      0x",
@@ -161,10 +206,11 @@ def main() -> int:
     if not include.parent.is_dir():
         raise SystemExit(f"U-Boot include directory missing: {include.parent}")
     shutil.copy2(policy, include)
+    patch_web_ui(root / "include" / "ursusweb_ui.inc")
     patch_dispatch(root / "cmd" / "ursusdispatch.c")
     patch_stock(root / "cmd" / "ursusstock.c")
     verify(root)
-    print(f"URSUS_BOARD_POLICY_APPLY=PASS policy={policy.stem}")
+    print(f"URSUS_BOARD_POLICY_APPLY=PASS policy={policy.stem} web_identity=policy")
     return 0
 
 
