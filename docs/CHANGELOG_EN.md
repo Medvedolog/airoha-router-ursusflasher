@@ -1,3 +1,17 @@
+# Development checkpoint — XG140 NATIVE1 / stock access RE (2026-09-14)
+
+- Added a dedicated XG-140G-MD development path on `feature/xg140-ursusboot-ram-recovery`; `main` and the published MD/MF production contract are unchanged.
+- Physical Bell/Nokia XG-140G-MD hardware confirms `XG140GMC2P5G`, AN7581DT, 512 MiB DDR4-2666 and SkyHigh S35ML02G3 256 MiB; a restore-grade full backup was captured before persistent XG140 experiments.
+- XG140 OpenWrt initramfs has booted on hardware: `bell,xg-140g-md`, target `airoha/an7581`, Linux 6.18.36; EN8811H 2.5G Ethernet and USB xHCI work. Production MAC recovery and voice support remain separate tasks.
+- After an accidental XG-040G-MD image write, XG140 stock tcboot remains alive while stock slot payload validation fails; the recovery architecture is therefore tcboot UART/XMODEM -> XG140 UrsusBoot RAM -> persistent UrsusBoot -> correct XG140 OpenWrt.
+- Native `mtd0` forensics: size `0x80000`, FIP at physical `0x800`, protected stock env at `0x7c000..0x7ffff`; BootROM prefix SHA256 `82830140f4f8842702d0569065c27071b7cc24e0876e6c487cb4d9d81c294dd7`, TB_FW SHA256 `07c9e1542a3de845055faa2244bbd07adc8c5a136811a61a0d678ec8fff5ee5e`.
+- Persistent field FIP now uses a **native donor**: `xg140_native_persistent_install.py` builds the hybrid from this unit's own `mtd0_bootloader.bin(.gz)`, replacing only NT_FW/BL33 and checksum; all other native FIP entries are checked byte-for-byte. No XG-040 donor is required for field FIP construction.
+- GitHub Actions run `34786299472` completed with `SUCCESS`; artifact `ursusboot-xg140-native1-4fb0dc93a044e1b87d92ad0f80f545ffdcfa9bce`, digest `sha256:49a17e1de24ab55ac82547e2946a9ac2d45d84758a320e2371efd18a49d5de47`.
+- XG140 stock config/service plumbing was reverse engineered: `TeleComAccount` carries privileged Web identity and `ServiceManage` carries Telnet/FactoryTelnet/SSH/su/vtysh fields; the credential-gated `system.cgi` factory path validates `flag/au/ap` through OID 59 and toggles `FactoryTelnetEnable` through OID 74. Plaintext device credentials are intentionally excluded from public Git/logs.
+- Current direct XG140 stock-bootstrap target is privileged Web -> Factory Telnet -> ordinary Telnet shell -> proven `su` to an actual UID0 account -> `id -u == 0`. The XG040 FTP/Samba escalation remains fallback only.
+- Before the first persistent hardware write: remove the duplicate `[y/N]` in the native helper plus `update_bootloader(confirm=True)`; audit STOCK `/api/update-ursusboot` for XG040-only hardcoding and full mtd0 readback/env preservation; tighten the persistent-identity gate before sysupgrade; verify XG140 stock-layout geometry and UrsusBoot Ethernet on hardware.
+- XG140 NATIVE1 status: **CI PASS / PERSISTENT HW WRITE PENDING**. CI success is not hardware acceptance.
+
 # Development checkpoint — `feature/mf-an7583` / MF2 HWTEST4 / STOCKRESTORE1 (2026-09-09)
 
 - Added the MD/MF `BoardProfile` layer and family-aware device/write policy. MD remains the reference production/HW baseline; MF broad persistent writers remain disabled.
