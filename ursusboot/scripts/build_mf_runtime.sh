@@ -10,6 +10,7 @@ PROFILE_REGISTRY="$ROOT/ursusboot/configs/board-profiles.json"
 PROFILE_RESOLVER="$ROOT/ursusboot/scripts/resolve_board_profile.py"
 MODE_CONFIG="$ROOT/ursusboot/configs/ursusboot-runtime-mf.cfg"
 CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
+POLICY_APPLIER="$ROOT/ursusboot/scripts/apply_board_policy.py"
 ENVFILE="$ROOT/ursusboot/configs/an7583_nokia_xg-040g-mf_RUNTIME_env"
 MF_BASE_TRANSFORM="$ROOT/ursusboot/scripts/mf2_ramreadonly_transform.py"
 RUNTIME_ENABLE="$ROOT/ursusboot/scripts/mf_runtime_enable.py"
@@ -30,11 +31,14 @@ EXPECTED_DONOR_SIZE=339010
 EXPECTED_DONOR_SHA=8bfe8870e44923a463a3ed66c8b1906214f5c820fd8c15865c63430185de8bb2
 
 for x in tar make gcc perl python3 sha256sum strings patch stat sed; do command -v "$x" >/dev/null; done
-for f in "$SOURCE_BUNDLE" "$SEED_CONFIG" "$PROFILE_REGISTRY" "$PROFILE_RESOLVER" "$MODE_CONFIG" "$CONFIG_MERGER" "$ENVFILE" "$MF_BASE_TRANSFORM" "$RUNTIME_ENABLE" "$BOARD_HW" "$REPACK" "$MEDVE_PATCHER" "$PRELOADER" "$DONOR"; do
+for f in "$SOURCE_BUNDLE" "$SEED_CONFIG" "$PROFILE_REGISTRY" "$PROFILE_RESOLVER" "$MODE_CONFIG" "$CONFIG_MERGER" "$POLICY_APPLIER" "$ENVFILE" "$MF_BASE_TRANSFORM" "$RUNTIME_ENABLE" "$BOARD_HW" "$REPACK" "$MEDVE_PATCHER" "$PRELOADER" "$DONOR"; do
     [ -f "$f" ] || { echo "MF runtime build input missing: $f" >&2; exit 1; }
 done
 mapfile -t PROFILE_CONFIGS < <(python3 "$PROFILE_RESOLVER" --registry "$PROFILE_REGISTRY" --profile "$PROFILE" --config-dir "$ROOT/ursusboot/configs")
 [ "${#PROFILE_CONFIGS[@]}" -ge 3 ] || { echo "UrsusBoot profile did not resolve: $PROFILE" >&2; exit 1; }
+POLICY_HEADER=$(python3 "$PROFILE_RESOLVER" --registry "$PROFILE_REGISTRY" --profile "$PROFILE" --field board_policy_header)
+BOARD_POLICY="$ROOT/ursusboot/board-policies/$POLICY_HEADER"
+[ -f "$BOARD_POLICY" ] || { echo "UrsusBoot board policy missing: $BOARD_POLICY" >&2; exit 1; }
 [ "$(stat -c %s "$PRELOADER")" = "$EXPECTED_PRELOADER_SIZE" ] || { echo "MF recovery preloader size mismatch" >&2; exit 1; }
 [ "$(sha256sum "$PRELOADER" | awk '{print $1}')" = "$EXPECTED_PRELOADER_SHA" ] || { echo "MF recovery preloader SHA mismatch" >&2; exit 1; }
 [ "$(stat -c %s "$DONOR")" = "$EXPECTED_DONOR_SIZE" ] || { echo "MF donor size mismatch" >&2; exit 1; }
@@ -54,6 +58,7 @@ cp -a "$WORK/u-boot" "$WORK/u-boot-pristine"
 python3 "$MF_BASE_TRANSFORM" "$WORK/u-boot"
 python3 "$RUNTIME_ENABLE" "$WORK/u-boot" "$WORK/u-boot-pristine"
 python3 "$BOARD_HW" "$WORK/u-boot"
+python3 "$POLICY_APPLIER" "$WORK/u-boot" "$BOARD_POLICY"
 printf '%s\n' "-UrsusBoot-${VERSION}" > "$WORK/u-boot/.scmversion"
 sed -E -i "s/^#define URSUS_VERSION \"[^\"]+\"/#define URSUS_VERSION \"${VERSION}\"/" "$WORK/u-boot/include/ursus_version.h"
 cp "$ENVFILE" "$WORK/u-boot/defenvs/an7583_nokia_xg-040g-mf_runtime_env"
@@ -89,6 +94,9 @@ grep -Fq 'URSUS_MF2_HWTEST8_LED_FIX' drivers/net/airoha_eth.c
 grep -Fq 'function = "phy4_led0";' arch/arm/dts/an7583-nokia-xg-040g-mf.dts
 grep -Fq 'obj-y += ursusweb.o ursusubi.o ursusdispatch.o ursusupdate.o ursusstock.o ursusled.o' cmd/Makefile
 
+grep -Fq '#define URSUS_BOARD_POLICY_ID              "xg040-mf"' include/ursus_board_policy.h
+grep -Fq '#define URSUS_BOARD_STOCK_HDR_MAGIC         "HDR3"' include/ursus_board_policy.h
+
 make -j"${JOBS:-$(nproc)}"
 
 python3 "$REPACK" \
@@ -109,6 +117,7 @@ for marker in \
     "$VERSION" \
     'Nokia XG-040G-MF' \
     'Airoha AN7583' \
+    'URSUS_BOARD_PROFILE=xg040-mf' \
     'URSUS_MF2_HWTEST8_LED_END result=OK' \
     'URSUS_UBI_MIGRATION_ENABLED=1' \
     'URSUS_UBI_UPDATE_ENABLED=1' \
@@ -152,6 +161,7 @@ printf '%s\n' \
   "PROFILE=${PROFILE}" \
   "SOC=AN7583" \
   "DERIVATION=native-mf" \
+  "BOARD_POLICY=${POLICY_HEADER}" \
   "MODE=PERSISTENT_RUNTIME" \
   "SOURCE=TEST61 exact source snapshot + TEST62 MF fixes" \
   "BUILD_COMMIT=${BUILD_COMMIT}" \
@@ -167,5 +177,5 @@ printf '%s\n' \
   "PROFILE_KCONFIG=PASS" \
   "MODE_KCONFIG=RUNTIME" > "$OUT/MF-RUNTIME-BUILD-INFO.txt"
 
-echo "MF_RUNTIME_BUILD=PASS version=${VERSION} profile=${PROFILE} commit=${BUILD_COMMIT} epoch=${BUILD_EPOCH}"
+echo "MF_RUNTIME_BUILD=PASS version=${VERSION} profile=${PROFILE} policy=${POLICY_HEADER} commit=${BUILD_COMMIT} epoch=${BUILD_EPOCH}"
 echo "Artifacts: $OUT"
