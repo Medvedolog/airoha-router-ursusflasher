@@ -3,6 +3,7 @@
 #define __URSUS_BOARD_POLICY_H__
 
 #define URSUS_BOARD_POLICY_ID              "xg140-md"
+#define URSUS_BOARD_PROFILE_MARKER         "URSUS_BOARD_PROFILE=xg140-md"
 #define URSUS_BOARD_MODEL                  "Bell XG-140G-MD"
 #define URSUS_BOARD_COMPATIBLE             "bell,xg-140g-md"
 
