@@ -1,0 +1,211 @@
+name: Build XG140 Emergency Initramfs Bridge
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/xg140-ursusboot-ram-recovery
+    paths:
+      - .github/workflows/xg140-emergency-initramfs.yml
+      - openwrt/xg140-rescue/**
+      - ursusflasher/src/xg140_emergency_initramfs.py
+      - ursusflasher/src/xg140_emergency_persistent.py
+      - ursusflasher/src/xg140_native_persistent_install.py
+      - ursusflasher/src/proven_backend.py
+      - ursusflasher/src/ursus_web_client.py
+      - ursusflasher/src/ui_terms.py
+      - ursusflasher/tools/repack_xg140_native_fip.py
+      - ursusflasher/tools/selftest_xg140_native_fip_repack.py
+      - ursusboot/scripts/build_xg140_ram_recovery.sh
+      - ursusboot/patches/140-xg140-ram1-dts.patch
+      - ursusboot/configs/u-boot.TEST61.full.config
+      - ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst
+      - toolchains/openwrt-sdk-r35906/**
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      OPENWRT_REPO: hzyitc/openwrt-redmi-ax3000
+      OPENWRT_REF: b27424f28a034ee1d18409b7952616ba9a40cca4
+      PROFILE: bell_xg-140g-md
+
+    steps:
+      - name: Checkout UrsusFlasher
+        uses: actions/checkout@v4
+        with:
+          path: kit
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gcc-multilib gettext git \
+            libncurses-dev libssl-dev liblzma-dev python3 python3-setuptools \
+            rsync swig unzip zlib1g-dev file wget jq time xz-utils zstd \
+            device-tree-compiler perl
+
+      - name: Test native XG140 FIP repacker
+        working-directory: kit
+        run: python3 ursusflasher/tools/selftest_xg140_native_fip_repack.py
+
+      - name: Build persistent XG140 BL33 payload
+        working-directory: kit
+        run: |
+          set -o pipefail
+          chmod +x ursusboot/scripts/build_xg140_ram_recovery.sh
+          JOBS="$(nproc)" ursusboot/scripts/build_xg140_ram_recovery.sh 2>&1 | tee xg140-ursusboot-build.log
+          test -s work/xg140-ram-recovery/out/u-boot.lzma
+
+      - name: Checkout XG140 OpenWrt tree
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.OPENWRT_REPO }}
+          ref: ${{ env.OPENWRT_REF }}
+          path: openwrt
+          fetch-depth: 1
+
+      - name: Prepare rescue-only writable boot area and userspace
+        run: |
+          set -e
+          DTS=openwrt/target/linux/airoha/dts/an7581-xg-140g-md.dts
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('openwrt/target/linux/airoha/dts/an7581-xg-140g-md.dts')
+          s = p.read_text()
+          start = s.index('partition@0 {\n\t\t\tlabel = "bootloader";')
+          end = s.index('\n\t\t};', start) + len('\n\t\t};')
+          block = s[start:end]
+          if '\n\t\t\tread-only;' not in block:
+              raise SystemExit('bootloader read-only marker missing from source DTS')
+          block2 = block.replace('\n\t\t\tread-only;', '', 1)
+          s2 = s[:start] + block2 + s[end:]
+          if s2 == s:
+              raise SystemExit('rescue DTS patch made no change')
+          p.write_text(s2)
+          print('XG140_RESCUE_BOOTLOADER_RW_DTS=PASS')
+          PY
+          grep -A10 'label = "bootloader"' "$DTS" | grep -q 'reg = <0x00000000 0x00080000>;'
+          if grep -A10 'label = "bootloader"' "$DTS" | grep -q 'read-only;'; then
+            echo 'bootloader is still read-only in rescue DTS' >&2
+            exit 1
+          fi
+
+          mkdir -p openwrt/files/usr/sbin openwrt/files/etc
+          cp -av kit/openwrt/xg140-rescue/xg140-ursus-install openwrt/files/usr/sbin/
+          cp -av kit/openwrt/xg140-rescue/ursus-xg140-rescue-id openwrt/files/etc/
+          chmod 0755 openwrt/files/usr/sbin/xg140-ursus-install
+
+      - name: Configure minimal rescue initramfs
+        working-directory: openwrt
+        run: |
+          cat > .config <<'EOF'
+          CONFIG_TARGET_airoha=y
+          CONFIG_TARGET_airoha_an7581=y
+          CONFIG_TARGET_airoha_an7581_DEVICE_bell_xg-140g-md=y
+          CONFIG_PACKAGE_lrzsz=y
+          CONFIG_PACKAGE_mtd=y
+          EOF
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+          make defconfig
+          grep -q '^CONFIG_TARGET_airoha_an7581_DEVICE_bell_xg-140g-md=y' .config
+          grep -q '^CONFIG_PACKAGE_lrzsz=y' .config
+          grep -q '^CONFIG_PACKAGE_mtd=y' .config
+
+      - name: Download OpenWrt sources
+        working-directory: openwrt
+        run: |
+          make download -j8
+          find dl -type f -size -1024c -delete
+
+      - name: Build XG140 rescue initramfs
+        working-directory: openwrt
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" V=s 2>&1 | tee ../xg140-rescue-openwrt-build.log || {
+            echo 'Parallel build failed; retrying single-threaded for diagnostics'
+            make -j1 V=s 2>&1 | tee -a ../xg140-rescue-openwrt-build.log
+          }
+
+      - name: Collect self-contained emergency artifact
+        run: |
+          set -e
+          TARGET_DIR=openwrt/bin/targets/airoha/an7581
+          INITRAMFS="$(find "$TARGET_DIR" -maxdepth 1 -type f -name '*bell_xg-140g-md-initramfs-uImage.itb' -print -quit)"
+          test -n "$INITRAMFS"
+          test -s "$INITRAMFS"
+
+          mkdir -p artifact/web-helper
+          cp -av "$INITRAMFS" artifact/xg140-rescue-initramfs.itb
+          cp -av kit/work/xg140-ram-recovery/out/u-boot.lzma artifact/
+          cp -av kit/ursusflasher/tools/repack_xg140_native_fip.py artifact/
+          cp -av kit/ursusflasher/src/xg140_emergency_initramfs.py artifact/web-helper/
+          cp -av kit/ursusflasher/src/xg140_emergency_persistent.py artifact/web-helper/
+          cp -av kit/ursusflasher/src/xg140_native_persistent_install.py artifact/web-helper/
+          cp -av kit/ursusflasher/src/proven_backend.py artifact/web-helper/
+          cp -av kit/ursusflasher/src/ursus_web_client.py artifact/web-helper/
+          cp -av kit/ursusflasher/src/ui_terms.py artifact/web-helper/
+          cp -av kit/config/UI_TERMS.json artifact/web-helper/
+          cp -av kit/xg140-ursusboot-build.log artifact/
+          cp -av xg140-rescue-openwrt-build.log artifact/
+
+          cat > artifact/START_EMERGENCY_XG140_RESCUE.cmd <<'EOF'
+          @echo off
+          setlocal
+          set NOKIA_LANG=ru
+          cd /d "%~dp0"
+          py -3 web-helper\xg140_emergency_initramfs.py
+          if errorlevel 1 pause
+          EOF
+
+          cat > artifact/emergency.local.example.json <<'EOF'
+          {
+            "host": "192.168.1.1",
+            "port": "auto",
+            "backup": "C:\\path\\to\\this-router\\mtd0_bootloader.bin.gz",
+            "tcboot_user": "",
+            "tcboot_password": ""
+          }
+          EOF
+
+          cat > artifact/README-EMERGENCY.txt <<'EOF'
+          XG140 emergency persistent UrsusBoot bridge
+
+          This artifact deliberately does NOT use `go` on a raw nested U-Boot image.
+          Hardware showed that tcboot returns from that path with rc=1.
+
+          Automatic path:
+            stock tcboot
+              -> XMODEM XG140 AArch64 Linux FIT to 0x85000000
+              -> tcboot iminfo
+              -> bootm rescue initramfs
+              -> XMODEM host-built native-hybrid FIP to /tmp
+              -> rescue Linux preserves live prefix + stock env
+              -> writes reconstructed 512 KiB boot area
+              -> reads back and byte-compares all 512 KiB
+              -> reboot
+
+          No persistent write starts before rescue Linux identity, mtd0 geometry,
+          FIP magic/size, protected regions and transferred FIP SHA are validated.
+          There is no automatic retry after a write has started.
+          EOF
+
+          (cd artifact/web-helper && python3 -c 'import ui_terms, proven_backend, ursus_web_client, xg140_native_persistent_install, xg140_emergency_persistent, xg140_emergency_initramfs')
+          git -C kit rev-parse HEAD > artifact/ursusflasher.commit
+          git -C openwrt rev-parse HEAD > artifact/openwrt.commit
+          (cd artifact && find . -type f ! -name ARTIFACT_SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > ARTIFACT_SHA256SUMS.txt)
+          find artifact -maxdepth 2 -type f -printf '%P\n' | sort
+
+      - name: Upload emergency artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xg140-emergency-initramfs-${{ github.sha }}
+          path: artifact
+          if-no-files-found: error
+          retention-days: 14
