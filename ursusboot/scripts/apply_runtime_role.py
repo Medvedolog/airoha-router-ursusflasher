@@ -17,6 +17,7 @@ ROLES = {
 
 SEARCH_ROOTS = ("defenvs", "include", "board")
 BASE_BOOTCMD = "bootcmd=ursusdispatch"
+ROLE_HEADER = "ursus_runtime_role.h"
 
 
 def iter_text_files(root: Path):
@@ -25,7 +26,7 @@ def iter_text_files(root: Path):
         if not base.exists():
             continue
         for path in base.rglob("*"):
-            if not path.is_file():
+            if not path.is_file() or path.name == ROLE_HEADER:
                 continue
             try:
                 text = path.read_text(encoding="utf-8")
@@ -44,7 +45,7 @@ def find_anchor(root: Path, token: str) -> list[tuple[Path, str]]:
 
 def write_role_header(root: Path, role: str) -> None:
     cfg = ROLES[role]
-    header = root / "include" / "ursus_runtime_role.h"
+    header = root / "include" / ROLE_HEADER
     header.write_text(
         "/* SPDX-License-Identifier: GPL-2.0+ */\n"
         "#ifndef __URSUS_RUNTIME_ROLE_H__\n"
@@ -74,25 +75,27 @@ def apply(root: Path, role: str) -> None:
         text = text.replace(BASE_BOOTCMD, target, 1)
         path.write_text(text, encoding="utf-8")
 
-    write_role_header(root, role)
-
-    # Verify source-level role selection. No post-build binary patching is allowed.
+    # Verify the real source tree before emitting a metadata header that itself
+    # contains the bootcmd as documentation. No post-build binary patching is allowed.
     after = []
     for p, data in iter_text_files(root):
         for token in ("bootcmd=ursusdispatch", "bootcmd=ursusweb;true"):
             if token in data:
                 after.append((p, token))
-    wanted = target
-    wanted_hits = [(p, t) for p, t in after if t == wanted]
+    wanted_hits = [(p, t) for p, t in after if t == target]
     forbidden = "bootcmd=ursusweb;true" if role == "persistent" else "bootcmd=ursusdispatch"
     forbidden_hits = [(p, t) for p, t in after if t == forbidden]
     if len(wanted_hits) != 1 or forbidden_hits:
+        wanted_locs = ",".join(str(p.relative_to(root)) for p, _ in wanted_hits) or "none"
+        forbidden_locs = ",".join(str(p.relative_to(root)) for p, _ in forbidden_hits) or "none"
         raise SystemExit(
-            f"runtime role verification failed role={role} wanted={len(wanted_hits)} forbidden={len(forbidden_hits)}"
+            f"runtime role verification failed role={role} wanted={len(wanted_hits)}[{wanted_locs}] "
+            f"forbidden={len(forbidden_hits)}[{forbidden_locs}]"
         )
 
+    write_role_header(root, role)
     print(
-        f"URSUS_RUNTIME_ROLE_APPLY=PASS role={role} bootcmd={wanted} "
+        f"URSUS_RUNTIME_ROLE_APPLY=PASS role={role} bootcmd={target} "
         f"source={path.relative_to(root)} mode=source-level"
     )
 
