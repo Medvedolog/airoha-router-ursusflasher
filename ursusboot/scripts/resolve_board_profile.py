@@ -5,6 +5,18 @@ import argparse
 import json
 from pathlib import Path
 
+FIELDS = (
+    "soc",
+    "vendor",
+    "model",
+    "compatible",
+    "board_policy_header",
+    "boot_policy",
+    "layout_policy",
+    "environment_policy",
+    "derivation",
+)
+
 
 def load_registry(path: Path) -> dict:
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -18,7 +30,7 @@ def main() -> int:
     ap.add_argument("--registry", type=Path, required=True)
     ap.add_argument("--profile", required=True)
     ap.add_argument("--config-dir", type=Path)
-    ap.add_argument("--field", choices=("soc", "vendor", "model", "compatible", "boot_policy", "layout_policy", "environment_policy", "derivation"))
+    ap.add_argument("--field", choices=FIELDS)
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
