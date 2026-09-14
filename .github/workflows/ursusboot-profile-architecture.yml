@@ -31,6 +31,7 @@ jobs:
             ursusboot/scripts/selftest_board_profiles.py \
             ursusboot/scripts/selftest_profile_catalog_bridge.py \
             ursusboot/scripts/apply_board_policy.py \
+            ursusboot/scripts/apply_runtime_role.py \
             ursusboot/scripts/xg140_md_derive.py
           bash -n ursusboot/scripts/build_alpha5_test61.sh
           bash -n ursusboot/scripts/build_mf_runtime.sh
@@ -43,9 +44,11 @@ jobs:
               --registry ursusboot/configs/board-profiles.json \
               --profile "$p" \
               --config-dir ursusboot/configs
-            python3 ursusboot/scripts/resolve_board_profile.py \
-              --registry ursusboot/configs/board-profiles.json \
-              --profile "$p" --json
+            for role in persistent ram-recovery; do
+              python3 ursusboot/scripts/resolve_board_profile.py \
+                --registry ursusboot/configs/board-profiles.json \
+                --profile "$p" --role "$role" --json
+            done
           done
 
       - name: Exercise board-policy source transforms
@@ -63,10 +66,33 @@ jobs:
               --registry ursusboot/configs/board-profiles.json \
               --profile "$p" --field board_policy_header)"
             python3 ursusboot/scripts/apply_board_policy.py "$work" "ursusboot/board-policies/$policy"
+            python3 ursusboot/scripts/apply_runtime_role.py "$work" --role persistent
             grep -F "URSUS_BOARD_PROFILE_MARKER" "$work/cmd/ursusdispatch.c"
             grep -F "URSUS_BOARD_PROFILE_MARKER" "$work/cmd/ursusstock.c"
             grep -F "URSUS_BOARD_STOCK_MASTER_BASE" "$work/cmd/ursusstock.c"
             grep -F "URSUS_BOARD_STOCK_HDR_MAGIC" "$work/cmd/ursusstock.c"
+            grep -F "URSUS_BOARD_MODEL" "$work/include/ursusweb_ui.inc"
+            grep -F 'URSUS_RUNTIME_ROLE_ID "persistent"' "$work/include/ursus_runtime_role.h"
+          done
+
+      - name: Exercise orthogonal XG140 runtime roles
+        run: |
+          set -euxo pipefail
+          for role in persistent ram-recovery; do
+            work="/tmp/ursus-xg140-$role"
+            rm -rf "$work"
+            mkdir -p "$work"
+            tar --zstd -xf ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst -C "$work"
+            python3 ursusboot/scripts/xg140_md_derive.py "$work"
+            python3 ursusboot/scripts/apply_board_policy.py "$work" ursusboot/board-policies/xg140-md.h
+            python3 ursusboot/scripts/apply_runtime_role.py "$work" --role "$role"
+            if [ "$role" = persistent ]; then
+              grep -RIlF -- 'bootcmd=ursusdispatch' "$work/defenvs" "$work/include" "$work/board"
+              ! grep -RIF -- 'bootcmd=ursusweb;true' "$work/defenvs" "$work/include" "$work/board"
+            else
+              grep -RIlF -- 'bootcmd=ursusweb;true' "$work/defenvs" "$work/include" "$work/board"
+              ! grep -RIF -- 'bootcmd=ursusdispatch' "$work/defenvs" "$work/include" "$work/board"
+            fi
           done
 
       - name: Audit common MD-derived C policy anchors
@@ -92,6 +118,11 @@ jobs:
   xg140-native-profile-build:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        role: [persistent, ram-recovery]
+    name: xg140-native-profile-build (${{ matrix.role }})
     steps:
       - uses: actions/checkout@v4
 
@@ -103,20 +134,25 @@ jobs:
       - name: Validate XG140 native FIP repacker
         run: python3 ursusflasher/tools/selftest_xg140_native_fip_repack.py
 
-      - name: Build persistent XG140 modular profile
+      - name: Build XG140 modular profile role
+        env:
+          URSUS_RUNTIME_ROLE: ${{ matrix.role }}
         run: |
           set -o pipefail
           chmod +x ursusboot/scripts/build_xg140_native_profile.sh
-          JOBS="$(nproc)" ursusboot/scripts/build_xg140_native_profile.sh 2>&1 | tee xg140-profile-build.log
+          JOBS="$(nproc)" ursusboot/scripts/build_xg140_native_profile.sh 2>&1 | tee "xg140-profile-${URSUS_RUNTIME_ROLE}-build.log"
 
-      - name: Verify production BL33 artifact
+      - name: Verify XG140 BL33 artifact
+        env:
+          ROLE: ${{ matrix.role }}
         run: |
           set -eux
-          OUT=work/xg140-native-profile/out
+          OUT="work/xg140-native-profile-${ROLE}/out"
           test -s "$OUT/u-boot.bin"
           test -s "$OUT/u-boot.lzma"
           test -s "$OUT/u-boot.XG140_PROFILE.full.config"
           test -s "$OUT/ursus_board_policy.h"
+          test -s "$OUT/ursus_runtime_role.h"
           test -s "$OUT/repack_xg140_native_fip.py"
           grep -q '^CONFIG_TARGET_AN7581=y' "$OUT/u-boot.XG140_PROFILE.full.config"
           grep -q '^CONFIG_ENV_IS_NOWHERE=y' "$OUT/u-boot.XG140_PROFILE.full.config"
@@ -125,43 +161,60 @@ jobs:
           grep -Fq '#define URSUS_BOARD_PROFILE_MARKER         "URSUS_BOARD_PROFILE=xg140-md"' "$OUT/ursus_board_policy.h"
           grep -Fq '#define URSUS_BOARD_ALLOW_UBI_BOOT          0' "$OUT/ursus_board_policy.h"
           grep -Fq '#define URSUS_BOARD_APPEND_SERDES_ARGS(dst, cap) 0' "$OUT/ursus_board_policy.h"
+          grep -Fq "#define URSUS_RUNTIME_ROLE_ID \"${ROLE}\"" "$OUT/ursus_runtime_role.h"
+          strings "$OUT/u-boot.bin" | grep -F 'Bell XG-140G-MD'
+          ! strings "$OUT/u-boot.bin" | grep -F 'Nokia XG-040G-MD'
           strings "$OUT/u-boot.bin" | grep -F 'URSUS_BOARD_PROFILE=xg140-md'
           strings "$OUT/u-boot.bin" | grep -F 'URSUS_STOCKBOOT_TCBOOT_XG140_ARGS source=vendor_env'
-          strings "$OUT/u-boot.bin" | grep -F 'bootcmd=ursusdispatch'
-          ! strings "$OUT/u-boot.bin" | grep -F 'bootcmd=ursusweb;true'
+          if [ "$ROLE" = persistent ]; then
+            strings "$OUT/u-boot.bin" | grep -F 'bootcmd=ursusdispatch'
+            ! strings "$OUT/u-boot.bin" | grep -F 'bootcmd=ursusweb;true'
+          else
+            strings "$OUT/u-boot.bin" | grep -F 'bootcmd=ursusweb;true'
+            ! strings "$OUT/u-boot.bin" | grep -F 'bootcmd=ursusdispatch'
+          fi
 
       - name: Package XG140 engineering artifact
+        env:
+          ROLE: ${{ matrix.role }}
         run: |
           set -eux
-          OUT=work/xg140-native-profile/out
-          mkdir -p artifact
-          cp -av "$OUT"/* artifact/
-          cp -av xg140-profile-build.log artifact/
-          cp -av config/BOARD_PROFILES.json artifact/URSUSFLASHER_BOARD_PROFILES.json
-          cp -av ursusboot/configs/board-profiles.json artifact/URSUSBOOT_BOARD_PROFILES.json
-          cp -av ursusboot/board-policies/xg140-md.h artifact/
-          cp -av ursusflasher/tools/repack_xg140_native_fip.py artifact/
-          cat > artifact/STATUS.txt <<'EOF'
-          UrsusBoot XG140 modular engineering build.
+          OUT="work/xg140-native-profile-${ROLE}/out"
+          ART="artifact-${ROLE}"
+          mkdir -p "$ART"
+          cp -av "$OUT"/* "$ART/"
+          cp -av "xg140-profile-${ROLE}-build.log" "$ART/"
+          cp -av config/BOARD_PROFILES.json "$ART/URSUSFLASHER_BOARD_PROFILES.json"
+          cp -av ursusboot/configs/board-profiles.json "$ART/URSUSBOOT_BOARD_PROFILES.json"
+          cp -av ursusboot/board-policies/xg140-md.h "$ART/"
+          cp -av ursusflasher/tools/repack_xg140_native_fip.py "$ART/"
+          if [ "$ROLE" = persistent ]; then
+            cat > "$ART/STATUS.txt" <<'EOF'
+          UrsusBoot XG140 modular engineering build — PERSISTENT role.
 
-          This is a persistent BL33 build for insertion into THIS DEVICE'S native XG140 FIP.
+          Persistent BL33 for insertion into THIS DEVICE'S native XG140 FIP.
           It is NOT a raw tcboot `go` RAM image.
-          It is derived from the proven XG-040G-MD UrsusBoot core and composed as:
-            common -> AN7581 -> XG140 board -> ENV_NOWHERE -> xg140-md board policy.
-
-          The XG140 policy preserves the vendor-owned boot-area environment, disables inherited
-          MD UBI auto-detection and does not synthesize MD SerDes overrides. StockBridge remains
-          the common MD-derived stock-Linux loader, parameterized by board policy.
-
+          Composition: common -> AN7581 -> XG140 board -> ENV_NOWHERE -> xg140-md board policy -> persistent role.
+          bootcmd=ursusdispatch. StockBridge is the common MD-derived stock-Linux loader parameterized by board policy.
           Persistent hardware cold-boot acceptance and XG140 stock-slot boot acceptance remain pending.
           EOF
-          git rev-parse HEAD > artifact/ursusflasher.commit
-          (cd artifact && find . -type f ! -name ARTIFACT_SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > ARTIFACT_SHA256SUMS.txt)
+          else
+            cat > "$ART/STATUS.txt" <<'EOF'
+          UrsusBoot XG140 modular engineering build — RAM-RECOVERY role.
+
+          RAM-only WebFailsafe role from the SAME XG140 board profile and common core.
+          Composition: common -> AN7581 -> XG140 board -> ENV_NOWHERE -> xg140-md board policy -> ram-recovery role.
+          bootcmd=ursusweb;true is selected at source level before compilation; there is no post-build binary patch.
+          This artifact is for non-destructive RAM recovery testing only and is not the persistent FIP payload.
+          EOF
+          fi
+          git rev-parse HEAD > "$ART/ursusflasher.commit"
+          (cd "$ART" && find . -type f ! -name ARTIFACT_SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > ARTIFACT_SHA256SUMS.txt)
 
       - name: Upload XG140 modular artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ursusboot-xg140-modular-${{ github.sha }}
-          path: artifact
+          name: ursusboot-xg140-${{ matrix.role }}-${{ github.sha }}
+          path: artifact-${{ matrix.role }}
           if-no-files-found: error
           retention-days: 14
