@@ -38,7 +38,7 @@ def patch_dispatch(path: Path) -> None:
     text = replace_once(text, "mtd_read(nand, 0x00020000ULL, sizeof(hdr), &retlen, hdr)", "mtd_read(nand, URSUS_BOARD_UBI_PROBE_OFF, sizeof(hdr), &retlen, hdr)", "ubi probe offset")
     text = replace_once(text, "if (ursus_ubi_present(nand)) {", "if (URSUS_BOARD_ALLOW_UBI_BOOT && ursus_ubi_present(nand)) {", "ubi policy")
     text = replace_once(text, "if (ursus_factory_kernel_present(nand)) {", "if (URSUS_BOARD_ALLOW_FACTORY_FIT && ursus_factory_kernel_present(nand)) {", "factory policy")
-    text = replace_once(text, "printf(\"URSUS_DISPATCH_BEGIN\\n\");", "printf(\"URSUS_DISPATCH_BEGIN\\n\");\n    printf(\"URSUS_BOARD_PROFILE=%s\\n\", URSUS_BOARD_POLICY_ID);", "profile marker")
+    text = replace_once(text, "printf(\"URSUS_DISPATCH_BEGIN\\n\");", "printf(\"URSUS_DISPATCH_BEGIN\\n\");\n    printf(\"%s\\n\", URSUS_BOARD_PROFILE_MARKER);", "profile marker")
     text = text.replace(
         'URSUS_PRODUCT_VERSION " boot-held Reset / stock-layout + UBI dispatcher"',
         'URSUS_PRODUCT_VERSION " modular Airoha boot/recovery dispatcher"',
@@ -107,7 +107,7 @@ def patch_stock(path: Path) -> None:
         "if (URSUS_BOARD_ORACLE_FIT_SIZE && chosen->fit_size == ORACLE_FIT_SIZE &&",
         "stock oracle gate",
     )
-    text = replace_once(text, 'printf("URSUS_STOCKBOOT_BEGIN\\n");', 'printf("URSUS_STOCKBOOT_BEGIN\\n");\n    printf("URSUS_BOARD_PROFILE=%s\\n", URSUS_BOARD_POLICY_ID);', "stock profile marker")
+    text = replace_once(text, 'printf("URSUS_STOCKBOOT_BEGIN\\n");', 'printf("URSUS_STOCKBOOT_BEGIN\\n");\n    printf("%s\\n", URSUS_BOARD_PROFILE_MARKER);', "stock profile marker")
     text = text.replace(
         'URSUS_PRODUCT_VERSION " StockBridge boot with Nokia tcboot board-argument parity"',
         'URSUS_PRODUCT_VERSION " modular stock-slot StockBridge"',
@@ -119,7 +119,7 @@ def verify(root: Path) -> None:
     dispatch = (root / "cmd/ursusdispatch.c").read_text(encoding="utf-8")
     stock = (root / "cmd/ursusstock.c").read_text(encoding="utf-8")
     for token in (
-        "URSUS_BOARD_POLICY_ID",
+        "URSUS_BOARD_PROFILE_MARKER",
         "URSUS_BOARD_ALLOW_UBI_BOOT",
         "URSUS_BOARD_ALLOW_FACTORY_FIT",
         "URSUS_BOARD_UBI_PROBE_OFF",
@@ -127,6 +127,7 @@ def verify(root: Path) -> None:
         if token not in dispatch:
             raise SystemExit(f"board policy dispatch marker missing: {token}")
     for token in (
+        "URSUS_BOARD_PROFILE_MARKER",
         "URSUS_BOARD_STOCK_MASTER_BASE",
         "URSUS_BOARD_STOCK_SLAVE_BASE",
         "URSUS_BOARD_STOCK_ENV_BASE",
