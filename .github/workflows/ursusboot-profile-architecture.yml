@@ -1,0 +1,51 @@
+name: UrsusBoot modular Airoha profiles
+
+on:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - 'ursusboot/configs/**'
+      - 'ursusboot/scripts/**'
+      - '.github/workflows/ursusboot-profile-architecture.yml'
+  workflow_dispatch:
+
+jobs:
+  profile-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate modular board profiles
+        run: |
+          python3 ursusboot/scripts/selftest_board_profiles.py
+          for p in xg040-md xg040-mf xg140-md; do
+            echo "=== $p ==="
+            python3 ursusboot/scripts/resolve_board_profile.py \
+              --registry ursusboot/configs/board-profiles.json \
+              --profile "$p" \
+              --config-dir ursusboot/configs
+            python3 ursusboot/scripts/resolve_board_profile.py \
+              --registry ursusboot/configs/board-profiles.json \
+              --profile "$p" --json
+          done
+
+      - name: Audit MD-derived C policy anchors
+        run: |
+          rm -rf /tmp/ursus-src
+          mkdir -p /tmp/ursus-src
+          tar --zstd -xf ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst -C /tmp/ursus-src
+          echo '=== cmd/ursusdispatch.c policy anchors ==='
+          grep -nE 'ursusstock|stock|nokia|xg-040|fit|ubi|bootm|mtd|flag|nsb|partition' /tmp/ursus-src/cmd/ursusdispatch.c || true
+          echo '=== cmd/ursusstock.c policy anchors ==='
+          grep -nE 'stock|nokia|xg-040|fit|bootm|mtd|flag|nsb|partition|serdes|board_args|HDR' /tmp/ursus-src/cmd/ursusstock.c || true
+
+      - name: Export exact dispatcher sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-md-policy-source
+          path: |
+            /tmp/ursus-src/cmd/ursusdispatch.c
+            /tmp/ursus-src/cmd/ursusstock.c
+          if-no-files-found: error
+          retention-days: 7
