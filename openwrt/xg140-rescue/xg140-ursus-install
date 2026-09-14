@@ -1,0 +1,87 @@
+#!/bin/sh
+set -eu
+
+FIP="${1:-/tmp/ursusboot.fip}"
+BOOT=/dev/mtd0
+LIVE=/tmp/xg140-live-mtd0.bin
+CAND=/tmp/xg140-ursus-mtd0.bin
+READBACK=/tmp/xg140-readback-mtd0.bin
+PREFIX_LIVE=/tmp/xg140-prefix-live.bin
+PREFIX_CAND=/tmp/xg140-prefix-cand.bin
+ENV_LIVE=/tmp/xg140-env-live.bin
+ENV_CAND=/tmp/xg140-env-cand.bin
+FIP_CHECK=/tmp/xg140-fip-check.bin
+
+fail() {
+    echo "URSUS_XG140_INSTALL_FAILED stage=$1 reason=$2" >/dev/console
+    echo "URSUS_XG140_INSTALL_FAILED stage=$1 reason=$2"
+    exit 1
+}
+
+[ -r "$FIP" ] || fail PRECHECK FIP_MISSING
+[ -c "$BOOT" ] || fail PRECHECK MTD0_MISSING
+
+FIP_SIZE="$(wc -c < "$FIP" | tr -d ' ')"
+case "$FIP_SIZE" in
+    ''|*[!0-9]*) fail PRECHECK FIP_SIZE_INVALID ;;
+esac
+[ "$FIP_SIZE" -gt 1024 ] || fail PRECHECK FIP_TOO_SMALL
+[ "$FIP_SIZE" -lt $((0x7c000 - 0x800)) ] || fail PRECHECK FIP_OVERLAPS_ENV
+
+MAGIC="$(dd if="$FIP" bs=8 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+[ "$MAGIC" = "010064aa78563412" ] || fail PRECHECK FIP_MAGIC_INVALID
+
+MODEL="$(tr -d '\000' < /proc/device-tree/model 2>/dev/null || true)"
+case "$MODEL" in
+    *XG-140G-MD*) ;;
+    *) fail PRECHECK WRONG_MODEL ;;
+esac
+
+MTD_LINE="$(grep '"'"'"bootloader"'"'"' /proc/mtd 2>/dev/null || true)"
+echo "$MTD_LINE" | grep -q '^mtd0: 00080000 ' || fail PRECHECK MTD0_GEOMETRY_INVALID
+
+printf 'URSUS_XG140_INSTALL_PRECHECK_OK model=%s fip_size=%s\n' "$MODEL" "$FIP_SIZE" >/dev/console
+
+dd if="$BOOT" of="$LIVE" bs=524288 count=1 2>/dev/null || fail BACKUP READ_LIVE_FAILED
+[ "$(wc -c < "$LIVE" | tr -d ' ')" = "524288" ] || fail BACKUP LIVE_SIZE_INVALID
+cp "$LIVE" "$CAND" || fail BUILD COPY_LIVE_FAILED
+
+# Preserve live 0x0000..0x07ff and 0x7c000..0x7ffff. Clear only the stock FIP
+# window, then overlay the host-built native-hybrid FIP at physical 0x800.
+dd if=/dev/zero of="$CAND" bs=2048 seek=1 count=247 conv=notrunc 2>/dev/null || fail BUILD CLEAR_FIP_WINDOW_FAILED
+dd if="$FIP" of="$CAND" bs=2048 seek=1 conv=notrunc 2>/dev/null || fail BUILD OVERLAY_FIP_FAILED
+[ "$(wc -c < "$CAND" | tr -d ' ')" = "524288" ] || fail BUILD CANDIDATE_SIZE_INVALID
+
+# Prove that the two protected live regions are unchanged.
+dd if="$LIVE" of="$PREFIX_LIVE" bs=2048 count=1 2>/dev/null
+dd if="$CAND" of="$PREFIX_CAND" bs=2048 count=1 2>/dev/null
+cmp -s "$PREFIX_LIVE" "$PREFIX_CAND" || fail BUILD PREFIX_CHANGED
+
+dd if="$LIVE" of="$ENV_LIVE" bs=2048 skip=248 count=8 2>/dev/null
+dd if="$CAND" of="$ENV_CAND" bs=2048 skip=248 count=8 2>/dev/null
+cmp -s "$ENV_LIVE" "$ENV_CAND" || fail BUILD ENV_CHANGED
+
+# Prove that the candidate contains the exact hybrid FIP supplied by the host.
+dd if="$CAND" of="$FIP_CHECK" bs=1 skip=2048 count="$FIP_SIZE" 2>/dev/null
+cmp -s "$FIP" "$FIP_CHECK" || fail BUILD FIP_OVERLAY_MISMATCH
+
+CAND_SHA="$(sha256sum "$CAND" | awk '{print $1}')"
+FIP_SHA="$(sha256sum "$FIP" | awk '{print $1}')"
+printf 'URSUS_XG140_INSTALL_CANDIDATE_OK candidate_sha256=%s fip_sha256=%s\n' "$CAND_SHA" "$FIP_SHA" >/dev/console
+printf 'URSUS_XG140_INSTALL_WRITE_START bytes=524288\n' >/dev/console
+
+# Rescue DTS deliberately exposes bootloader writable only in this RAM image.
+# mtd performs the erase/write; no reboot is requested until full readback passes.
+mtd write "$CAND" bootloader || fail WRITE MTD_WRITE_FAILED
+sync
+
+printf 'URSUS_XG140_INSTALL_READBACK_START bytes=524288\n' >/dev/console
+dd if="$BOOT" of="$READBACK" bs=524288 count=1 2>/dev/null || fail VERIFY READBACK_FAILED
+[ "$(wc -c < "$READBACK" | tr -d ' ')" = "524288" ] || fail VERIFY READBACK_SIZE_INVALID
+cmp -s "$CAND" "$READBACK" || fail VERIFY READBACK_MISMATCH
+
+READBACK_SHA="$(sha256sum "$READBACK" | awk '{print $1}')"
+[ "$READBACK_SHA" = "$CAND_SHA" ] || fail VERIFY READBACK_SHA_MISMATCH
+printf 'URSUS_XG140_INSTALL_COMPLETE candidate_sha256=%s readback_sha256=%s\n' "$CAND_SHA" "$READBACK_SHA" >/dev/console
+printf 'URSUS_XG140_INSTALL_COMPLETE candidate_sha256=%s readback_sha256=%s\n' "$CAND_SHA" "$READBACK_SHA"
+exit 0
