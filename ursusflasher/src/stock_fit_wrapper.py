@@ -127,7 +127,6 @@ def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[di
         "/images/kernel@1/type": b"kernel\0",
         "/images/kernel@1/arch": b"arm64\0",
         "/images/kernel@1/os": b"linux\0",
-        "/images/kernel@1/compression": b"lzma\0",
         "/images/kernel@1/hash@1/algo": b"sha1\0",
         "/configurations/default": b"conf@1\0",
         "/configurations/conf@1/kernel": b"kernel@1\0",
@@ -138,6 +137,14 @@ def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[di
         got = prop(stock_slot, props, key)
         if got != value:
             raise RuntimeError(f"unexpected stock FIT property {key}: {got!r} != {value!r}")
+
+    stock_compression = prop(stock_slot, props, "/images/kernel@1/compression")
+    if stock_compression not in (b"none\0", b"lzma\0"):
+        raise RuntimeError(
+            "unsupported stock FIT kernel compression: "
+            f"{stock_compression!r}; expected b'none\\x00' or b'lzma\\x00'"
+        )
+
     load = struct.unpack(">I", prop(stock_slot, props, "/images/kernel@1/load"))[0]
     entry = struct.unpack(">I", prop(stock_slot, props, "/images/kernel@1/entry"))[0]
     if load != 0x80088000 or entry != 0x80088000:
@@ -161,6 +168,7 @@ def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[di
         "fdt_data_size": len(fdt_data),
         "kernel_load": load,
         "kernel_entry": entry,
+        "stock_kernel_compression": stock_compression.rstrip(b"\0").decode("ascii"),
     })
     return props, meta
 
@@ -218,6 +226,8 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
         "transition_kernel_padding": kernel_size - len(linux_image),
         "kernel_load": fit_meta["kernel_load"],
         "kernel_entry": fit_meta["kernel_entry"],
+        "stock_kernel_compression": fit_meta["stock_kernel_compression"],
+        "transition_kernel_compression": "none",
         "filesystem_data_size": fit_meta["filesystem_data_size"],
         "fdt_data_size": fit_meta["fdt_data_size"],
         "stock_sha256": sha256_bytes(stock_slot),
