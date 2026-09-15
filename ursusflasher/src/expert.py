@@ -22,6 +22,7 @@ import stock_web
 import ui_terms as terms
 import network_guidance
 import stock_restore
+import stock_ab_transition
 import ursus_web_client as uw
 import ursusboot_install
 import ursusboot_update
@@ -228,7 +229,6 @@ def _readonly_stock_access(host: str, *, expected_family: str | None = None) -> 
         try:
             client.login(user, password, allow_plain=False)
         except Exception:
-            # A manually changed Web password may still be used; this remains read-only.
             entered = getpass.getpass(tr(
                 "Стандартный пароль stock Web не принят. Пароль Web UI [Enter — перейти к BootROM backup]: ",
                 "The standard stock Web password was not accepted. Web UI password [Enter — use BootROM backup]: ",
@@ -241,25 +241,18 @@ def _readonly_stock_access(host: str, *, expected_family: str | None = None) -> 
             client.login(user, password, allow_plain=False)
         setup = stock_web.StockSetup(client)
         info = setup.read_device_info()
-        match = bp.match_profile(
-            model=str(info.get("model") or ""),
-            soc=str(info.get("chipset") or ""),
-        )
+        match = bp.match_profile(model=str(info.get("model") or ""), soc=str(info.get("chipset") or ""))
         if not match:
-            raise stock_web.UnsupportedModel(
-                tr(
-                    f"неподдерживаемая или противоречивая пара model/SoC: {info.get('model') or 'unknown'} / {info.get('chipset') or 'unknown'}",
-                    f"unsupported or conflicting model/SoC pair: {info.get('model') or 'unknown'} / {info.get('chipset') or 'unknown'}",
-                )
-            )
+            raise stock_web.UnsupportedModel(tr(
+                f"неподдерживаемая или противоречивая пара model/SoC: {info.get('model') or 'unknown'} / {info.get('chipset') or 'unknown'}",
+                f"unsupported or conflicting model/SoC pair: {info.get('model') or 'unknown'} / {info.get('chipset') or 'unknown'}",
+            ))
         family, profile = match
         if expected_family and family != expected_family:
-            raise stock_web.UnsupportedModel(
-                tr(
-                    f"семья устройства изменилась между preflight и backup: ожидалась {expected_family.upper()}, получена {family.upper()}",
-                    f"device family changed between preflight and backup: expected {expected_family.upper()}, got {family.upper()}",
-                )
-            )
+            raise stock_web.UnsupportedModel(tr(
+                f"семья устройства изменилась между preflight и backup: ожидалась {expected_family.upper()}, получена {family.upper()}",
+                f"device family changed between preflight and backup: expected {expected_family.upper()}, got {family.upper()}",
+            ))
         credentials = setup.read_credentials()
         telnet_port = int(credentials["telnet_port"])
         if not bool(credentials.get("telnet_enabled")) or not _tcp_open(host, telnet_port):
@@ -301,19 +294,14 @@ def backup_stock_readonly(host: str, *, expected_family: str | None = None) -> N
         access = _readonly_stock_access(host, expected_family=expected_family)
         stamp = time.strftime("%Y%m%d-%H%M%S")
         default_dest = Path(proven.WORK) / "backups" / f"stock-{access.family}-full-readonly-{stamp}"
-        raw = input(tr(f"Каталог для полной копии [{default_dest}]: ",
-                       f"Full backup directory [{default_dest}]: ")).strip().strip('"')
+        raw = input(tr(f"Каталог для полной копии [{default_dest}]: ", f"Full backup directory [{default_dest}]: ")).strip().strip('"')
         destination = Path(raw).expanduser() if raw else default_dest
         print(tr(
             f"[ШАГ] Снимаю mtd0..mtd16 для {access.family.upper()}. Службы Telnet/FTP/Samba не включаются, NAND не изменяется.",
             f"[STEP] Capturing mtd0..mtd16 for {access.family.upper()}. Service provisioning is forbidden: Telnet/FTP/Samba are not enabled and NAND is not modified.",
         ))
-        proven.backup_tftp(
-            access, access.host, destination, expected_family=access.family,
-            allow_service_provisioning=False,
-        )
-        print(tr(f"[ГОТОВО] Полная копия сохранена: {destination}",
-                 f"[READY] Complete backup saved: {destination}"))
+        proven.backup_tftp(access, access.host, destination, expected_family=access.family, allow_service_provisioning=False)
+        print(tr(f"[ГОТОВО] Полная копия сохранена: {destination}", f"[READY] Complete backup saved: {destination}"))
     finally:
         if access:
             access.close_web(announce=False)
@@ -324,10 +312,7 @@ def full_backup_readonly(state: ds.DeviceState) -> None:
         try:
             match = bp.match_profile(model=state.model, soc=state.soc)
             if not match:
-                raise RuntimeError(tr(
-                    "DeviceState не содержит подтверждённый board profile для stock backup.",
-                    "DeviceState does not contain a confirmed board profile for stock backup.",
-                ))
+                raise RuntimeError(tr("DeviceState не содержит подтверждённый board profile для stock backup.", "DeviceState does not contain a confirmed board profile for stock backup."))
             backup_stock_readonly(state.host, expected_family=match[0])
             return
         except Exception as exc:
@@ -345,10 +330,7 @@ def full_backup_readonly(state: ds.DeviceState) -> None:
             "[ИНФО] Копия, созданная из запущенной OpenWrt с доступной записью, не считается пригодной для точного восстановления. Для точного копирования используется среда восстановления, запущенная в оперативной памяти.",
             "[INFO] A live writable OpenWrt dump is not marked restore-grade. Exact capture uses the quiescent BootROM/RAM path.",
         ))
-    proven.bootrom_backup_wizard(
-        source_system=state.current_system,
-        source_layout=state.current_layout,
-    )
+    proven.bootrom_backup_wizard(source_system=state.current_system, source_layout=state.current_layout)
 
 
 def validate_backup() -> None:
@@ -376,13 +358,6 @@ def validate_backup() -> None:
 
 
 def _interactive_diagnostic_state(state: ds.DeviceState) -> ds.DeviceState:
-    """Upgrade an operator-requested diagnostic probe without changing the router.
-
-    The menu probe is deliberately non-interactive.  Once the operator selects
-    diagnostics/backup, a single system-OpenSSH command may ask for the root
-    password and read board/layout information.  No temporary key is installed
-    and no router file is modified.
-    """
     if state.probe_status == ds.PROBE_COMPLETE:
         return state
     if not state.access.get("ssh"):
@@ -393,10 +368,7 @@ def _interactive_diagnostic_state(state: ds.DeviceState) -> ds.DeviceState:
     ))
     fresh = ds.probe_device_state(state.host, interactive_ssh=True)
     if fresh.access.get("root") is True:
-        ui.status(tr("ГОТОВО", "READY"), tr(
-            "Root SSH подтверждён; сведения о системе и разметке обновлены.",
-            "Root SSH confirmed; system and layout information was refreshed.",
-        ))
+        ui.status(tr("ГОТОВО", "READY"), tr("Root SSH подтверждён; сведения о системе и разметке обновлены.", "Root SSH confirmed; system and layout information was refreshed."))
     else:
         proven._write_session_only("[INTERACTIVE-DIAGNOSTIC] root SSH was not confirmed")
     return fresh
@@ -419,6 +391,8 @@ def capability_report(state: ds.DeviceState) -> None:
     for number in ds.visible_action_numbers():
         a = app[number]
         title = terms.action_title(a.key)
+        if number == 4:
+            title = tr("Stock Nokia → Vanilla OpenWrt (TRANSITION)", "Stock Nokia → Vanilla OpenWrt (TRANSITION)")
         yes = tr("ДА", "YES") if a.enabled else tr("НЕТ", "NO")
         marker = "!" if a.write_capable else " "
         print(f" {marker} {number:2d}  {title:<42} {yes}")
@@ -431,16 +405,12 @@ def capability_report(state: ds.DeviceState) -> None:
         if a.enabled and a.note:
             print(f"       {a.note}")
     print()
-    ui.note(tr(
-        "! означает только: операция может выполнять запись во flash-память (NAND). Это не общий значок опасности.",
-        "! means only that the operation may perform a persistent write. It is not a generic danger marker.",
-    ))
+    ui.note(tr("! означает только: операция может выполнять запись во flash-память (NAND). Это не общий значок опасности.", "! means only that the operation may perform a persistent write. It is not a generic danger marker."))
 
 
 def flash_diagnostics(state: ds.DeviceState) -> bool:
     print_state_header(state)
     print()
-    # Raw machine state belongs in the session log, not in the operator UI.
     proven._write_session_only("[DEVICESTATE-RAW]\n" + json.dumps(state.to_dict(), ensure_ascii=False, indent=2))
     layout = terms.human(state.current_layout, "layout")
     nand_parts = [terms.human(state.nand_vendor, "identity"), terms.human(state.nand_model, "identity")]
@@ -453,10 +423,7 @@ def flash_diagnostics(state: ds.DeviceState) -> bool:
     print(tr("Flash-память: ", "Flash memory: ") + nand_text)
     ui.note(tr("Машинные значения DeviceState записаны в лог сеанса.", "Raw DeviceState values were written to the session log."))
     if state.probe_status != ds.PROBE_COMPLETE:
-        print(tr(
-            "\nСетевая проверка состояния неполна. Для не загружающегося роутера можно отдельно проверить UBI/BL2 через USB-UART только для чтения; NAND/UBI не изменяются.",
-            "\nNetwork state check is incomplete. For a brick, a separate read-only UBI/BL2 check can be run over USB-UART; NAND/UBI are not modified.",
-        ))
+        print(tr("\nСетевая проверка состояния неполна. Для не загружающегося роутера можно отдельно проверить UBI/BL2 через USB-UART только для чтения; NAND/UBI не изменяются.", "\nNetwork state check is incomplete. For a brick, a separate read-only UBI/BL2 check can be run over USB-UART; NAND/UBI are not modified."))
         ans = input(tr("Запустить проверку через USB-UART только для чтения? [y/N]: ", "Run the read-only UART check? [y/N]: ")).strip().lower()
         if ans in ("y", "yes", "д", "да"):
             ursusboot_update.uart_bootrom_forensics()
@@ -465,7 +432,6 @@ def flash_diagnostics(state: ds.DeviceState) -> bool:
 
 
 def _operator_error_cause(exc: Exception) -> str:
-    """Return one short operator-useful cause line without replacing the full log."""
     lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
     if not lines:
         return exc.__class__.__name__
@@ -489,13 +455,11 @@ def run_action(fn, *, write_may_happen: bool = False) -> None:
     except KeyboardInterrupt:
         print(); ui.status(tr("СТОП", "STOP"), tr("Остановлено пользователем.", "Stopped by user."))
         if write_may_happen:
-            ui.status(tr("ВНИМАНИЕ", "WARNING"), tr("Если запись уже началась — не выключайте роутер. Сохраните окно и лог.",
-                     "If a write has already started, do not power the router off. Save the window and log."))
+            ui.status(tr("ВНИМАНИЕ", "WARNING"), tr("Если запись уже началась — не выключайте роутер. Сохраните окно и лог.", "If a write has already started, do not power the router off. Save the window and log."))
     except Exception as exc:
         print(); ui.status(tr("ОШИБКА", "ERROR"), tr("Операция не завершена.", "The operation did not complete."), stream=sys.stderr)
         if write_may_happen:
-            ui.status(tr("ВНИМАНИЕ", "WARNING"), tr("Если запись уже началась — не выключайте питание до уточнения состояния.",
-                     "If writing has already started, do not remove power until the state is known."), stream=sys.stderr)
+            ui.status(tr("ВНИМАНИЕ", "WARNING"), tr("Если запись уже началась — не выключайте питание до уточнения состояния.", "If writing has already started, do not remove power until the state is known."), stream=sys.stderr)
         proven._write_session_only("[TECH] " + repr(exc))
         cause = _operator_error_cause(exc)
         ui.status(tr("ПРИЧИНА", "CAUSE"), cause, stream=sys.stderr)
@@ -508,69 +472,64 @@ def run_action(fn, *, write_may_happen: bool = False) -> None:
 def _show_action(number: int, app: dict[int, ds.ActionApplicability], detail_ru: str = "", detail_en: str = "") -> None:
     a = app[number]
     detail = tr(detail_ru, detail_en) if detail_ru or detail_en else ""
-    ui.menu_item(
-        number, terms.action_title(a.key), detail or None,
-        write_capable=a.write_capable, enabled=a.enabled,
-        reason=a.reason if not a.enabled else "",
-    )
+    ui.menu_item(number, terms.action_title(a.key), detail or None, write_capable=a.write_capable, enabled=a.enabled, reason=a.reason if not a.enabled else "")
     if a.enabled and a.note:
         print(f"       {ui.paint(a.note, 'dim')}")
 
 
+def _transition_profile(state: ds.DeviceState) -> str | None:
+    if state.current_system != "NOKIA_STOCK":
+        return None
+    match = bp.match_profile(model=state.model, soc=state.soc)
+    if not match:
+        return None
+    return str(match[1].get("ursusboot_profile") or "") or None
+
+
+def _show_transition_action(state: ds.DeviceState) -> None:
+    profile = _transition_profile(state)
+    enabled = profile in ("xg040-md", "xg040-mf")
+    reason = "" if enabled else tr("доступно только для подтверждённой Nokia stock MD/MF", "available only for confirmed Nokia stock MD/MF")
+    ui.menu_item(
+        4,
+        tr("Stock Nokia → Vanilla OpenWrt (TRANSITION)", "Stock Nokia → Vanilla OpenWrt (TRANSITION)"),
+        tr("полный all-MTD backup → stock-compatible SLOT2 → TRANSITION в RAM; один y/N после preflight", "full all-MTD backup → stock-compatible SLOT2 → TRANSITION in RAM; one y/N after preflight"),
+        write_capable=True,
+        enabled=enabled,
+        reason=reason,
+    )
+
+
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
+    if number == 4:
+        return (
+            "Полный all-MTD backup → structural FIT → proven transport preflight → один y/N → SLAVE/readback/selector",
+            "Full all-MTD backup → structural FIT → proven transport preflight → one y/N → SLAVE/readback/selector",
+        )
     if number in app and not app[number].enabled:
         return "", ""
     if number == 1:
-        return (
-            "Полный переход: резервная копия → UrsusBoot → комплектная OpenWrt; транспорт выбирается по текущей системе",
-            "Full workflow: backup → UrsusBoot → bundled OpenWrt; transport follows the current system",
-        )
+        return ("Полный переход: резервная копия → UrsusBoot → комплектная OpenWrt; транспорт выбирается по текущей системе", "Full workflow: backup → UrsusBoot → bundled OpenWrt; transport follows the current system")
     if number == 2:
-        text = _bootloader_menu_detail(state, app[2])
-        return text, text
+        text = _bootloader_menu_detail(state, app[2]); return text, text
     if number == 3:
-        text = _custom_openwrt_menu_detail(state, app[3])
-        return text, text
+        text = _custom_openwrt_menu_detail(state, app[3]); return text, text
     if number == 5:
-        return (
-            "USB-UART → Airoha BootROM → UrsusBoot из RAM → запись и проверка загрузчика",
-            "USB-UART → Airoha BootROM → UrsusBoot from RAM → bootloader write and verification",
-        )
+        return ("USB-UART → Airoha BootROM → UrsusBoot из RAM → запись и проверка загрузчика", "USB-UART → Airoha BootROM → UrsusBoot from RAM → bootloader write and verification")
     if number == 6:
-        return (
-            "Проверенный stock backup: автоматически без UART через U-Boot+RAM initramfs при доступной OpenWrt/recovery; иначе BootROM/XMODEM",
-            "Validated stock backup: automatically without UART through U-Boot+RAM initramfs when OpenWrt/recovery is available; otherwise BootROM/XMODEM",
-        )
+        return ("Проверенный stock backup: автоматически без UART через U-Boot+RAM initramfs при доступной OpenWrt/recovery; иначе BootROM/XMODEM", "Validated stock backup: automatically without UART through U-Boot+RAM initramfs when OpenWrt/recovery is available; otherwise BootROM/XMODEM")
     if number == 7:
-        return (
-            "BootROM/USB-UART → среда в RAM → чтение NAND → копия на ПК; flash не изменяется",
-            "BootROM/USB-UART → RAM environment → NAND read → PC backup; flash is not modified",
-        )
+        return ("BootROM/USB-UART → среда в RAM → чтение NAND → копия на ПК; flash не изменяется", "BootROM/USB-UART → RAM environment → NAND read → PC backup; flash is not modified")
     if number == 8:
-        return (
-            "Проверка на ПК: структура, размеры и SHA256; роутер не изменяется",
-            "PC-side validation: structure, sizes and SHA256; the router is not modified",
-        )
+        return ("Проверка на ПК: структура, размеры и SHA256; роутер не изменяется", "PC-side validation: structure, sizes and SHA256; the router is not modified")
     if number == 9:
-        return (
-            "Сборка аварийного комплекта из проверенной резервной копии; пока не реализовано",
-            "Build a rescue kit from a validated backup; not implemented yet",
-        )
+        return ("Сборка аварийного комплекта из проверенной резервной копии; пока не реализовано", "Build a rescue kit from a validated backup; not implemented yet")
     if number == 10:
-        return (
-            "Пассивная диагностика Web/SSH: система, разметка, загрузчик и применимые операции",
-            "Passive Web/SSH diagnostics: system, layout, bootloader and applicable actions",
-        )
+        return ("Пассивная диагностика Web/SSH: система, разметка, загрузчик и применимые операции", "Passive Web/SSH diagnostics: system, layout, bootloader and applicable actions")
     if number == 11:
-        return (
-            "Web/SSH, при необходимости USB-UART: разметка, NAND и bad blocks; только чтение",
-            "Web/SSH, USB-UART when needed: layout, NAND and bad blocks; read-only",
-        )
+        return ("Web/SSH, при необходимости USB-UART: разметка, NAND и bad blocks; только чтение", "Web/SSH, USB-UART when needed: layout, NAND and bad blocks; read-only")
     if number == 12:
-        return (
-            "Локальная проверка SHA256 и состава файлов публичного комплекта",
-            "Local SHA256 and package-content verification",
-        )
+        return ("Локальная проверка SHA256 и состава файлов публичного комплекта", "Local SHA256 and package-content verification")
     return "", ""
 
 
@@ -592,21 +551,19 @@ def main() -> int:
         for number in (1, 2, 3):
             detail_ru, detail_en = _menu_detail(number, state, app)
             _show_action(number, app, detail_ru, detail_en)
+        _show_transition_action(state)
 
         ui.section(tr("Если роутер не загружается", "If the router does not boot"), style="amber2")
         for number in (5, 6):
-            detail_ru, detail_en = _menu_detail(number, state, app)
-            _show_action(number, app, detail_ru, detail_en)
+            detail_ru, detail_en = _menu_detail(number, state, app); _show_action(number, app, detail_ru, detail_en)
 
         ui.section(tr("Резервные копии", "Backups"), style="ok")
         for number in (7, 8, 9):
-            detail_ru, detail_en = _menu_detail(number, state, app)
-            _show_action(number, app, detail_ru, detail_en)
+            detail_ru, detail_en = _menu_detail(number, state, app); _show_action(number, app, detail_ru, detail_en)
 
         ui.section(tr("Посмотреть", "Inspect"), style="amber2")
         for number in (10, 11, 12):
-            detail_ru, detail_en = _menu_detail(number, state, app)
-            _show_action(number, app, detail_ru, detail_en)
+            detail_ru, detail_en = _menu_detail(number, state, app); _show_action(number, app, detail_ru, detail_en)
 
         print()
         ui.menu_item(0, tr("Выход", "Exit"))
@@ -617,39 +574,38 @@ def main() -> int:
         if c == "0":
             return 0
         number = int(c)
+
         if number == 4:
-            ui.note(tr(
-                "Пункт 4 объединён с пунктом 2: установка и обновление UrsusBoot теперь используют один автоматический сценарий.",
-                "Item 4 was merged into item 2: UrsusBoot install and update now use one automatic workflow.",
-            ))
-            number = 2
+            profile = _transition_profile(state)
+            if profile not in ("xg040-md", "xg040-mf"):
+                ui.status(tr("СТОП", "STOP"), tr("Vanilla TRANSITION доступен только из подтверждённой Nokia stock MD/MF.", "Vanilla TRANSITION is available only from confirmed Nokia stock MD/MF."))
+                ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
+                continue
+            network_guidance.show()
+            ui.section(tr("Перед первым запуском на stock Nokia", "Before first run on Nokia stock"), style="amber2")
+            ui.note(tr("На включённом роутере удерживайте Reset не менее 30 секунд, отпустите и дождитесь полной загрузки stock Web UI.", "With the router powered on, hold Reset for at least 30 seconds, release it, and wait for the stock Web UI to boot fully."))
+            run_action(lambda: stock_ab_transition.run_expert(host=host, profile=profile), write_may_happen=True)
+            continue
+
         selected = app[number]
         if not selected.enabled:
-            print()
-            ui.status(tr("СТОП", "STOP"), selected.reason or tr("Действие сейчас неприменимо.", "This action is not currently applicable."))
+            print(); ui.status(tr("СТОП", "STOP"), selected.reason or tr("Действие сейчас неприменимо.", "This action is not currently applicable."))
             ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
             continue
 
         if number == 1:
             skip_backup = False
             if state.current_system == "NOKIA_STOCK":
-                ans = ui.prompt(tr(
-                    "EXPERT: пропустить полный backup mtd0..mtd16 для этого запуска? [y/N]: ",
-                    "EXPERT: skip the full mtd0..mtd16 backup for this run? [y/N]: ",
-                )).strip().lower()
+                ans = ui.prompt(tr("EXPERT: пропустить полный backup mtd0..mtd16 для этого запуска? [y/N]: ", "EXPERT: skip the full mtd0..mtd16 backup for this run? [y/N]: ")).strip().lower()
                 skip_backup = ans in ("y", "yes", "д", "да")
             run_action(lambda: one_key.main(skip_full_backup=skip_backup), write_may_happen=True)
         elif number == 2:
             network_guidance.show()
-            # Item 2 is an explicit operator request, so raise the passive menu
-            # probe to an interactive read-only SSH preflight when needed.
-            # This may ask for the root password, but does not write the router.
             fresh_state = _interactive_diagnostic_state(ds.probe_device_state(host))
             fresh_action = ds.action_applicability(fresh_state)[2]
             if not fresh_action.enabled:
                 ui.status(tr("СТОП", "STOP"), fresh_action.reason or tr("Действие сейчас неприменимо.", "This action is not currently applicable."))
-                ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
-                continue
+                ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu...")); continue
             ui.section(tr("Разрешённое действие", "Resolved action"), style="amber2")
             print("  " + tr("Действие: установить или обновить UrsusBoot", "Action: install or update UrsusBoot"))
             print("  " + tr("Метод: ", "Method: ") + _bootloader_menu_detail(fresh_state, fresh_action))
@@ -662,22 +618,14 @@ def main() -> int:
             fresh_action = ds.action_applicability(fresh_state)[3]
             if not fresh_action.enabled:
                 ui.status(tr("СТОП", "STOP"), fresh_action.reason or tr("Действие сейчас неприменимо.", "This action is not currently applicable."))
-                ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
-                continue
+                ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu...")); continue
             run_action(lambda: run_custom_openwrt(host, fresh_state, fresh_action), write_may_happen=True)
         elif number == 5:
             network_guidance.show()
-            if confirm_uart_recovery(
-                "Airoha BootROM запустит среду восстановления из оперативной памяти; механизм записи остаётся прежним до отдельной переработки транзакционной модели.",
-                "Airoha BootROM will start recovery from RAM; the destructive backend remains unchanged until the transaction refactor.",
-            ):
+            if confirm_uart_recovery("Airoha BootROM запустит среду восстановления из оперативной памяти; механизм записи остаётся прежним до отдельной переработки транзакционной модели.", "Airoha BootROM will start recovery from RAM; the destructive backend remains unchanged until the transaction refactor."):
                 run_action(ursusboot_update.uart_bootrom_recover, write_may_happen=True)
         elif number == 6:
-            network_guidance.show()
-            # Restore owns its single destructive y/N at the latest safe point:
-            # before one-shot persistent bootcmd on the no-UART route, or after
-            # RECOVERY_SAFE + geometry + TFTP preflight on the UART route.
-            run_action(lambda: stock_restore.restore_nokia(_interactive_diagnostic_state(state)), write_may_happen=True)
+            network_guidance.show(); run_action(lambda: stock_restore.restore_nokia(_interactive_diagnostic_state(state)), write_may_happen=True)
         elif number == 7:
             run_action(lambda: full_backup_readonly(_interactive_diagnostic_state(state)))
         elif number == 8:
