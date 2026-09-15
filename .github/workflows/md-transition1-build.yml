@@ -3,7 +3,7 @@ name: MD TRANSITION1 build
 on:
   push:
     branches:
-      - feature/mf3-an7583-persistent
+      - feature/ursusboot-modular-airoha
     paths:
       - '.github/workflows/md-transition1-build.yml'
       - 'ursusboot/scripts/build_md_transition1.sh'
