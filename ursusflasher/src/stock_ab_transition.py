@@ -142,16 +142,53 @@ def _upload(telnet: pb.Telnet, access: pb.StockAccess, local: Path, remote: str)
     return expected
 
 
-def _mtd_writer_preflight(telnet: pb.Telnet) -> None:
-    rc, text = telnet.command_clean("mtd --help 2>&1 || mtd 2>&1 || true", timeout=20)
-    if "write" not in text.lower():
-        raise RuntimeError("stock Linux mtd writer with 'write' command is unavailable")
+def _mtd_writer_preflight(telnet: pb.Telnet) -> str:
+    rc, text = telnet.command_clean(
+        "for x in mtd mtd_debug flash_erase nandwrite; do command -v $x 2>/dev/null && echo TOOL:$x; done; "
+        "echo __MTD_HELP__; mtd --help 2>&1 || mtd 2>&1 || true",
+        timeout=20,
+    )
+    tools = set(re.findall(r"TOOL:([A-Za-z0-9_+.-]+)", text))
+    help_text = text.split("__MTD_HELP__", 1)[-1].lower()
+    if "mtd" in tools and "write" in help_text:
+        method = "mtd"
+    elif "mtd_debug" in tools:
+        method = "mtd_debug"
+    elif "flash_erase" in tools and "nandwrite" in tools:
+        method = "flash_erase+nandwrite"
+    else:
+        raise RuntimeError(
+            "no supported stock MTD writer is available; need mtd write, mtd_debug, or flash_erase+nandwrite"
+        )
+    ui.status("READY", f"Stock MTD writer selected: {method}")
+    return method
 
 
-def _write_partition(telnet: pb.Telnet, remote: str, part: str, timeout: int = 600) -> None:
-    rc, text = telnet.command_clean(f"mtd write {shlex.quote(remote)} {shlex.quote(part)} && sync", timeout=timeout)
+def _write_partition(
+    telnet: pb.Telnet,
+    remote: str,
+    part: str,
+    dev: str,
+    size: int,
+    method: str,
+    timeout: int = 600,
+) -> None:
+    qremote = shlex.quote(remote)
+    qpart = shlex.quote(part)
+    qdev = shlex.quote(dev)
+    if size <= 0 or size % ERASE_SIZE:
+        raise RuntimeError(f"unsafe write size for {part}: 0x{size:x}")
+    if method == "mtd":
+        cmd = f"mtd write {qremote} {qpart} && sync"
+    elif method == "mtd_debug":
+        cmd = f"mtd_debug erase {qdev} 0 {size} && mtd_debug write {qdev} 0 {size} {qremote} && sync"
+    elif method == "flash_erase+nandwrite":
+        cmd = f"flash_erase {qdev} 0 0 && nandwrite -p {qdev} {qremote} && sync"
+    else:
+        raise RuntimeError(f"unsupported MTD writer method: {method}")
+    rc, text = telnet.command_clean(cmd, timeout=timeout)
     if rc:
-        raise RuntimeError(f"mtd write failed for {part}: {text[-1000:]}")
+        raise RuntimeError(f"{method} write failed for {part}: {text[-1000:]}")
 
 
 def _remote_partition_sha(telnet: pb.Telnet, dev: str, timeout: int = 300) -> str:
@@ -175,7 +212,7 @@ def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = 
     try:
         access, telnet = ubi.open_root_auto(host) if unattended else ubi.open_root()
         _require_stock_geometry(telnet)
-        _mtd_writer_preflight(telnet)
+        writer = _mtd_writer_preflight(telnet)
 
         flag_path = run_dir / "mtd8_flag_before.bin"
         flagback_path = run_dir / "mtd9_flagback_before.bin"
@@ -208,6 +245,7 @@ def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = 
             "slot": slot_meta,
             "selector": flag_meta,
             "flagback_observed": fbs,
+            "writer": writer,
             "dry_run": dry_run,
         }
         (run_dir / "TRANSITION_PLAN.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
@@ -226,7 +264,7 @@ def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = 
 
         remote_slot = "/tmp/ursus-md-transition-slot.bin"
         _upload(telnet, access, slot_candidate_path, remote_slot)
-        _write_partition(telnet, remote_slot, "nsb_slave", timeout=900)
+        _write_partition(telnet, remote_slot, "nsb_slave", "/dev/mtd15", SLOT_SIZE, writer, timeout=900)
         got = _remote_partition_sha(telnet, "/dev/mtd15", timeout=600)
         if got != slot_meta["candidate_sha256"]:
             raise RuntimeError(f"nsb_slave readback mismatch: {got} != {slot_meta['candidate_sha256']}")
@@ -234,7 +272,7 @@ def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = 
 
         remote_flag = "/tmp/ursus-md-flag-activate-slave.bin"
         expected_flag_sha = _upload(telnet, access, flag_candidate_path, remote_flag)
-        _write_partition(telnet, remote_flag, "flag", timeout=120)
+        _write_partition(telnet, remote_flag, "flag", "/dev/mtd8", FLAG_SIZE, writer, timeout=120)
         got_flag = _remote_partition_sha(telnet, "/dev/mtd8", timeout=120)
         if got_flag != expected_flag_sha:
             raise RuntimeError(f"flag readback mismatch: {got_flag} != {expected_flag_sha}")
