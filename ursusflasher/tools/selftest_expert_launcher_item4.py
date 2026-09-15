@@ -33,8 +33,9 @@ def test_launcher_chain_source() -> None:
 
 def test_shipped_item4_dispatch_behavior() -> None:
     em = launcher.base
+    host = "192.0.2.1"
     state = ds.DeviceState(
-        host="192.0.2.1",
+        host=host,
         probe_status=ds.PROBE_COMPLETE,
         model="Nokia XG-040G-MD",
         soc="Airoha AN7581",
@@ -45,6 +46,7 @@ def test_shipped_item4_dispatch_behavior() -> None:
     )
     events: list[tuple] = []
     old: list[tuple[object, str, object]] = []
+    old_host = os.environ.get("NOKIA_ROUTER_IP")
 
     def patch(obj: object, name: str, value: object) -> None:
         old.append((obj, name, getattr(obj, name)))
@@ -52,6 +54,7 @@ def test_shipped_item4_dispatch_behavior() -> None:
 
     choices = iter(("4", "0"))
     try:
+        os.environ["NOKIA_ROUTER_IP"] = host
         patch(em.ds, "probe_device_state", lambda _host: state)
         patch(em.base.proven, "start_session_logging", lambda: None)
         patch(em.base.ui, "enable", lambda: None)
@@ -73,16 +76,16 @@ def test_shipped_item4_dispatch_behavior() -> None:
             "run_expert",
             lambda *, host, profile: (events.append(("transition", host, profile)) or 0),
         )
-        patch(
-            em.base,
-            "run_action",
-            lambda fn, **kwargs: fn(),
-        )
+        patch(em.base, "run_action", lambda fn, **kwargs: fn())
 
         rc = launcher.main()
         assert rc == 0
-        assert events == [("transition", "192.0.2.1", "xg040-md")]
+        assert events == [("transition", host, "xg040-md")]
     finally:
+        if old_host is None:
+            os.environ.pop("NOKIA_ROUTER_IP", None)
+        else:
+            os.environ["NOKIA_ROUTER_IP"] = old_host
         for obj, name, value in reversed(old):
             setattr(obj, name, value)
 
