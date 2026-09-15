@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
 import os
@@ -60,10 +61,9 @@ MD_POLICY = TransitionPolicy(
     nt_fw_uuid=bytes.fromhex("d6d0eea7fcead54b97829934f234b6e4"),
 )
 
-# MF is intentionally a distinct board policy.  Do not inherit MD MTD indices,
-# offsets or HDR/FIT assumptions.  The common orchestration is ready for it,
-# but production write enablement requires the MF secondary-slot wrapper policy
-# and payload to be described explicitly here first.
+# MF is deliberately not synthesized from MD constants. The common runtime is
+# board-profile driven, but xg040-mf must receive its own slot/HDR/FIT/selector
+# policy and TRANSITION payload before production writes are enabled.
 POLICIES = {MD_POLICY.profile: MD_POLICY}
 
 
@@ -187,25 +187,23 @@ def _require_stock_geometry(telnet: pb.Telnet, policy: TransitionPolicy) -> None
             raise RuntimeError(f"stock MTD geometry mismatch for {name}: {got} != {want}")
 
 
-def _capture(telnet: pb.Telnet, access: pb.StockAccess, dev: str, size: int, local: Path) -> str:
-    remote = f"/tmp/ursus-ab-{local.name}"
-    bs = 131072
-    count = (size + bs - 1) // bs
-    rc, text = telnet.command_clean(
-        f"rm -f {shlex.quote(remote)}; dd if={shlex.quote(dev)} of={shlex.quote(remote)} bs={bs} count={count} 2>/dev/null && wc -c < {shlex.quote(remote)} && sha256sum {shlex.quote(remote)}",
-        timeout=300,
-    )
-    if rc:
-        raise RuntimeError(f"failed to capture {dev}")
-    hashes = re.findall(r"\b([0-9a-fA-F]{64})\b", text)
-    sizes = re.findall(r"(?:^|\n)\s*(\d+)\s*(?:\n|$)", text)
-    if not hashes or not sizes or int(sizes[-1]) != size:
-        raise RuntimeError(f"capture metadata invalid for {dev}")
-    expected = hashes[-1].lower()
-    ubi.receive_remote_file(telnet, access.host, remote, local, port=1069, block_size=4096)
-    if local.stat().st_size != size or sha256_file(local) != expected:
-        raise RuntimeError(f"PC copy mismatch for {dev}")
-    return expected
+def _backup_partition_bytes(backup_dir: Path, number: int, name: str, expected_size: int) -> tuple[bytes, str, Path]:
+    """Read a staging input from the already verified full stock backup.
+
+    This intentionally replaces the old reduced four-partition TFTP capture.
+    Candidate construction therefore has no second mandatory download transport.
+    """
+    path = backup_dir / f"mtd{number}_{name}.bin.gz"
+    if not path.is_file():
+        matches = sorted(backup_dir.glob(f"mtd{number}_*.bin.gz"))
+        if len(matches) != 1:
+            raise RuntimeError(f"verified full backup does not contain an unambiguous mtd{number} file")
+        path = matches[0]
+    with gzip.open(path, "rb") as fh:
+        data = fh.read()
+    if len(data) != expected_size:
+        raise RuntimeError(f"backup mtd{number} raw size mismatch: {len(data):#x} != {expected_size:#x}")
+    return data, sha256_bytes(data), path
 
 
 def _verify_remote_upload(telnet: pb.Telnet, local: Path, remote: str) -> str:
@@ -216,13 +214,7 @@ def _verify_remote_upload(telnet: pb.Telnet, local: Path, remote: str) -> str:
     return expected
 
 
-def _upload_with_backend(
-    backend: str,
-    telnet: pb.Telnet,
-    access: pb.StockAccess,
-    local: Path,
-    remote: str,
-) -> str:
+def _upload_with_backend(backend: str, telnet: pb.Telnet, access: pb.StockAccess, local: Path, remote: str) -> str:
     if backend == "tcp":
         pb.send_file_to_router(telnet, access.host, local, remote)
     elif backend == "tftp":
@@ -241,8 +233,8 @@ def _select_and_preflight_transport(
     """Choose one proven transfer primitive before the destructive boundary.
 
     Both transaction inputs are uploaded and SHA/size-verified while NAND is
-    still untouched.  Another backend may be tried only here.  The returned
-    backend is frozen and no automatic switch is permitted after confirmation.
+    untouched. Another backend may be tried only here. The returned backend is
+    frozen; no automatic switch is permitted after confirmation.
     """
     remote_slot = f"/tmp/ursus-{access.family}-transition-slot.bin"
     remote_flag = f"/tmp/ursus-{access.family}-transition-flag.bin"
@@ -309,10 +301,18 @@ def _remote_partition_sha(telnet: pb.Telnet, dev: str, timeout: int = 300) -> st
     return hashes[-1].lower()
 
 
-def run(*, host: str = "192.168.1.1", profile: str = "xg040-md", unattended: bool = False, dry_run: bool = False, reboot: bool = True) -> int:
+def run(
+    *,
+    host: str = "192.168.1.1",
+    profile: str = "xg040-md",
+    unattended: bool = False,
+    dry_run: bool = False,
+    reboot: bool = True,
+    own_transcript: bool = True,
+) -> int:
     policy = _policy(profile)
     stamp = time.strftime("%Y%m%d-%H%M%S")
-    log_path = _enable_transcript(stamp, policy)
+    log_path = _enable_transcript(stamp, policy) if own_transcript else None
     ui.enable()
     linux_image, payload_meta = _load_payload(policy)
     WORK.mkdir(parents=True, exist_ok=True)
@@ -326,45 +326,64 @@ def run(*, host: str = "192.168.1.1", profile: str = "xg040-md", unattended: boo
         _require_stock_geometry(telnet, policy)
         writer = _mtd_writer_preflight(telnet)
 
-        # Production contract: complete backup of every live /proc/mtd entry via
-        # the already proven UrsusFlasher backup backend, then validation, before
-        # candidate staging is authorized.
+        # Complete stock backup is the authoritative source for all staging
+        # inputs. No reduced backup backend exists in the production path.
         full_backup = run_dir / "full-stock-backup"
-        pb.backup_tftp(access, access.host, full_backup, expected_family=access.family, allow_service_provisioning=True)
+        pb.backup_tftp(
+            access,
+            access.host,
+            full_backup,
+            expected_family=access.family,
+            allow_service_provisioning=True,
+        )
         backup_result = pb.verify_stock_restore_backup(full_backup)
         ui.status("READY", f"Complete stock backup verified: {full_backup}")
 
-        flag_path = run_dir / f"mtd{policy.flag_mtd}_flag_before.bin"
-        flagback_path = run_dir / f"mtd{policy.flagback_mtd}_flagback_before.bin"
-        master_path = run_dir / f"mtd{policy.master_mtd}_nsb_master_before.bin"
-        slave_path = run_dir / f"mtd{policy.slave_mtd}_nsb_slave_before.bin"
-        flag_sha = _capture(telnet, access, f"/dev/mtd{policy.flag_mtd}", policy.flag_size, flag_path)
-        flagback_sha = _capture(telnet, access, f"/dev/mtd{policy.flagback_mtd}", policy.flag_size, flagback_path)
-        master_sha = _capture(telnet, access, f"/dev/mtd{policy.master_mtd}", policy.slot_size, master_path)
-        slave_sha = _capture(telnet, access, f"/dev/mtd{policy.slave_mtd}", policy.slot_size, slave_path)
+        flag, flag_sha, flag_path = _backup_partition_bytes(
+            full_backup, policy.flag_mtd, "flag", policy.flag_size
+        )
+        flagback, flagback_sha, flagback_path = _backup_partition_bytes(
+            full_backup, policy.flagback_mtd, "flagback", policy.flag_size
+        )
+        master, master_sha, master_path = _backup_partition_bytes(
+            full_backup, policy.master_mtd, "nsb_master", policy.slot_size
+        )
+        slave, slave_sha, slave_path = _backup_partition_bytes(
+            full_backup, policy.slave_mtd, "nsb_slave", policy.slot_size
+        )
 
-        flag = flag_path.read_bytes()
-        flagback = flagback_path.read_bytes()
         fs = parse_flag(flag, policy)
         fbs = parse_flag(flagback, policy)
         ui.status("INFO", f"Stock A/B state: flag={fs}; flagback={fbs}")
         if fs["curimg"] != 0 or fs["active"] != 0 or fbs["curimg"] != fs["curimg"]:
             ui.status("INFO", "A/B selector state is advisory; structural/profile invariants remain authoritative.")
 
-        slot_candidate, slot_meta = build_transition_slot(slave_path.read_bytes(), linux_image, policy)
+        slot_candidate, slot_meta = build_transition_slot(slave, linux_image, policy)
         slot_candidate_path = run_dir / f"mtd{policy.slave_mtd}_nsb_slave_transition.bin"
         slot_candidate_path.write_bytes(slot_candidate)
         flag_candidate, flag_meta = build_activation_flag(flag, 1, policy)
         flag_candidate_path = run_dir / f"mtd{policy.flag_mtd}_flag_activate_slave.bin"
         flag_candidate_path.write_bytes(flag_candidate)
 
-        # Preflight transfer before y/N.  Failure can move to another proven
-        # backend only here.  Both remote candidates are verified while NAND is
-        # untouched; after y/N no transport selection occurs at all.
+        # Candidate upload is preflight, not part of the destructive transaction.
+        # A failing backend may be replaced here, while NAND is still untouched.
         transport, remote_slot, remote_flag = _select_and_preflight_transport(
             telnet, access, slot_candidate_path, flag_candidate_path
         )
 
+        backup_summary = {
+            "stock_family": backup_result.get("stock_family"),
+            "stock_variant": backup_result.get("stock_variant"),
+            "full_directory": str(full_backup),
+            "flag_source": str(flag_path),
+            "flagback_source": str(flagback_path),
+            "nsb_master_source": str(master_path),
+            "nsb_slave_source": str(slave_path),
+            "flag_sha256": flag_sha,
+            "flagback_sha256": flagback_sha,
+            "nsb_master_sha256": master_sha,
+            "nsb_slave_sha256": slave_sha,
+        }
         report = {
             "operation": f"{policy.profile}_stock_ab_transition",
             "profile": policy.profile,
@@ -372,20 +391,15 @@ def run(*, host: str = "192.168.1.1", profile: str = "xg040-md", unattended: boo
             "slot": slot_meta,
             "selector": flag_meta,
             "flagback_observed": fbs,
-            "backup": {
-                "full_directory": str(full_backup),
-                "verification": backup_result,
-                "flag_sha256": flag_sha,
-                "flagback_sha256": flagback_sha,
-                "nsb_master_sha256": master_sha,
-                "nsb_slave_sha256": slave_sha,
-            },
+            "backup": backup_summary,
             "writer": writer,
             "transport": transport,
-            "log": str(log_path),
+            "log": str(log_path) if log_path else "common UrsusFlasher session log",
             "dry_run": dry_run,
         }
-        (run_dir / "TRANSITION_PLAN.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+        (run_dir / "TRANSITION_PLAN.json").write_text(
+            json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
         ui.status("READY", f"SLAVE candidate prepared: SHA256 {slot_meta['candidate_sha256']}")
         ui.status("READY", "Stock FIP/HDR2/FIT topology preserved; only allowed kernel data/compression/hash fields changed.")
@@ -405,27 +419,51 @@ def run(*, host: str = "192.168.1.1", profile: str = "xg040-md", unattended: boo
 
         # ---------------- destructive boundary ----------------
         # transport and writer are frozen; do not auto-switch either below.
-        _write_partition(telnet, remote_slot, "nsb_slave", f"/dev/mtd{policy.slave_mtd}", policy.slot_size, writer, policy.erase_size, timeout=900)
+        _write_partition(
+            telnet,
+            remote_slot,
+            "nsb_slave",
+            f"/dev/mtd{policy.slave_mtd}",
+            policy.slot_size,
+            writer,
+            policy.erase_size,
+            timeout=900,
+        )
         got = _remote_partition_sha(telnet, f"/dev/mtd{policy.slave_mtd}", timeout=600)
         if got != slot_meta["candidate_sha256"]:
             raise RuntimeError(f"nsb_slave readback mismatch: {got} != {slot_meta['candidate_sha256']}")
         ui.status("READY", "nsb_slave TRANSITION write/readback verified; MAIN remains untouched.")
 
         expected_flag_sha = sha256_file(flag_candidate_path)
-        _write_partition(telnet, remote_flag, "flag", f"/dev/mtd{policy.flag_mtd}", policy.flag_size, writer, policy.erase_size, timeout=120)
+        _write_partition(
+            telnet,
+            remote_flag,
+            "flag",
+            f"/dev/mtd{policy.flag_mtd}",
+            policy.flag_size,
+            writer,
+            policy.erase_size,
+            timeout=120,
+        )
         got_flag = _remote_partition_sha(telnet, f"/dev/mtd{policy.flag_mtd}", timeout=120)
         if got_flag != expected_flag_sha:
             raise RuntimeError(f"flag readback mismatch: {got_flag} != {expected_flag_sha}")
         ui.status("READY", "Stock tcboot selector request verified: active=1; flagback untouched.")
 
         if reboot:
-            ui.status("ACTION", pb.tr("Перезагрузка в SLAVE/TRANSITION через штатный tcboot.", "Rebooting into SLAVE/TRANSITION through stock tcboot."))
+            ui.status("ACTION", pb.tr(
+                "Перезагрузка в SLAVE/TRANSITION через штатный tcboot.",
+                "Rebooting into SLAVE/TRANSITION through stock tcboot.",
+            ))
             try:
                 telnet.send_line("sync; reboot")
             except Exception:
                 pass
         else:
-            ui.status("ACTION", pb.tr("Требуется перезагрузка для применения selector.", "A reboot is required to apply the selector."))
+            ui.status("ACTION", pb.tr(
+                "Требуется перезагрузка для применения selector.",
+                "A reboot is required to apply the selector.",
+            ))
         return 0
     finally:
         if telnet:
@@ -443,21 +481,37 @@ def run(*, host: str = "192.168.1.1", profile: str = "xg040-md", unattended: boo
 def run_expert(*, host: str, profile: str) -> int:
     """Production EXPERT item 4 entrypoint.
 
-    EXPERT owns the UI/session; this backend owns the board-policy transaction.
-    The standalone launcher is retained only as a developer/HW-test wrapper.
+    EXPERT owns the common UI/session log. This module owns only the board-policy
+    transaction. The standalone CLI remains a developer/HW-test wrapper.
     """
-    return run(host=host, profile=profile, unattended=True, dry_run=False, reboot=True)
+    return run(
+        host=host,
+        profile=profile,
+        unattended=True,
+        dry_run=False,
+        reboot=True,
+        own_transcript=False,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="UrsusFlasher stock A/B TRANSITION backend (developer/HW-test wrapper)")
+    ap = argparse.ArgumentParser(
+        description="UrsusFlasher stock A/B TRANSITION backend (developer/HW-test wrapper)"
+    )
     ap.add_argument("--host", default=os.environ.get("NOKIA_HOST", "192.168.1.1"))
     ap.add_argument("--profile", default="xg040-md", choices=("xg040-md", "xg040-mf"))
     ap.add_argument("--unattended", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-reboot", action="store_true")
     args = ap.parse_args(argv)
-    return run(host=args.host, profile=args.profile, unattended=args.unattended, dry_run=args.dry_run, reboot=not args.no_reboot)
+    return run(
+        host=args.host,
+        profile=args.profile,
+        unattended=args.unattended,
+        dry_run=args.dry_run,
+        reboot=not args.no_reboot,
+        own_transcript=True,
+    )
 
 
 if __name__ == "__main__":
