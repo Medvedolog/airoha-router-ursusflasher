@@ -1,4 +1,4 @@
-name: MD TRANSITION2 no-UART fast kit
+name: EXPERT item4 TRANSITION2 no-UART kit
 
 on:
   workflow_dispatch:
@@ -10,9 +10,11 @@ on:
       - 'ursusboot/configs/ursusboot-transition-handoff.cfg'
       - 'ursusboot/patches/190-md-transition1-handoff.patch'
       - 'ursusboot/scripts/build_md_transition1.sh'
+      - 'ursusflasher/src/expert.py'
       - 'ursusflasher/src/stock_ab_transition.py'
       - 'ursusflasher/src/stock_fit_wrapper.py'
-      - 'START_MD_TRANSITION.*'
+      - 'ursusflasher/tools/selftest_transition_expert_item4.py'
+      - 'config/**'
 
 permissions:
   contents: read
@@ -32,9 +34,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential gcc g++ make perl python3 git patch xz-utils zstd liblzma-dev device-tree-compiler zip
 
-      - name: Python syntax QA
+      - name: Python syntax and host contract QA
         run: |
-          python3 -m py_compile ursusflasher/src/stock_ab_transition.py ursusflasher/src/stock_fit_wrapper.py
+          python3 -m py_compile \
+            ursusflasher/src/expert.py \
+            ursusflasher/src/stock_ab_transition.py \
+            ursusflasher/src/stock_fit_wrapper.py
+          python3 ursusflasher/tools/selftest_transition_expert_item4.py
 
       - name: Build TRANSITION2
         run: |
@@ -55,62 +61,74 @@ jobs:
           info={
             'schema':2,'board':'MD','board_profile':'xg040-md','mode':'TRANSITION',
             'runtime_role':'transition','persistence_target':'NONE',
-            'final_target':'VANILLA_OPENWRT_FUDAN','stock_inner_format':'ARM64_LINUX_IMAGE_HANDOFF',
+            'final_target':'VANILLA_OPENWRT_UBI','stock_inner_format':'ARM64_LINUX_IMAGE_HANDOFF',
             'stock_kernel_load':'0x80088000','text_base':'0x81e00000',
             'transition_entry':'ursusdispatch->ursusweb','handoff_only':False,
             'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
             'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
-            'hardware_status':'HW_PENDING_TRANSITION2_WEB'
+            'hardware_status':'HW_PENDING_EXPERT_ITEM4_TRANSITION2_WEB'
           }
           pathlib.Path('payloads/md/transition/TRANSITION2.json').write_text(json.dumps(info,indent=2)+'\n')
           PY
           PYTHONPATH=ursusflasher/src python3 - <<'PY'
           import stock_ab_transition
-          data, meta=stock_ab_transition._load_payload()
+          policy=stock_ab_transition._policy('xg040-md')
+          data, meta=stock_ab_transition._load_payload(policy)
           assert meta['transition_entry']=='ursusdispatch->ursusweb'
           assert meta['handoff_only'] is False
+          assert meta['final_target']=='VANILLA_OPENWRT_UBI'
           print('TRANSITION2_QA=PASS', len(data), meta['sha256'])
           PY
 
-      - name: Assemble no-UART kit
+      - name: Assemble EXPERT item4 test kit
         run: |
           set -eux
-          ART=/tmp/ursus-transition2
+          ART=/tmp/ursus-transition2-expert
+          rm -rf "$ART"
           mkdir -p "$ART"
-          cp -a START_MD_TRANSITION.cmd START_MD_TRANSITION.sh VERSION README.md "$ART/"
+          cp -a START_EXPERT.cmd START_EXPERT.sh VERSION README.md "$ART/"
           cp -a config fw payloads ursusflasher docs "$ART/"
           cat > "$ART/TRANSITION2-READ-ME-FIRST.txt" <<EOF
-          MD TRANSITION2 NO-UART TEST KIT
+          UrsusFlasher EXPERT ITEM 4 - MD TRANSITION2 NO-UART TEST KIT
           Source commit: ${GITHUB_SHA}
 
-          Proven on previous hardware test:
-            stock tcboot -> SLOT2 handoff works on XG-040G-MD/Fudan;
-            failed SLOT2 attempts fall back automatically to untouched stock SLOT1.
+          Operator entry:
+            START_EXPERT -> item 4 -> Stock Nokia -> Vanilla OpenWrt (TRANSITION)
 
-          This TRANSITION2 changes:
-            ursusdispatch -> direct Ursus Web entry (no stock boot chain)
-            ENV_IS_NOWHERE
-            TRANSITION_HANDOFF_ONLY=0
-            A/B selector state is advisory, not a gate
-            stock Telnet backup captures flag, flagback, nsb_master and nsb_slave before write
-            one y/N immediately before writing
-            full nsb_slave and flag readback verification
-            console transcript saved under logs/
-            CMD waits for Enter on both success and failure
+          Before first run on Nokia stock:
+            router powered on -> hold Reset >=30 seconds -> release -> wait for full stock Web UI.
 
-          MAIN/SLOT1 and flagback are not written by the transition stager.
-          TRANSITION2 Web entry is HW_PENDING until this build is tested.
+          Host preflight contract:
+            confirmed xg040-md stock profile
+            complete proven all-/proc/mtd backup and validation
+            structural stock FIP/HDR2/FIT validation
+            TRANSITION2 injected as compression=none with hash update
+            proven transfer backend selected and both candidate files SHA-verified before y/N
+            writer and transfer backend frozen before destructive boundary
+            one ordinary y/N
+            full nsb_slave readback
+            selector readback; flagback untouched
+
+          Previous hardware evidence remains limited to the bootstrap mechanism:
+            tcboot can select SLOT2, stock-compatible FIT/hash passes, TRANSITION shim starts,
+            Fudan NAND is detected, and failed SLOT2 attempts roll back to untouched SLOT1.
+
+          THIS EXPERT ITEM4 ORCHESTRATION BUILD IS HW_PENDING.
+          CI/package PASS is not HW PASS.
           EOF
+          find "$ART" -type d -name __pycache__ -prune -exec rm -rf {} + || true
+          find "$ART" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+          git rev-parse HEAD > "$ART/URSUSFLASHER_COMMIT.txt"
           (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
           cd /tmp
-          zip -qr UrsusFlasher-MD-TRANSITION2-NOUART-${GITHUB_SHA}.zip ursus-transition2
-          sha256sum UrsusFlasher-MD-TRANSITION2-NOUART-${GITHUB_SHA}.zip > UrsusFlasher-MD-TRANSITION2-NOUART-${GITHUB_SHA}.zip.sha256
+          zip -qr UrsusFlasher-EXPERT-ITEM4-MD-TRANSITION2-${GITHUB_SHA}.zip ursus-transition2-expert
+          sha256sum UrsusFlasher-EXPERT-ITEM4-MD-TRANSITION2-${GITHUB_SHA}.zip > UrsusFlasher-EXPERT-ITEM4-MD-TRANSITION2-${GITHUB_SHA}.zip.sha256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UrsusFlasher-MD-TRANSITION2-NOUART-${{ github.sha }}
+          name: UrsusFlasher-EXPERT-ITEM4-MD-TRANSITION2-${{ github.sha }}
           path: |
-            /tmp/UrsusFlasher-MD-TRANSITION2-NOUART-${{ github.sha }}.zip
-            /tmp/UrsusFlasher-MD-TRANSITION2-NOUART-${{ github.sha }}.zip.sha256
+            /tmp/UrsusFlasher-EXPERT-ITEM4-MD-TRANSITION2-${{ github.sha }}.zip
+            /tmp/UrsusFlasher-EXPERT-ITEM4-MD-TRANSITION2-${{ github.sha }}.zip.sha256
           if-no-files-found: error
           retention-days: 14
