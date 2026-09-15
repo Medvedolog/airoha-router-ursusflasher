@@ -20,7 +20,7 @@ common core
   -> runtime role
 ```
 
-Архитектурная цель проекта в перспективе — многомодельный Airoha flasher/recovery stack, в котором UrsusFlasher выбирает модель, transport и operation policy, а UrsusBoot предоставляет общий компактный execution backend.
+Архитектурная цель проекта — многомодельный Airoha flasher/recovery stack, в котором UrsusFlasher выбирает модель, transport и operation policy, а UrsusBoot предоставляет общий компактный execution backend.
 
 ## 2. Поддерживаемые профили
 
@@ -65,13 +65,22 @@ bootcmd=ursusdispatch
 
 Нормальный persistent supervisor. Persistent UrsusBoot остаётся первым управляемым U-Boot runtime и может загружать stock Nokia Linux либо OpenWrt по board policy.
 
+Persistent product сохраняет оба штатных OpenWrt payload-класса проекта:
+
+```text
+OpenWrt factory/non-UBI image path
+OpenWrt initramfs image for UrsusBoot recovery/rescue
+```
+
+Они не являются частью Vanilla Transition и не должны удаляться из общего UrsusFlasher bundle.
+
 ### `ram-recovery`
 
 ```text
 bootcmd=ursusweb;true
 ```
 
-RAM-only WebFailsafe role из той же кодовой базы. Пост-build byte patch готового `u-boot.bin` запрещён.
+RAM-only WebFailsafe role из той же кодовой базы. Пост-build byte patch готового `u-boot.bin` запрещён. Initramfs OpenWrt images должны оставаться доступными как recovery payload для загрузки через UrsusBoot.
 
 ### `transition`
 
@@ -110,6 +119,18 @@ post-write full readback/compare
 ```
 
 После начала destructive write запрещён автоматический fallback на второй writer/backend.
+
+### Обязательный первый запуск на stock Nokia
+
+Перед самым первым запуском UrsusFlasher на устройстве с заводским Nokia firmware оператор обязан выполнить аппаратный factory reset stock-конфигурации:
+
+```text
+при включённом роутере удерживать Reset не менее 30 секунд
+```
+
+Практический аппаратный тест показал, что более короткое удержание может не привести к полному сбросу stock Nokia. После reset необходимо дождаться нормальной загрузки stock Web и только затем запускать UrsusFlasher.
+
+Это операторский pre-step, а не дополнительный destructive confirmation gate внутри UrsusFlasher.
 
 ## 6. XG140 persistent native-hybrid
 
@@ -175,7 +196,7 @@ stock tcboot
   -> bootm
   -> rescue Linux полностью в RAM
   -> transfer device-derived native-hybrid FIP
-  -> reconstruct 512-KiB boot area
+  -> reconstruct 512-KiB mtd0 candidate
   -> write once
   -> full 512-KiB readback
   -> reboot
@@ -188,7 +209,7 @@ UrsusFlasher EXPERT routing для `XG140 -> UART` обязан использо
 
 UrsusFlasher остаётся policy/orchestration layer:
 
-- backup/restore;
+- полный backup/restore;
 - model/family selection and detection;
 - manifest/provenance;
 - identity repair;
@@ -213,27 +234,79 @@ UrsusBoot остаётся компактным execution/recovery backend:
 
 Vanilla Transition — отдельный optional final product и не заменяет persistent UrsusBoot path.
 
-Целевая цепочка:
+### Обязательный полный stock backup
+
+До любой записи stock -> TRANSITION UrsusFlasher обязан через stock Web/Telnet снять и локально валидировать **все MTD-разделы, перечисленные текущим `/proc/mtd` устройства**, а не только `flag/flagback/nsb_master/nsb_slave`.
+
+Backup contract:
+
+```text
+/proc/mtd snapshot
+mtd0..mtdN — полный бинарный dump каждого раздела
+partition name
+exact size
+erase size
+SHA256 каждого dump
+DEVICE_IDENTITY / MAC / serial / RI / factory metadata, где применимо
+BACKUP_MANIFEST.json
+```
+
+Переход к destructive staging запрещён, если хотя бы один раздел из текущего `/proc/mtd` не скопирован полностью на ПК или его размер/SHA256 не подтверждён.
+
+Полный backup должен использовать общий proven UrsusFlasher backup backend. MD/MF transition не должны иметь отдельный урезанный backup implementation.
+
+### Целевая цепочка
 
 ```text
 stock Nokia MAIN
-  -> verified backup
+  -> FULL verified backup of ALL /proc/mtd partitions
   -> TRANSITION payload в stock secondary/SLAVE staging
   -> selector request на SLAVE
   -> stock tcboot
   -> stock-compatible Linux-image handoff
   -> UrsusBoot TRANSITION в RAM
-  -> official/OpenWrt-compatible boot-chain migration
-  -> canonical OpenWrt layout/sysupgrade
+  -> vanilla OpenWrt boot-chain migration
+  -> canonical OpenWrt UBI repartition/layout
+  -> OpenWrt UBI/sysupgrade payload
   -> final verification
   -> vanilla OpenWrt, Ursus-specific persistent code ABSENT
 ```
 
+### Жёсткое правило Vanilla layout
+
+Для режима `Vanilla Transition` существует только один конечный storage target:
+
+```text
+VANILLA -> canonical OpenWrt UBI layout
+```
+
+Никакого `factory/non-UBI` варианта внутри Vanilla Transition быть не должно. Никакого меню выбора `factory vs UBI`, fallback на factory layout или сохранения Nokia A/B layout после начала финальной миграции не допускается.
+
+Factory/non-UBI OpenWrt payload остаётся поддерживаемым **только для отдельного persistent UrsusBoot product/path** и должен оставаться в общем bundle вместе с recovery initramfs images.
+
+Финальный Vanilla backend обязан:
+
+```text
+получить заранее упакованный board-specific payload set
+-> проверить manifest/SHA/profile/NAND geometry
+-> один y/N
+-> записать canonical OpenWrt BL2/preloader
+-> full readback
+-> записать canonical OpenWrt FIP/BL31/U-Boot
+-> full readback
+-> выполнить canonical UBI repartition/format
+-> развернуть OpenWrt UBI/sysupgrade image
+-> проверить UBI attach/volumes/FIT/rootfs contract
+-> sync
+-> reboot
+```
+
+Все payload должны быть заранее включены в UrsusFlasher bundle; live download из Internet во время destructive migration не допускается.
+
 ### MD status
 
-Для XG-040G-MD уже существуют:
+Для XG-040G-MD существуют:
 
-- `ursusboot/scripts/build_md_transition1.sh`;
 - `ursusboot/configs/ursusboot-transition-handoff.cfg`;
 - stock-compatible ARM64 Linux Image handoff shim;
 - `ursusflasher/src/stock_ab_transition.py`;
@@ -243,32 +316,21 @@ stock Nokia MAIN
 - `flagback` не зеркалируется вручную;
 - readback slot и selector до reboot.
 
-MD TRANSITION bootstrap остаётся **HW ACCEPTANCE PENDING**. CI/build наличие не является доказательством stock tcboot -> TRANSITION runtime на реальном устройстве.
-
-Первый обязательный MD acceptance:
+Аппаратно подтверждено на XG-040G-MD с Fudan FM25G02B:
 
 ```text
-stock MAIN
--> backup PASS
--> stage TRANSITION in SLAVE
--> slot readback PASS
--> active=1 readback PASS
--> reboot без UART input
--> tcboot chooses SLAVE
--> Linux-image shim starts UrsusBoot TRANSITION
--> Web/API/network PASS
--> cold boot repeatability PASS
+stock tcboot chooses SLAVE
+-> stock-compatible FIT hash passes
+-> Linux Image shim starts UrsusBoot TRANSITION
+-> stock A/B retry counter decreases on failed secondary boot
+-> tcboot eventually returns automatically to untouched stock SLOT1
 ```
 
-Только после этого разрешается destructive final Vanilla migration test.
+Следующая обязательная MD acceptance — исправленный TRANSITION runtime должен остаться в Web/API без ухода в stock boot, после чего разрешается первый destructive Vanilla UBI migration test.
 
 ### MF status
 
-Для XG-040G-MF отдельный production-equivalent `build_mf_transition*.sh` и MF slot2 transition backend пока не завершены.
-
-MF уже имеет AN7583 RAM/persistent groundwork, но TRANSITION должен быть перенесён как общий runtime role + MF board policy, а не копированием MD implementation.
-
-Цель следующей итерации:
+XG-040G-MF обязан получить production-equivalent Vanilla Transition на той же общей архитектуре:
 
 ```text
 common transition runtime
@@ -276,7 +338,9 @@ common transition runtime
   + xg040-mf board policy
 ```
 
-Общий `stock_ab_transition` должен стать board-profile driven; номера mtd/offsets/HDR2/HDR3 не должны быть универсально зашиты как MD constants.
+MF transition должен включать тот же обязательный полный backup всех `/proc/mtd`, отдельный stock-compatible secondary-slot wrapper/HDR policy, MF selector/layout policy и конечный **только UBI** Vanilla target.
+
+`stock_ab_transition` должен стать board-profile driven; номера mtd/offsets/HDR2/HDR3 не должны быть универсально зашиты как MD constants.
 
 ## 11. Nokia A/B selector policy
 
@@ -285,9 +349,12 @@ common transition runtime
 - `active` — requested slot;
 - `curimg` — фактически загруженный slot;
 - `startok` — stock userspace success state;
+- `count` — retry/state counter;
 - `flagback` принадлежит stock tcboot reconciliation logic.
 
 При запросе SLAVE меняется только `active=1`, если конкретный board profile подтвердил этот contract. Нельзя вручную зеркалировать `flagback` без доказанной необходимости.
+
+На MD аппаратно подтверждено автоматическое возвращение tcboot к нетронутому SLOT1 после серии неуспешных загрузок SLOT2.
 
 A/B selector является отдельным policy-модулем и не должен смешиваться с persistent boot-area write transaction.
 
@@ -297,12 +364,16 @@ Vanilla OpenWrt означает конечную persistent-систему, п�
 
 Допустимы необходимые board/hardware-support patches, включая Fudan/FMSH SPI-NAND support для MD, если они являются частью OpenWrt hardware enablement и отражены в provenance.
 
+Vanilla storage contract для MD/MF transition — **только canonical UBI layout**.
+
 Недопустимы в конечном Vanilla boot chain:
 
 - UrsusBoot WebFailsafe/API;
 - `Mode=TRANSITION/PERSISTENT`;
 - Ursus-specific boot policy/writers;
-- зависимость от transition staging slot после завершения migration.
+- зависимость от transition staging slot после завершения migration;
+- Nokia A/B slot layout как финальный OpenWrt storage target;
+- factory/non-UBI final layout.
 
 TRANSITION используется только как временная RAM-среда и не ухудшает Vanilla status, если после migration он не участвует в boot chain.
 
@@ -315,13 +386,16 @@ TRANSITION используется только как временная RAM-�
 - WebFailsafe board identity через policy;
 - отсутствие чужой board identity в итоговом binary;
 - source-level runtime role selection;
-- правильный bootcmd для каждой role;
+- правильный bootcmd/runtime dispatch для каждой role;
 - требуемые SoC/network/MTD symbols;
 - environment ownership policy;
 - размер/сжатие BL33;
 - XG140 native FIP repacker self-test;
 - host-side imports/routes operator kit;
-- packaged payload SHA checks.
+- packaged payload SHA checks;
+- Vanilla bundle содержит MD и MF payload sets;
+- Vanilla manifests разрешают только UBI final target;
+- persistent bundle продолжает содержать OpenWrt factory payload и initramfs recovery images.
 
 Актуальная multimodel baseline:
 
@@ -334,7 +408,7 @@ artifact id:  10371938945
 digest:       sha256:8714a98ede51fb9d3615cff1ebbe0fec68cdced86f9d98f35152e8edaecfab4e
 ```
 
-Эта baseline включает modular XG140 persistent BL33, rescue initramfs payload, multimodel EXPERT routing и packaged runtime verification. Она не равна XG140 persistent hardware acceptance.
+Эта baseline не равна hardware acceptance новых transition/vanilla путей.
 
 ## 14. Hardware acceptance XG140
 
@@ -349,8 +423,6 @@ CI PASS не равен hardware acceptance.
 5. `ursusdispatch -> ursusstockboot -> stock MASTER` подтверждается на железе;
 6. затем отдельно принимается Nokia A/B selector/fallback policy;
 7. только после этого XG140 persistent path перестаёт быть engineering-only.
-
-Текущий лабораторный XG140 имеет повреждённый stock MAIN/slot1 payload, но stock tcboot/UART остаются живыми. Для него допустимый текущий bootstrap — XG140 UART FIT/initramfs bridge.
 
 ## 15. Правило расширения
 
@@ -373,7 +445,10 @@ existing/new SoC module
 - Не менять `main` без прямой команды оператора.
 - Не merge/tag/release без прямой команды.
 - Не коммитить device backups, plaintext credentials, serial/GPON secrets.
+- Перед первым запуском UrsusFlasher на stock Nokia выполнить аппаратный factory reset удержанием Reset **30+ секунд**, дождаться полной загрузки stock Web.
+- Для stock -> transition обязателен полный verified backup **всех** разделов текущего `/proc/mtd`.
 - EXPERT/HWTEST — минимальная operator ceremony; не добавлять бессмысленные policy-gates.
 - Для штатной destructive операции достаточно одного осмысленного `y/N` после автоматического preflight-summary, если конкретный emergency flow не задан как unattended.
 - Structural checks/readback выполняются автоматически и не требуют дополнительных подтверждений.
 - После начала записи нельзя автоматически переключаться на другой writer/backend.
+- Vanilla MD/MF migration имеет только UBI final target; factory/non-UBI относится только к persistent UrsusBoot product path.
