@@ -28,7 +28,11 @@ UrsusFlasher является policy/orchestration layer. UrsusBoot являет
 
 Board profile определяет только реальные различия: DTS, storage/env, stock slot layout, HDR/FIT policy, selector policy, write spans, SerDes, identity/restore regions и hardware hooks. Common runtime не копируется по моделям.
 
-## 3. Runtime roles
+## 3. Boot-time runtime roles и payload lifecycle
+
+`runtime_role` в `ursusboot/configs/board-profiles.json` означает только boot-time роль UrsusBoot runtime. Это отдельный namespace от lifecycle metadata конкретного payload/artifact.
+
+Boot-time registry содержит:
 
 ### `persistent`
 
@@ -48,18 +52,21 @@ OpenWrt sysupgrade/UBI payloads where supported
 
 RAM-only WebFailsafe из той же кодовой базы. Initramfs OpenWrt images остаются штатными recovery payloads для UrsusBoot.
 
-### `transition`
+### Payload lifecycle `transition`
 
-Одноразовая RAM-среда для Vanilla OpenWrt migration:
+`transition` не является третьим boot-time `runtime_role` registry entry. Это lifecycle одноразового migration payload:
 
 ```text
 Mode=TRANSITION
+Product lifecycle=transition
 Persistence target=NONE
 Final target=OFFICIAL_OPENWRT
 ENV_IS_NOWHERE
 ```
 
-TRANSITION не остаётся в конечном boot chain.
+TRANSITION не остаётся в конечном boot chain MD/MF.
+
+Payload metadata не должна использовать имя `runtime_role` для lifecycle-значения `transition`; для новых metadata используется отдельное поле `product_lifecycle` (либо явно эквивалентное lifecycle namespace). Нельзя добавлять `transition` в boot-time role registry только для согласования названий metadata.
 
 ## 4. Product separation: Persistent vs Vanilla
 
@@ -89,9 +96,32 @@ write spans/final layout policy
 NAND-specific enablement/provenance
 ```
 
+### Final boot chain является board policy
+
+Наличие persistent UrsusBoot в конечной цепочке — не глобальный invariant платформы. Каждый board profile определяет, является ли persistent UrsusBoot только install/recovery supervisor либо частью целевой boot chain.
+
+```text
+xg040-md:
+  TRANSITION temporary
+  final = vanilla OpenWrt bootchain + canonical UBI
+  persistent UrsusBoot absent from final active chain
+
+xg040-mf:
+  TRANSITION temporary
+  final = vanilla OpenWrt bootchain + canonical UBI
+  persistent UrsusBoot absent from final active chain
+
+xg140-md:
+  persistent UrsusBoot is intentional target BL33
+  native trusted early envelope is preserved
+  final storage target = OpenWrt UBI under persistent UrsusBoot
+```
+
+XG140 persistent target не является исключением из MD/MF правила: это отдельная board policy, вытекающая из device-derived native-hybrid FIP architecture.
+
 ### Жёсткое правило Vanilla
 
-Для `Vanilla Transition` существует только один конечный storage target:
+Для `Vanilla Transition` MD/MF существует только один конечный storage target:
 
 ```text
 VANILLA -> canonical OpenWrt UBI layout
@@ -106,6 +136,8 @@ fallback на factory layout
 Nokia A/B как конечная OpenWrt storage layout
 persistent UrsusBoot в конечной boot chain
 ```
+
+Это правило относится к MD/MF Vanilla product path и не должно механически применяться к XG140 persistent target chain.
 
 Factory/non-UBI payload остаётся только для отдельного persistent UrsusBoot product/path.
 
@@ -354,9 +386,9 @@ BootROM
 
 После успешной migration отсутствуют tcboot, Nokia A/B и UrsusBoot в active final boot target. Factory/identity/calibration regions, которые должны сохраняться для работы конкретной платы, не уничтожаются только ради формального «перезаписать всё».
 
-## 14. XG140 persistent native-hybrid
+## 14. XG140 persistent native-hybrid + UBI snapshot target
 
-XG140 остаётся отдельным persistent/recovery направлением.
+XG140 остаётся отдельным persistent/recovery направлением внутри той же модульной архитектуры UrsusBoot/UrsusFlasher. Для него persistent UrsusBoot является частью целевой цепочки, а не временным install supervisor.
 
 Known physical boot area:
 
@@ -382,18 +414,78 @@ live vendor env           KEEP
 tcboot -> loadx raw u-boot.bin -> go 0x81e00000
 ```
 
-Правильный emergency path:
+HW-proven stock ingress:
 
 ```text
 stock tcboot
 -> XMODEM Linux FIT initramfs @0x85000000
 -> bootm
--> rescue Linux in RAM
--> native-hybrid FIP reconstruction/write
--> full 0x80000 readback
--> reboot
--> persistent modular UrsusBoot
+-> rescue/OpenWrt Linux in RAM
 ```
+
+### XG140 recovery prerequisite перед PERSIST1
+
+На текущем evidence уровне единственный HW-proven ingress проходит через stock tcboot, а PERSIST1 записывает тот же `mtd0` boot area, где находится текущий tcboot path. Поэтому первый persistent write считается one-way door, пока для конкретного XG140 не доказан независимый BootROM/UART recovery ingress.
+
+До первого PERSIST1 destructive write требуется отдельно доказать на stock, неизменённом устройстве:
+
+```text
+BootROM/UART emergency ingress
+-> загрузка минимального rescue payload или recovery loader
+-> доступ к NAND/boot area достаточный для восстановления mtd0
+```
+
+Этот prerequisite не является дополнительным operator ceremony для обычного production flow; это hardware-acceptance prerequisite для перевода `xg140` persistent write из engineering/HW_PENDING в разрешённую операцию.
+
+### Stage XG140-PERSIST1
+
+После доказанного fallback:
+
+```text
+stock tcboot -> RAM initramfs
+-> full verified backup
+-> device-derived native-hybrid mtd0 candidate
+-> preserve BootROM prefix/native trusted entries/vendor env
+-> replace only approved NT_FW/BL33 span
+-> one y/N
+-> write full 0x80000 boot area with frozen writer
+-> full 0x80000 readback/SHA verification
+-> cold reboot
+-> persistent modular UrsusBoot
+-> WebFailsafe/network acceptance
+```
+
+PERSIST1 не переписывает UBI/data layout. Его цель — доказать persistent recovery anchor отдельно от последующей OpenWrt storage migration.
+
+### Stage XG140-UBI1
+
+Только после `XG140-PERSIST1 HW_PASS`:
+
+```text
+persistent UrsusBoot/WebFailsafe
+-> verify complete stock backup + identity manifest
+-> deploy board-specific canonical OpenWrt UBI snapshot/layout
+-> restore device-specific identity/factory data from verified backup
+-> verify RI/BOSA/MAC/serial/GPON/calibration regions or volumes
+-> verify UBI attach/volumes/FIT/rootfs
+-> sync
+-> reboot
+-> OpenWrt
+```
+
+RI/BOSA/MAC/serial/GPON identity никогда не запекаются в общий snapshot. Shared snapshot содержит только общие firmware/layout данные; уникальные данные восстанавливаются из verified backup и проходят отдельный readback/SHA или эквивалентный semantic verification.
+
+Целевая XG140 chain:
+
+```text
+BootROM
+-> preserved native trusted early envelope
+-> persistent modular UrsusBoot as BL33
+-> canonical OpenWrt UBI
+-> OpenWrt
+```
+
+Отдельный MD-подобный SLOT2 TRANSITION для XG140 не создаётся без новой аппаратной необходимости: HW-proven tcboot/XMODEM RAM ingress уже выполняет роль безопасного bootstrap path до PERSIST1.
 
 ## 15. CI contract
 
@@ -401,13 +493,16 @@ CI проверяет:
 
 - common/SoC/board/runtime layer boundaries;
 - profile resolver consistency;
-- source-level runtime role selection;
+- source-level boot-time runtime role selection;
+- `runtime_role` boot registry namespace не смешивается с payload lifecycle metadata;
+- transition payload metadata использует отдельный lifecycle namespace (`product_lifecycle=transition` для новых artifacts);
 - board identity;
 - environment ownership;
 - payload manifests/SHA;
 - no duplicate shared OpenWrt artifacts without reason;
 - separate MD/MF board manifests where bootchain/layout actually differs;
-- Vanilla permits only UBI final target;
+- MD/MF Vanilla permits only UBI final target;
+- XG140 final target policy intentionally keeps persistent UrsusBoot BL33 inside preserved native trusted envelope;
 - persistent bundle retains factory payload and initramfs recovery images;
 - transition wrapper structural self-tests cover at least supported `compression=none` and `compression=lzma` stock FIT variants;
 - EXPERT item 4 uses common/proven backup, auth, transport and logging infrastructure rather than standalone copies.
@@ -429,7 +524,10 @@ CI PASS не равен hardware acceptance.
 10. Build and HW-accept MF secondary-slot TRANSITION.
 11. HW-test MF final UBI-only Vanilla migration.
 12. Keep persistent UrsusBoot + factory/non-UBI + initramfs recovery paths intact.
-13. Continue XG140 persistent/recovery acceptance independently.
+13. Prove XG140 BootROM/UART independent recovery ingress on stock hardware before first PERSIST1 write.
+14. HW-accept XG140-PERSIST1: native-hybrid mtd0 write/readback/cold boot into persistent UrsusBoot.
+15. Implement/HW-accept XG140-UBI1: board-specific UBI snapshot + device identity restore from verified backup.
+16. Keep XG140 persistent UrsusBoot as intentional final BL33 board policy.
 ```
 
 ## 17. Repository / operator contract
@@ -445,6 +543,10 @@ CI PASS не равен hardware acceptance.
 - Один meaningful `y/N` после automatic preflight-summary.
 - Structural geometry/boundary/readback checks выполняются автоматически.
 - После начала destructive write backend/writer не меняется.
-- Vanilla MD/MF final target — **UBI only**.
+- Final boot chain определяется board policy, а не глобальным правилом платформы.
+- Vanilla MD/MF final target — **UBI only**, persistent UrsusBoot отсутствует в final active chain.
+- XG140 final target — preserved native trusted envelope -> persistent UrsusBoot BL33 -> canonical OpenWrt UBI -> OpenWrt.
+- Перед разрешением XG140 persistent write должен быть HW-доказан независимый BootROM/UART recovery ingress либо иной эквивалентный независимый fallback.
 - Persistent UrsusBoot сохраняет factory/non-UBI OpenWrt support и initramfs recovery images.
+- Boot-time `runtime_role` и payload `product_lifecycle` являются разными namespace и не должны использовать одно имя для разных смыслов.
 - OpenWrt firmware artifacts shared между MD/MF, когда один artifact реально совместим; board-specific остаются только реально различающиеся transition/bootchain/layout payloads.
