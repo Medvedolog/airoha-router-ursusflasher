@@ -1,0 +1,333 @@
+name: Airoha multimodel public test
+
+on:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - '.github/workflows/airoha-multimodel-public-test.yml'
+      - '.github/workflows/md-transition1-build.yml'
+      - 'START_*.cmd'
+      - 'START_*.sh'
+      - 'config/**'
+      - 'payloads/**'
+      - 'ursusflasher/**'
+      - 'ursusboot/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: airoha-multimodel-public-test-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  OPENWRT_REPO: openwrt/openwrt
+  OPENWRT_REF: 1ff2a3ef77ea9c5b30b2f7a548bfd3f5a3b5e065
+  FASTSCAN_ATF_REPO: Yuzhii0718/atf-airoha
+  FASTSCAN_ATF_REF: 083c14faf832cb2de3d7dc8368dc8fb1c8f6a1e5
+
+jobs:
+  fastscan-bl2:
+    name: fast UBI BL2 (${{ matrix.soc }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - soc: an7581
+            subtarget: an7581
+            device: nokia_xg-040g-md-ubi
+          - soc: an7583
+            subtarget: an7583
+            device: nokia_xg-040g-mf-ubi
+    steps:
+      - name: Checkout pinned OpenWrt
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.OPENWRT_REPO }}
+          ref: ${{ env.OPENWRT_REF }}
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gcc-multilib gettext git \
+            libncurses-dev libssl-dev liblzma-dev python3 python3-setuptools \
+            rsync swig unzip zlib1g-dev file wget jq time xz-utils zstd \
+            device-tree-compiler perl
+
+      - name: Pin hardware-tested fast-scan ATF source
+        env:
+          ATF_REPO: ${{ env.FASTSCAN_ATF_REPO }}
+          ATF_REF: ${{ env.FASTSCAN_ATF_REF }}
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re
+          p = pathlib.Path('package/boot/arm-trusted-firmware-airoha/Makefile')
+          s = p.read_text()
+          s, n1 = re.subn(r'(^\s*SOURCE_VERSION:=)[0-9a-f]+$', r'\g<1>' + os.environ['ATF_REF'], s, count=1, flags=re.M)
+          s, n2 = re.subn(r'(^\s*URL:=)https://github\.com/[^\s]+/atf-airoha\.git$', r'\g<1>https://github.com/' + os.environ['ATF_REPO'] + '.git', s, count=1, flags=re.M)
+          s, n3 = re.subn(r'(^\s*MIRROR_HASH:=).+$', r'\g<1>skip', s, count=1, flags=re.M)
+          if (n1, n2, n3) != (1, 1, 1):
+              raise SystemExit(f'ATF pin rewrite failed: version={n1} url={n2} hash={n3}')
+          p.write_text(s)
+          print('FASTSCAN_ATF_PIN=' + os.environ['ATF_REF'])
+          PY
+          grep -F "SOURCE_VERSION:=${FASTSCAN_ATF_REF}" package/boot/arm-trusted-firmware-airoha/Makefile
+          grep -F "URL:=https://github.com/${FASTSCAN_ATF_REPO}.git" package/boot/arm-trusted-firmware-airoha/Makefile
+          grep -F 'MIRROR_HASH:=skip' package/boot/arm-trusted-firmware-airoha/Makefile
+
+      - name: Configure Airoha target
+        env:
+          SUBTARGET: ${{ matrix.subtarget }}
+        run: |
+          cat > .config <<EOF
+          CONFIG_TARGET_airoha=y
+          CONFIG_TARGET_airoha_${SUBTARGET}=y
+          EOF
+          make defconfig
+          grep -q '^CONFIG_TARGET_airoha=y' .config
+          grep -q "^CONFIG_TARGET_airoha_${SUBTARGET}=y" .config
+
+      - name: Download sources
+        run: |
+          make download -j8
+          find dl -type f -size -1024c -delete
+
+      - name: Build Airoha ATF BL2
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee atf-${{ matrix.soc }}.log || {
+            make -j1 package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee -a atf-${{ matrix.soc }}.log
+          }
+
+      - name: Stage fast-scan preloader FIP
+        env:
+          SOC: ${{ matrix.soc }}
+          DEVICE: ${{ matrix.device }}
+        run: |
+          set -eux
+          BL2="$(find staging_dir -type f -name "${SOC}-bl2.bin" -print -quit)"
+          FIPTOOL="$(find staging_dir -type f -path '*/host/bin/fiptool' -print -quit)"
+          test -n "$BL2" && test -s "$BL2"
+          test -n "$FIPTOOL" && test -x "$FIPTOOL"
+          mkdir -p fastscan-out
+          "$FIPTOOL" create --tb-fw "$BL2" fastscan-out/preloader.bin
+          test -s fastscan-out/preloader.bin
+          cp "$BL2" fastscan-out/${SOC}-bl2.bin
+          sha256sum fastscan-out/preloader.bin fastscan-out/${SOC}-bl2.bin > fastscan-out/SHA256SUMS
+          cat > fastscan-out/PROVENANCE.txt <<EOF
+          PURPOSE=FAST_UBI_SCAN_BL2_PUBLIC_TEST
+          SOC=${SOC}
+          DEVICE=${DEVICE}
+          OPENWRT_REPO=${OPENWRT_REPO}
+          OPENWRT_REF=${OPENWRT_REF}
+          ATF_REPO=${FASTSCAN_ATF_REPO}
+          ATF_REF=${FASTSCAN_ATF_REF}
+          UPSTREAM_HW_STATUS=REPORTED_HW_TESTED
+          LOCAL_HW_STATUS=HW_PENDING
+          EOF
+          grep -R -F 'nandflash_read_range' build_dir/target-*/*trusted-firmware* package/boot/arm-trusted-firmware-airoha 2>/dev/null | head -n1
+
+      - name: Upload fast-scan BL2
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastscan-bl2-${{ matrix.soc }}-${{ github.sha }}
+          path: fastscan-out/
+          if-no-files-found: error
+          retention-days: 14
+
+  package:
+    name: multimodel public-test kit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    needs: fastscan-bl2
+    steps:
+      - name: Checkout UrsusFlasher
+        uses: actions/checkout@v4
+        with:
+          path: kit
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential gcc g++ make perl python3 git patch xz-utils zstd \
+            liblzma-dev device-tree-compiler jq unzip
+
+      - name: Download fast-scan BL2 artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fastscan-bl2-*-${{ github.sha }}
+          path: fastscan
+
+      - name: Fetch last green XG140 rescue payload
+        working-directory: kit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ../baseline-xg140
+          gh run download 34900134319 \
+            --repo "$GITHUB_REPOSITORY" \
+            --name UrsusFlasher-Airoha-Multimodel-HWTEST-5993429874f7ec2287931a4a5bcba199de826fe2 \
+            --dir ../baseline-xg140
+          test -s ../baseline-xg140/ursusflasher/xg140-rescue-initramfs.itb
+
+      - name: Build MD persistent UrsusBoot
+        working-directory: kit
+        run: |
+          bash ursusboot/scripts/build_alpha5_test61.sh
+          test -s work/alpha5-test61-rebuild/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip
+
+      - name: Build MD TRANSITION runtime
+        working-directory: kit
+        run: |
+          bash ursusboot/scripts/build_md_transition1.sh
+          test -s work/md-transition1/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg
+
+      - name: Stage MD TRANSITION payload and metadata
+        working-directory: kit
+        run: |
+          set -eux
+          SRC=work/md-transition1/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg
+          DST=payloads/md/transition
+          mkdir -p "$DST"
+          cp "$SRC" "$DST/"
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          p=pathlib.Path('payloads/md/transition/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg')
+          info={
+            'schema': 1,
+            'board': 'MD',
+            'board_profile': 'xg040-md',
+            'mode': 'TRANSITION',
+            'runtime_role': 'transition',
+            'persistence_target': 'NONE',
+            'final_target': 'OFFICIAL_OPENWRT',
+            'stock_inner_format': 'ARM64_LINUX_IMAGE_HANDOFF',
+            'stock_kernel_load': '0x80088000',
+            'text_base': '0x81e00000',
+            'size': p.stat().st_size,
+            'sha256': hashlib.sha256(p.read_bytes()).hexdigest(),
+            'source_commit': subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip(),
+            'hardware_status': 'HW_PENDING_TCBOOT_TO_TRANSITION',
+          }
+          pathlib.Path('payloads/md/transition/TRANSITION1.json').write_text(json.dumps(info, indent=2)+'\n')
+          print(json.dumps(info, indent=2))
+          PY
+          PYTHONPATH=ursusflasher/src python3 - <<'PY'
+          import stock_ab_transition
+          data, meta = stock_ab_transition._load_payload()
+          assert meta['runtime_role'] == 'transition'
+          print('PACKAGED_MD_TRANSITION=PASS', len(data), meta['sha256'])
+          PY
+
+      - name: Stage rebuilt MD persistent payload
+        working-directory: kit
+        run: |
+          cp work/alpha5-test61-rebuild/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip \
+            payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip
+          cp work/alpha5-test61-rebuild/out/u-boot.bin \
+            payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-u-boot.bin
+          cp work/alpha5-test61-rebuild/out/u-boot.lzma \
+            payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-u-boot.lzma
+
+      - name: Stage fast-scan BL2 for MD and MF
+        working-directory: kit
+        run: |
+          set -eux
+          MD="$(find ../fastscan -path '*an7581*' -name preloader.bin -print -quit)"
+          MF="$(find ../fastscan -path '*an7583*' -name preloader.bin -print -quit)"
+          test -s "$MD" && test -s "$MF"
+          cp "$MD" payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin
+          mkdir -p payloads/mf/proven
+          cp "$MF" payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin
+          mkdir -p payloads/fastscan-provenance
+          cp "$(find ../fastscan -path '*an7581*' -name PROVENANCE.txt -print -quit)" payloads/fastscan-provenance/AN7581.txt
+          cp "$(find ../fastscan -path '*an7583*' -name PROVENANCE.txt -print -quit)" payloads/fastscan-provenance/AN7583.txt
+          sha256sum \
+            payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin \
+            payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin
+
+      - name: Build XG140 persistent modular BL33
+        working-directory: kit
+        env:
+          URSUS_RUNTIME_ROLE: persistent
+        run: |
+          bash ursusboot/scripts/build_xg140_native_profile.sh
+          test -s work/xg140-native-profile-persistent/out/u-boot.lzma
+          mkdir -p payloads/xg140/ursusboot payloads/xg140/rescue
+          cp work/xg140-native-profile-persistent/out/u-boot.lzma payloads/xg140/ursusboot/u-boot.persistent.lzma
+          cp work/xg140-native-profile-persistent/out/u-boot.bin payloads/xg140/ursusboot/u-boot.persistent.bin
+          cp ../baseline-xg140/ursusflasher/xg140-rescue-initramfs.itb payloads/xg140/rescue/xg140-rescue-initramfs.itb
+
+      - name: Build public-test operator kit
+        working-directory: kit
+        run: |
+          set -euxo pipefail
+          ART=/tmp/ursusflasher-airoha-public-test
+          rm -rf "$ART"
+          mkdir -p "$ART"
+          cp -a START_*.cmd START_*.sh VERSION README.md "$ART/"
+          cp -a config fw payloads ursusflasher docs "$ART/"
+          cp payloads/xg140/rescue/xg140-rescue-initramfs.itb "$ART/ursusflasher/xg140-rescue-initramfs.itb"
+          cp payloads/xg140/ursusboot/u-boot.persistent.lzma "$ART/ursusflasher/u-boot.lzma"
+          cp ursusflasher/tools/repack_xg140_native_fip.py "$ART/ursusflasher/repack_xg140_native_fip.py"
+          cat > "$ART/README-PUBLIC-TEST.txt" <<EOF
+          UrsusFlasher Airoha multimodel PUBLIC TEST
+          Source branch: feature/ursusboot-modular-airoha
+          Source commit: ${GITHUB_SHA}
+
+          Models:
+            Nokia XG-040G-MD  persistent + MD TRANSITION hardware test
+            Nokia XG-040G-MF  current proven persistent runtime + fast-scan BL2 candidate
+            Bell/Nokia XG-140G-MD  native-hybrid persistent hardware test
+
+          Fast UBI scan BL2 provenance:
+            ${FASTSCAN_ATF_REPO}@${FASTSCAN_ATF_REF}
+          The fast-scan BL2 is packaged only for XG-040G-MD/AN7581 and
+          XG-040G-MF/AN7583. XG140 keeps its native device-derived BL2/FIP chain.
+
+          Hardware acceptance remains required. CI/build/package PASS is not HW PASS.
+          EOF
+          find "$ART" -type d -name __pycache__ -prune -exec rm -rf {} + || true
+          find "$ART" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+          git rev-parse HEAD > "$ART/URSUSFLASHER_COMMIT.txt"
+          (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+
+      - name: Verify public-test package
+        run: |
+          set -eux
+          ART=/tmp/ursusflasher-airoha-public-test
+          test -f "$ART/START_EXPERT.cmd"
+          test -f "$ART/START_MD_TRANSITION.cmd"
+          test -s "$ART/payloads/md/transition/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg"
+          test -s "$ART/payloads/md/transition/TRANSITION1.json"
+          test -s "$ART/payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin"
+          test -s "$ART/payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin"
+          test -s "$ART/payloads/xg140/ursusboot/u-boot.persistent.lzma"
+          test -s "$ART/ursusflasher/xg140-rescue-initramfs.itb"
+          (cd "$ART" && PYTHONPATH=ursusflasher/src python3 - <<'PY'
+          import stock_ab_transition
+          data, meta = stock_ab_transition._load_payload()
+          assert meta['board_profile'] == 'xg040-md'
+          assert meta['runtime_role'] == 'transition'
+          print('PUBLIC_TEST_TRANSITION_IMPORT=PASS', len(data))
+          PY
+          )
+          (cd "$ART" && sha256sum -c SHA256SUMS >/dev/null)
+          du -sh "$ART"
+
+      - name: Upload multimodel public-test kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: UrsusFlasher-Airoha-Multimodel-PUBLIC-TEST-${{ github.sha }}
+          path: /tmp/ursusflasher-airoha-public-test
+          if-no-files-found: error
+          retention-days: 14
