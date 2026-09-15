@@ -25,8 +25,8 @@ def validate_linux_image(data: bytes) -> dict:
         )
     if flags != 0:
         raise RuntimeError(f"TRANSITION Linux Image flags are unexpected: {flags:#x}")
-    if b"TRANSITION1" not in data or b"OFFICIAL_OPENWRT" not in data:
-        raise RuntimeError("TRANSITION identity markers are missing from Linux Image handoff")
+    if b"TRANSITION2" not in data or b"OFFICIAL_OPENWRT" not in data:
+        raise RuntimeError("TRANSITION2 identity markers are missing from Linux Image handoff")
     return {"size": len(data), "text_offset": text_offset, "image_size": image_size, "flags": flags}
 
 
