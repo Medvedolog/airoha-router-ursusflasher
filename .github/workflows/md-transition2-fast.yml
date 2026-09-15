@@ -7,14 +7,19 @@ on:
       - feature/ursusboot-modular-airoha
     paths:
       - '.github/workflows/md-transition2-fast.yml'
+      - 'START_EXPERT.cmd'
+      - 'START_EXPERT.sh'
       - 'ursusboot/configs/ursusboot-transition-handoff.cfg'
       - 'ursusboot/patches/190-md-transition1-handoff.patch'
       - 'ursusboot/scripts/build_md_transition1.sh'
       - 'ursusflasher/src/expert.py'
+      - 'ursusflasher/src/expert_airoha.py'
+      - 'ursusflasher/src/expert_multi.py'
       - 'ursusflasher/src/stock_ab_transition.py'
       - 'ursusflasher/src/stock_fit_wrapper.py'
       - 'ursusflasher/tools/selftest_transition_expert_item4.py'
       - 'ursusflasher/tools/selftest_transition_write_safety.py'
+      - 'ursusflasher/tools/selftest_expert_launcher_item4.py'
       - 'config/**'
 
 permissions:
@@ -39,12 +44,16 @@ jobs:
         run: |
           python3 -m py_compile \
             ursusflasher/src/expert.py \
+            ursusflasher/src/expert_airoha.py \
+            ursusflasher/src/expert_multi.py \
             ursusflasher/src/stock_ab_transition.py \
             ursusflasher/src/stock_fit_wrapper.py \
             ursusflasher/tools/selftest_transition_expert_item4.py \
-            ursusflasher/tools/selftest_transition_write_safety.py
+            ursusflasher/tools/selftest_transition_write_safety.py \
+            ursusflasher/tools/selftest_expert_launcher_item4.py
           python3 ursusflasher/tools/selftest_transition_expert_item4.py
           python3 ursusflasher/tools/selftest_transition_write_safety.py
+          python3 ursusflasher/tools/selftest_expert_launcher_item4.py
 
       - name: Build TRANSITION2
         run: |
@@ -113,6 +122,7 @@ jobs:
             exact destructive targets: nsb_slave then flag; nsb_master and flagback untouched
             full nsb_slave readback mismatch aborts before selector write
             flag readback mismatch aborts completion
+            shipped START_EXPERT -> expert_airoha -> expert_multi item 4 routing is behavior-tested
 
           Previous hardware evidence remains limited to the bootstrap mechanism:
             tcboot can select SLOT2, stock-compatible FIT/hash passes, TRANSITION shim starts,
