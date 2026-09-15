@@ -15,7 +15,7 @@ assert len(a)==12
 assert a[1].enabled and a[1].write_capable
 assert a[4].enabled and a[4].write_capable and a[4].key=='vanilla_transition'
 assert a[9].enabled and a[9].write_capable and a[9].key=='restore_factory_bootarea'
-assert not a[6].enabled and 'не реализовано' in a[6].reason
+assert a[6].enabled and a[6].write_capable and a[6].resolved_backend.startswith('STATE_RESOLVED_STOCK_RESTORE')
 assert a[7].enabled and not a[7].write_capable
 assert a[8].enabled and a[8].reason==''
 assert a[10].enabled and not a[10].write_capable
@@ -28,7 +28,7 @@ assert ap[1].enabled and ap[2].enabled and ap[5].enabled
 assert not ap[3].enabled and 'OpenWrt' in ap[3].reason
 assert ap[4].enabled and ap[4].key=='vanilla_transition'
 assert ap[9].enabled and ap[9].key=='restore_factory_bootarea' and ap[9].resolved_backend=='UART_BOOTAREA_FACTORY_RESTORE'
-assert not ap[6].enabled and 'не реализовано' in ap[6].reason
+assert ap[6].enabled and ap[6].write_capable
 assert ap[7].enabled and ap[10].enabled and ap[11].enabled and ap[12].enabled
 
 failed=ds.DeviceState(probe_status=ds.PROBE_FAILED)
