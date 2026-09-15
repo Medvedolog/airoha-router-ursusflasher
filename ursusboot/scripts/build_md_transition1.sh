@@ -35,6 +35,10 @@ tar --zstd -xf "$SDK_BUNDLE" -C "$WORK/sdk"
 tar --zstd -xf "$SOURCE_BUNDLE" -C "$WORK/u-boot"
 patch -d "$WORK/u-boot" -p1 < "$PATCH"
 
+echo '=== TRANSITION2 dispatch source locator ==='
+grep -R -n -F 'URSUS_DISPATCH_BEGIN' "$WORK/u-boot" --include='*.c' --include='*.h' || true
+echo '=== end dispatch source locator ==='
+
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
 [ -n "$SDK_ROOT" ] || { echo "SDK root not found" >&2; exit 1; }
 TC="$SDK_ROOT/staging_dir/toolchain-aarch64_cortex-a53_gcc-14.4.0_musl/bin"
@@ -63,9 +67,6 @@ grep -q '^CONFIG_TEXT_BASE=0x81e00000$' .config || { echo 'TRANSITION2: unexpect
 
 make -j"${JOBS:-$(nproc)}"
 
-# Stock-tcboot-compatible handoff image. tcboot continues down its proven
-# ARM64 Linux kernel path at 0x80088000. The position-independent shim copies
-# TRANSITION U-Boot to its linked TEXT_BASE 0x81e00000 and branches there.
 cat > "$WORK/transition-linux-handoff.S" <<'EOF_ASM'
 .section .text,"ax"
 .global _start
