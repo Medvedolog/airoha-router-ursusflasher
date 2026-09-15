@@ -65,14 +65,17 @@ bootcmd=ursusdispatch
 
 Нормальный persistent supervisor. Persistent UrsusBoot остаётся первым управляемым U-Boot runtime и может загружать stock Nokia Linux либо OpenWrt по board policy.
 
-Persistent product сохраняет оба штатных OpenWrt payload-класса проекта:
+Persistent product сохраняет штатные OpenWrt firmware payload-классы проекта:
 
 ```text
 OpenWrt factory/non-UBI image path
 OpenWrt initramfs image for UrsusBoot recovery/rescue
+OpenWrt sysupgrade/UBI image where required by the supported target
 ```
 
-Они не являются частью Vanilla Transition и не должны удаляться из общего UrsusFlasher bundle.
+OpenWrt firmware payloads должны храниться как **shared firmware bundle**, если один и тот же artifact действительно совместим с несколькими board profiles. Нельзя механически дублировать идентичные `factory`, `initramfs`, `sysupgrade`/UBI images отдельно для MD и MF только из-за различия bootstrap/bootchain.
+
+Они не являются частью board-specific TRANSITION bootstrap и не должны удаляться из общего UrsusFlasher bundle.
 
 ### `ram-recovery`
 
@@ -267,7 +270,7 @@ stock Nokia MAIN
   -> UrsusBoot TRANSITION в RAM
   -> vanilla OpenWrt boot-chain migration
   -> canonical OpenWrt UBI repartition/layout
-  -> OpenWrt UBI/sysupgrade payload
+  -> shared OpenWrt UBI/sysupgrade payload where compatible
   -> final verification
   -> vanilla OpenWrt, Ursus-specific persistent code ABSENT
 ```
@@ -282,12 +285,33 @@ VANILLA -> canonical OpenWrt UBI layout
 
 Никакого `factory/non-UBI` варианта внутри Vanilla Transition быть не должно. Никакого меню выбора `factory vs UBI`, fallback на factory layout или сохранения Nokia A/B layout после начала финальной миграции не допускается.
 
-Factory/non-UBI OpenWrt payload остаётся поддерживаемым **только для отдельного persistent UrsusBoot product/path** и должен оставаться в общем bundle вместе с recovery initramfs images.
+Factory/non-UBI OpenWrt payload остаётся поддерживаемым **только для отдельного persistent UrsusBoot product/path** и должен оставаться в общем shared OpenWrt firmware bundle вместе с recovery initramfs images.
+
+### Payload separation contract
+
+UrsusFlasher bundle разделяется на два класса payloads:
+
+```text
+shared OpenWrt firmware bundle
+  factory/non-UBI image
+  initramfs recovery image
+  sysupgrade/UBI image
+  firmware manifest/provenance
+
+board-specific transition/bootchain bundle
+  stock-compatible TRANSITION wrapper/image
+  BL2/preloader, если различается для board/SoC/NAND
+  FIP/BL31/U-Boot, если различается для board/SoC
+  board layout/write-span policy
+  NAND enablement policy/patch provenance
+```
+
+Если один OpenWrt firmware artifact действительно совместим с MD и MF, он хранится **один раз** в shared bundle и используется обоими профилями. Разделение на `md/...` и `mf/...` допустимо только для реально различающихся artifacts, а не по имени платы.
 
 Финальный Vanilla backend обязан:
 
 ```text
-получить заранее упакованный board-specific payload set
+получить shared OpenWrt firmware bundle + board-specific transition/bootchain bundle
 -> проверить manifest/SHA/profile/NAND geometry
 -> один y/N
 -> записать canonical OpenWrt BL2/preloader
@@ -295,7 +319,7 @@ Factory/non-UBI OpenWrt payload остаётся поддерживаемым **
 -> записать canonical OpenWrt FIP/BL31/U-Boot
 -> full readback
 -> выполнить canonical UBI repartition/format
--> развернуть OpenWrt UBI/sysupgrade image
+-> развернуть compatible OpenWrt UBI/sysupgrade image из shared firmware bundle
 -> проверить UBI attach/volumes/FIT/rootfs contract
 -> sync
 -> reboot
@@ -339,6 +363,8 @@ common transition runtime
 ```
 
 MF transition должен включать тот же обязательный полный backup всех `/proc/mtd`, отдельный stock-compatible secondary-slot wrapper/HDR policy, MF selector/layout policy и конечный **только UBI** Vanilla target.
+
+OpenWrt firmware images для MF должны браться из того же shared firmware bundle, если их compatible/target contract допускает использование того же artifact; отдельная MF-копия нужна только при фактическом различии firmware image.
 
 `stock_ab_transition` должен стать board-profile driven; номера mtd/offsets/HDR2/HDR3 не должны быть универсально зашиты как MD constants.
 
@@ -393,7 +419,8 @@ TRANSITION используется только как временная RAM-�
 - XG140 native FIP repacker self-test;
 - host-side imports/routes operator kit;
 - packaged payload SHA checks;
-- Vanilla bundle содержит MD и MF payload sets;
+- shared OpenWrt firmware bundle не дублирует идентичные MD/MF artifacts;
+- MD и MF имеют отдельные board-specific transition/bootchain manifests там, где payloads/layout различаются;
 - Vanilla manifests разрешают только UBI final target;
 - persistent bundle продолжает содержать OpenWrt factory payload и initramfs recovery images.
 
@@ -452,3 +479,4 @@ existing/new SoC module
 - Structural checks/readback выполняются автоматически и не требуют дополнительных подтверждений.
 - После начала записи нельзя автоматически переключаться на другой writer/backend.
 - Vanilla MD/MF migration имеет только UBI final target; factory/non-UBI относится только к persistent UrsusBoot product path.
+- OpenWrt firmware payloads используются как shared bundle там, где один artifact реально совместим с несколькими board profiles; board-specific остаются только действительно различающиеся transition/bootchain/layout payloads.
