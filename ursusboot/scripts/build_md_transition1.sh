@@ -35,9 +35,9 @@ tar --zstd -xf "$SDK_BUNDLE" -C "$WORK/sdk"
 tar --zstd -xf "$SOURCE_BUNDLE" -C "$WORK/u-boot"
 patch -d "$WORK/u-boot" -p1 < "$PATCH"
 
-echo '=== TRANSITION2 dispatch source locator ==='
-grep -R -n -F 'URSUS_DISPATCH_BEGIN' "$WORK/u-boot" --include='*.c' --include='*.h' || true
-echo '=== end dispatch source locator ==='
+echo '=== TRANSITION2 dispatch source ==='
+sed -n '110,185p' "$WORK/u-boot/cmd/ursusdispatch.c"
+echo '=== end dispatch source ==='
 
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
 [ -n "$SDK_ROOT" ] || { echo "SDK root not found" >&2; exit 1; }
