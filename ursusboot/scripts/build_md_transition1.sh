@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-WORK=${URSUS_BUILD_DIR:-"$ROOT/work/md-transition1"}
+WORK=${URSUS_BUILD_DIR:-"$ROOT/work/md-transition2"}
 SDK_BUNDLE="$ROOT/toolchains/openwrt-sdk-r35906/openwrt-sdk-r35906.tar.zst"
 SOURCE_BUNDLE="$ROOT/ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst"
 CONFIG="$ROOT/ursusboot/configs/u-boot.TEST61.full.config"
@@ -13,7 +13,7 @@ CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
 PATCH="$ROOT/ursusboot/patches/190-md-transition1-handoff.patch"
 OUT="$WORK/out"
 RELEASE_EPOCH=1789300800
-VERSION="0.1.0-alpha5-UBIUX1-TRANSITION1"
+VERSION="0.1.0-alpha5-UBIUX1-TRANSITION2"
 STOCK_KERNEL_LOAD=0x80088000
 TEXT_BASE=0x81e00000
 
@@ -49,16 +49,17 @@ python3 "$CONFIG_MERGER" --config "$WORK/u-boot/.config" "$COMMON_CONFIG" "$BOAR
 cd "$WORK/u-boot"
 make olddefconfig
 
-grep -q '^CONFIG_ENV_IS_NOWHERE=y$' .config || { echo 'TRANSITION1: ENV_IS_NOWHERE missing' >&2; exit 1; }
+grep -q '^CONFIG_ENV_IS_NOWHERE=y$' .config || { echo 'TRANSITION2: ENV_IS_NOWHERE missing' >&2; exit 1; }
+grep -q '^CONFIG_BOOTCOMMAND="ursusweb; true"$' .config || { echo 'TRANSITION2: ursusweb bootcmd missing' >&2; exit 1; }
 for sym in CONFIG_ENV_IS_IN_UBI CONFIG_ENV_REDUNDANT CONFIG_CMD_SAVEENV CONFIG_CMD_ERASEENV; do
     if grep -q "^${sym}=y$" .config; then
-        echo "TRANSITION1: forbidden ${sym}=y" >&2
+        echo "TRANSITION2: forbidden ${sym}=y" >&2
         exit 1
     fi
 done
-grep -q '^CONFIG_NET_LWIP=y$' .config || { echo 'TRANSITION1: NET_LWIP missing' >&2; exit 1; }
-grep -q '^CONFIG_MTD=y$' .config || { echo 'TRANSITION1: MTD missing' >&2; exit 1; }
-grep -q '^CONFIG_TEXT_BASE=0x81e00000$' .config || { echo 'TRANSITION1: unexpected TEXT_BASE' >&2; exit 1; }
+grep -q '^CONFIG_NET_LWIP=y$' .config || { echo 'TRANSITION2: NET_LWIP missing' >&2; exit 1; }
+grep -q '^CONFIG_MTD=y$' .config || { echo 'TRANSITION2: MTD missing' >&2; exit 1; }
+grep -q '^CONFIG_TEXT_BASE=0x81e00000$' .config || { echo 'TRANSITION2: unexpected TEXT_BASE' >&2; exit 1; }
 
 make -j"${JOBS:-$(nproc)}"
 
@@ -132,8 +133,9 @@ ${CROSS_COMPILE}objcopy -O binary "$WORK/transition-linux-handoff.elf" \
 cp u-boot u-boot.bin u-boot.map u-boot.sym System.map "$OUT/"
 [ "$(cat .scmversion)" = "-UrsusBoot-${VERSION}" ]
 grep -Fq "#define URSUS_VERSION \"${VERSION}\"" include/ursus_version.h
+grep -Fq '#define URSUS_TRANSITION_HANDOFF_ONLY 0' include/ursus_version.h
 strings u-boot.bin > "$WORK/u-boot.strings"
-for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT' 'TRANSITION_HANDOFF_ONLY'; do
+for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT'; do
     grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "missing transition marker: $marker" >&2; exit 1; }
 done
 
@@ -157,12 +159,13 @@ printf '%s\n' \
     "MODE=TRANSITION" \
     "PERSISTENCE_TARGET=NONE" \
     "FINAL_TARGET=OFFICIAL_OPENWRT" \
-    "HANDOFF_ONLY=1" \
+    "HANDOFF_ONLY=0" \
+    "BOOTCOMMAND=ursusweb; true" \
     "ENV_IS_NOWHERE=PASS" \
     "STOCK_INNER_FORMAT=ARM64_LINUX_IMAGE_HANDOFF" \
     "STOCK_KERNEL_LOAD=${STOCK_KERNEL_LOAD}" \
     "TEXT_BASE=${TEXT_BASE}" \
-    "SOURCE_DATE_EPOCH=${RELEASE_EPOCH}" > "$OUT/TRANSITION1-BUILD_INFO.txt"
+    "SOURCE_DATE_EPOCH=${RELEASE_EPOCH}" > "$OUT/TRANSITION2-BUILD_INFO.txt"
 
-echo "MD_TRANSITION1_BUILD=PASS"
+echo "MD_TRANSITION2_BUILD=PASS"
 echo "Artifacts: $OUT"
