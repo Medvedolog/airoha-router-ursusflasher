@@ -3,8 +3,9 @@ from __future__ import annotations
 import json, os, sys
 from pathlib import Path
 D=Path(__file__).resolve().parents[1]
+DATA=D/'data' if (D/'data').is_dir() else D/'src'
 os.environ.setdefault('NOKIA_LANG','ru')
-sys.path.insert(0,str(D/'data'))
+sys.path.insert(0,str(DATA))
 import device_state as ds
 
 # Pure state/applicability contract, no network dependency.
@@ -12,7 +13,8 @@ complete=ds.DeviceState(probe_status=ds.PROBE_COMPLETE, model='Nokia XG-040G-MD'
 a=ds.action_applicability(complete)
 assert len(a)==12
 assert a[1].enabled and a[1].write_capable
-assert a[4].enabled and a[4].write_capable
+assert a[4].enabled and a[4].write_capable and a[4].key=='vanilla_transition'
+assert a[9].enabled and a[9].write_capable and a[9].key=='restore_factory_bootarea'
 assert not a[6].enabled and 'не реализовано' in a[6].reason
 assert a[7].enabled and not a[7].write_capable
 assert a[8].enabled and a[8].reason==''
@@ -20,11 +22,12 @@ assert a[10].enabled and not a[10].write_capable
 
 partial=ds.DeviceState(probe_status=ds.PROBE_PARTIAL, current_system='UNKNOWN')
 ap=ds.action_applicability(partial)
-# STATEUI6: passive completeness is informational; operations with their own
-# authoritative preflight remain selectable. Action-specific gates still apply.
+# Passive completeness is informational; operations with their own authoritative
+# preflight remain selectable. Action-specific gates still apply.
 assert ap[1].enabled and ap[2].enabled and ap[5].enabled
 assert not ap[3].enabled and 'OpenWrt' in ap[3].reason
-assert ap[4].enabled and ap[4].resolved_backend=='ALIAS_TO_ACTION_2'
+assert ap[4].enabled and ap[4].key=='vanilla_transition'
+assert ap[9].enabled and ap[9].key=='restore_factory_bootarea' and ap[9].resolved_backend=='UART_BOOTAREA_FACTORY_RESTORE'
 assert not ap[6].enabled and 'не реализовано' in ap[6].reason
 assert ap[7].enabled and ap[10].enabled and ap[11].enabled and ap[12].enabled
 
@@ -32,7 +35,8 @@ failed=ds.DeviceState(probe_status=ds.PROBE_FAILED)
 af=ds.action_applicability(failed)
 assert af[1].enabled and af[2].enabled and af[5].enabled and af[7].enabled
 
-caps=json.loads((D/'data/FIRMWARE_CAPABILITIES.json').read_text(encoding='utf-8'))
+caps_path=(D/'data/FIRMWARE_CAPABILITIES.json') if (D/'data/FIRMWARE_CAPABILITIES.json').is_file() else (D.parent/'config/FIRMWARE_CAPABILITIES.json')
+caps=json.loads(caps_path.read_text(encoding='utf-8'))
 assert caps['md']['GLOBAL_WRITE_STATE_UNKNOWN'].startswith('DEFERRED')
 assert caps['ui_actions']['full_backup']['write_capable'] is False
 print('DEVICESTATE_V529_QA=PASS')
