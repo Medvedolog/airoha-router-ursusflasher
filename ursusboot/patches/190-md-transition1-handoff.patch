@@ -1,6 +1,6 @@
 --- a/include/ursus_version.h
 +++ b/include/ursus_version.h
-@@ -3,7 +3,11 @@
+@@ -3,7 +3,12 @@
  #define __URSUS_VERSION_H
  
  #define URSUS_PRODUCT_NAME "UrsusBoot"
@@ -11,6 +11,7 @@
 +#define URSUS_PERSISTENCE_TARGET "NONE"
 +#define URSUS_FINAL_TARGET "OFFICIAL_OPENWRT"
 +#define URSUS_TRANSITION_HANDOFF_ONLY 0
++#define URSUS_TRANSITION_WEB_ONLY 1
  
  #endif
 --- a/.scmversion
@@ -18,6 +19,20 @@
 @@ -1 +1 @@
 --UrsusBoot-0.1.0-alpha5-UBIUX1-TEST61
 +-UrsusBoot-0.1.0-alpha5-UBIUX1-TRANSITION2
+--- a/cmd/ursusdispatch.c
++++ b/cmd/ursusdispatch.c
+@@ -140,6 +140,11 @@ static int do_ursusdispatch(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
+     int ret;
+ 
+     printf("URSUS_DISPATCH_BEGIN\n");
++#if URSUS_TRANSITION_WEB_ONLY
++    printf("URSUS_TRANSITION_WEB_BEGIN\n");
++    return ursus_enter_webfailsafe("TRANSITION_WEB_ONLY", 0);
++#endif
++
+     printf("URSUS_RESET_POLICY=HELD_AT_BOOT debounce_ms=%lu legacy_hold_ms=%lu\n",
+            URSUS_RESET_BOOT_DEBOUNCE_MS, URSUS_RESET_HOLD_MS);
+     if (ursus_recovery_latched)
 --- a/cmd/ursusweb.c
 +++ b/cmd/ursusweb.c
 @@ -1593,6 +1593,7 @@
