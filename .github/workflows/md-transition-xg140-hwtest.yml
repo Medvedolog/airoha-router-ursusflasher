@@ -82,6 +82,18 @@ jobs:
           make download -j8
           find dl -type f -size -1024c -delete
 
+      - name: Build OpenWrt host tools
+        working-directory: openwrt
+        run: |
+          make -j"$(nproc)" tools/install V=s
+          test -x staging_dir/host/bin/sed
+          test -x staging_dir/host/bin/openssl
+
+      - name: Build OpenWrt toolchain
+        working-directory: openwrt
+        run: |
+          make -j"$(nproc)" toolchain/install V=s
+
       - name: Build vanilla OpenWrt U-Boot
         working-directory: openwrt
         run: |
