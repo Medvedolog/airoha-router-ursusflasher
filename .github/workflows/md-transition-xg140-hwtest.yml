@@ -133,7 +133,7 @@ jobs:
           retention-days: 14
 
   hwtest-kit:
-    name: XG140 brick + MD TRANSITION HW test kit
+    name: XG140 brick + MD TRANSITION2 HW test kit
     needs: vanilla-md-uboot
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -167,40 +167,46 @@ jobs:
             --dir ../xg140-base
           test -s ../xg140-base/ursusflasher/xg140-rescue-initramfs.itb
 
-      - name: Build MD TRANSITION runtime
+      - name: Build MD TRANSITION2 runtime
         working-directory: kit
         run: |
           bash ursusboot/scripts/build_md_transition1.sh
-          test -s work/md-transition1/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg
+          test -s work/md-transition2/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION2.linuximg
+          grep -Fq 'BOOTCOMMAND=ursusweb; true' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
+          grep -Fq 'HANDOFF_ONLY=0' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
 
-      - name: Stage MD TRANSITION payload
+      - name: Stage MD TRANSITION2 payload
         working-directory: kit
         run: |
           set -eux
           mkdir -p payloads/md/transition payloads/md/vanilla
-          cp work/md-transition1/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg payloads/md/transition/
+          rm -f payloads/md/transition/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg payloads/md/transition/TRANSITION1.json
+          cp work/md-transition2/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION2.linuximg payloads/md/transition/
           cp ../vanilla-md/openwrt-vanilla-an7581-xg040md-fudan-u-boot.lzma payloads/md/vanilla/
           cp ../vanilla-md/openwrt-vanilla-an7581-xg040md-fudan-u-boot.bin payloads/md/vanilla/
           cp ../vanilla-md/PROVENANCE.txt payloads/md/vanilla/VANILLA-UBOOT-PROVENANCE.txt
           python3 - <<'PY'
           import hashlib, json, pathlib, subprocess
-          p=pathlib.Path('payloads/md/transition/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg')
+          p=pathlib.Path('payloads/md/transition/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION2.linuximg')
           info={
-            'schema':1,'board':'MD','board_profile':'xg040-md','mode':'TRANSITION',
+            'schema':2,'board':'MD','board_profile':'xg040-md','mode':'TRANSITION',
             'runtime_role':'transition','persistence_target':'NONE',
             'final_target':'VANILLA_OPENWRT_FUDAN','stock_inner_format':'ARM64_LINUX_IMAGE_HANDOFF',
             'stock_kernel_load':'0x80088000','text_base':'0x81e00000',
+            'bootcommand':'ursusweb; true','handoff_only':False,
             'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
             'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
-            'hardware_status':'HW_PENDING_TCBOOT_TO_TRANSITION'
+            'hardware_status':'HW_PENDING_TRANSITION2_WEB'
           }
-          pathlib.Path('payloads/md/transition/TRANSITION1.json').write_text(json.dumps(info,indent=2)+'\n')
+          pathlib.Path('payloads/md/transition/TRANSITION2.json').write_text(json.dumps(info,indent=2)+'\n')
           PY
           PYTHONPATH=ursusflasher/src python3 - <<'PY'
           import stock_ab_transition
           data, meta=stock_ab_transition._load_payload()
           assert meta['mode']=='TRANSITION'
-          print('MD_TRANSITION_PAYLOAD_QA=PASS',len(data),meta['sha256'])
+          assert meta['bootcommand']=='ursusweb; true'
+          assert meta['handoff_only'] is False
+          print('MD_TRANSITION2_PAYLOAD_QA=PASS',len(data),meta['sha256'])
           PY
 
       - name: Build XG140 persistent native-hybrid UrsusBoot
@@ -231,25 +237,29 @@ jobs:
             Persistent candidate keeps native device-derived BL2/FIP and replaces BL33 only.
 
           Track B: Nokia XG-040G-MD no-UART transition
-            stock tcboot MAIN -> patched SLAVE slot -> UrsusBoot TRANSITION runtime.
-            TRANSITION itself is non-persistent/read-only.
-            Final bootloader payload included separately:
+            stock tcboot MAIN -> patched SLAVE slot -> UrsusBoot TRANSITION2 -> ursusweb.
+            UrsusFlasher captures flag/flagback/MASTER/SLAVE through stock Telnet before the write.
+            A/B state is advisory; geometry, write span and full readback remain authoritative.
+            TRANSITION2 uses ENV_IS_NOWHERE and boots directly to ursusweb.
+            Handoff-only Web gates are disabled for the final vanilla migration path.
+            Final vanilla OpenWrt U-Boot payload included separately:
               payloads/md/vanilla/openwrt-vanilla-an7581-xg040md-fudan-u-boot.lzma
-            This is OpenWrt U-Boot v2026.07 with only the preserved Fudan FM25G01B/FM25G02B patch.
+            This is OpenWrt U-Boot v2026.07 with the preserved Fudan FM25G01B/FM25G02B patch.
 
-          Do not treat CI PASS as HW PASS.
+          tcboot SLOT2 selection and automatic fallback to stock SLOT1 are HW-proven on the previous TRANSITION1 test.
+          TRANSITION2 Web entry itself remains HW_PENDING until tested.
           EOF
           (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
           cd /tmp
-          zip -qr UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${GITHUB_SHA}.zip ursus-hwtest
-          sha256sum UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${GITHUB_SHA}.zip > UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${GITHUB_SHA}.zip.sha256
+          zip -qr UrsusFlasher-MD-TRANSITION2-XG140-BRICK-HWTEST-${GITHUB_SHA}.zip ursus-hwtest
+          sha256sum UrsusFlasher-MD-TRANSITION2-XG140-BRICK-HWTEST-${GITHUB_SHA}.zip > UrsusFlasher-MD-TRANSITION2-XG140-BRICK-HWTEST-${GITHUB_SHA}.zip.sha256
 
       - name: Upload HW test kit
         uses: actions/upload-artifact@v4
         with:
-          name: UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${{ github.sha }}
+          name: UrsusFlasher-MD-TRANSITION2-XG140-BRICK-HWTEST-${{ github.sha }}
           path: |
-            /tmp/UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${{ github.sha }}.zip
-            /tmp/UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${{ github.sha }}.zip.sha256
+            /tmp/UrsusFlasher-MD-TRANSITION2-XG140-BRICK-HWTEST-${{ github.sha }}.zip
+            /tmp/UrsusFlasher-MD-TRANSITION2-XG140-BRICK-HWTEST-${{ github.sha }}.zip.sha256
           if-no-files-found: error
           retention-days: 14
