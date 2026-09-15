@@ -19,9 +19,9 @@ goto done
 python "%entry%" %*
 set "rc=%errorlevel%"
 :done
-if not "%rc%"=="0" (
-  echo.
-  echo Press Enter to close / Нажмите Enter для закрытия...
-  pause >nul
-)
+echo.
+echo Exit code: %rc%
+echo Full transcript is saved in the logs folder.
+echo Press Enter to close / Нажмите Enter для закрытия...
+pause >nul
 exit /b %rc%
