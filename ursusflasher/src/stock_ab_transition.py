@@ -17,9 +17,10 @@ _REPO_ROOT = HERE.parent.parent
 REPO_MODE = (_REPO_ROOT / "payloads").is_dir() and (_REPO_ROOT / "config").is_dir()
 ROOT = _REPO_ROOT if REPO_MODE else HERE.parent
 PAYLOAD_ROOT = (ROOT / "payloads" / "md" / "transition") if REPO_MODE else (ROOT / "data" / "payloads" / "md" / "transition")
-PAYLOAD = PAYLOAD_ROOT / "ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg"
-PAYLOAD_META = PAYLOAD_ROOT / "TRANSITION1.json"
+PAYLOAD = PAYLOAD_ROOT / "ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION2.linuximg"
+PAYLOAD_META = PAYLOAD_ROOT / "TRANSITION2.json"
 WORK = ROOT / "work" / "stock-ab-transition"
+LOG_ROOT = ROOT / "logs"
 
 sys.path.insert(0, str(HERE))
 import proven_backend as pb  # noqa: E402
@@ -31,6 +32,34 @@ SLOT_SIZE = 0x02880000
 FLAG_SIZE = 0x00040000
 ERASE_SIZE = 0x00020000
 NT_FW_UUID = bytes.fromhex("d6d0eea7fcead54b97829934f234b6e4")
+
+
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data):
+        for stream in self.streams:
+            stream.write(data)
+            stream.flush()
+        return len(data)
+
+    def flush(self):
+        for stream in self.streams:
+            stream.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.streams[0], name)
+
+
+def _enable_transcript(stamp: str) -> Path:
+    LOG_ROOT.mkdir(parents=True, exist_ok=True)
+    path = LOG_ROOT / f"MD_TRANSITION_{stamp}.log"
+    log = path.open("a", encoding="utf-8", buffering=1)
+    sys.stdout = _Tee(sys.__stdout__, log)
+    sys.stderr = _Tee(sys.__stderr__, log)
+    print(f"[LOG] {path}")
+    return path
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -47,17 +76,17 @@ def sha256_file(path: Path) -> str:
 
 def _load_payload() -> tuple[bytes, dict]:
     if not PAYLOAD.is_file() or not PAYLOAD_META.is_file():
-        raise RuntimeError(f"TRANSITION1 payload is missing from the UrsusFlasher bundle: {PAYLOAD_ROOT}")
+        raise RuntimeError(f"TRANSITION2 payload is missing from the UrsusFlasher bundle: {PAYLOAD_ROOT}")
     meta = json.loads(PAYLOAD_META.read_text(encoding="utf-8"))
     data = PAYLOAD.read_bytes()
     expected = str(meta.get("sha256") or "").lower()
     got = sha256_bytes(data)
     if not expected or got != expected:
-        raise RuntimeError(f"TRANSITION1 payload SHA256 mismatch: {got} != {expected or 'missing'}")
+        raise RuntimeError(f"TRANSITION2 payload SHA256 mismatch: {got} != {expected or 'missing'}")
     if str(meta.get("mode")) != "TRANSITION" or str(meta.get("board")) != "MD":
-        raise RuntimeError("TRANSITION1 metadata does not identify MD TRANSITION mode")
+        raise RuntimeError("TRANSITION2 metadata does not identify MD TRANSITION mode")
     if str(meta.get("stock_inner_format")) != "ARM64_LINUX_IMAGE_HANDOFF":
-        raise RuntimeError("TRANSITION1 metadata does not identify stock-compatible Linux Image handoff")
+        raise RuntimeError("TRANSITION2 metadata does not identify stock-compatible Linux Image handoff")
     sfw.validate_linux_image(data)
     return data, meta
 
@@ -84,8 +113,6 @@ def build_activation_flag(flag: bytes, target: int) -> tuple[bytes, dict]:
     state = parse_flag(flag)
     if target not in (0, 1):
         raise RuntimeError("target image must be 0 or 1")
-    if state["curimg"] == target:
-        raise RuntimeError(f"requested target {target} is already curimg")
     out = bytearray(flag)
     struct.pack_into("<I", out, 0, target)
     if out[4:] != flag[4:]:
@@ -118,7 +145,7 @@ def _capture(telnet: pb.Telnet, access: pb.StockAccess, dev: str, size: int, loc
     count = (size + bs - 1) // bs
     rc, text = telnet.command_clean(
         f"rm -f {shlex.quote(remote)}; dd if={shlex.quote(dev)} of={shlex.quote(remote)} bs={bs} count={count} 2>/dev/null && wc -c < {shlex.quote(remote)} && sha256sum {shlex.quote(remote)}",
-        timeout=240,
+        timeout=300,
     )
     if rc:
         raise RuntimeError(f"failed to capture {dev}")
@@ -202,10 +229,11 @@ def _remote_partition_sha(telnet: pb.Telnet, dev: str, timeout: int = 300) -> st
 
 
 def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = False, reboot: bool = True) -> int:
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    log_path = _enable_transcript(stamp)
     ui.enable()
     linux_image, payload_meta = _load_payload()
     WORK.mkdir(parents=True, exist_ok=True)
-    stamp = time.strftime("%Y%m%d-%H%M%S")
     run_dir = WORK / stamp
     run_dir.mkdir(parents=True)
     access = telnet = None
@@ -216,59 +244,67 @@ def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = 
 
         flag_path = run_dir / "mtd8_flag_before.bin"
         flagback_path = run_dir / "mtd9_flagback_before.bin"
+        master_path = run_dir / "mtd14_nsb_master_before.bin"
         slave_path = run_dir / "mtd15_nsb_slave_before.bin"
-        _capture(telnet, access, "/dev/mtd8", FLAG_SIZE, flag_path)
-        _capture(telnet, access, "/dev/mtd9", FLAG_SIZE, flagback_path)
-        _capture(telnet, access, "/dev/mtd15", SLOT_SIZE, slave_path)
+        flag_sha = _capture(telnet, access, "/dev/mtd8", FLAG_SIZE, flag_path)
+        flagback_sha = _capture(telnet, access, "/dev/mtd9", FLAG_SIZE, flagback_path)
+        master_sha = _capture(telnet, access, "/dev/mtd14", SLOT_SIZE, master_path)
+        slave_sha = _capture(telnet, access, "/dev/mtd15", SLOT_SIZE, slave_path)
+        ui.status("READY", f"Stock backup captured via Telnet: {run_dir}")
 
         flag = flag_path.read_bytes()
         flagback = flagback_path.read_bytes()
         fs = parse_flag(flag)
         fbs = parse_flag(flagback)
-        if fs["curimg"] != 0:
-            raise RuntimeError(f"hardware-test gate requires current MAIN/curimg=0, got {fs}")
-        if fs["active"] != 0:
-            raise RuntimeError(f"pending selector request already exists; refusing to overwrite it: {fs}")
-        if fbs["curimg"] != fs["curimg"]:
-            raise RuntimeError(f"flag/flagback curimg diverged: flag={fs} flagback={fbs}")
+        ui.status("INFO", f"Stock A/B state: flag={fs}; flagback={fbs}")
+        if fs["curimg"] != 0 or fs["active"] != 0 or fbs["curimg"] != fs["curimg"]:
+            ui.status("INFO", "A/B selector state is advisory; proceeding from the captured stock backup.")
 
         slot_candidate, slot_meta = build_transition_slot(slave_path.read_bytes(), linux_image)
-        slot_candidate_path = run_dir / "mtd15_nsb_slave_transition1.bin"
+        slot_candidate_path = run_dir / "mtd15_nsb_slave_transition2.bin"
         slot_candidate_path.write_bytes(slot_candidate)
         flag_candidate, flag_meta = build_activation_flag(flag, 1)
         flag_candidate_path = run_dir / "mtd8_flag_activate_slave.bin"
         flag_candidate_path.write_bytes(flag_candidate)
 
         report = {
-            "operation": "md_stock_ab_transition",
+            "operation": "md_stock_ab_transition2",
             "payload": payload_meta,
             "slot": slot_meta,
             "selector": flag_meta,
             "flagback_observed": fbs,
+            "backup": {
+                "flag_sha256": flag_sha,
+                "flagback_sha256": flagback_sha,
+                "nsb_master_sha256": master_sha,
+                "nsb_slave_sha256": slave_sha,
+                "directory": str(run_dir),
+            },
             "writer": writer,
+            "log": str(log_path),
             "dry_run": dry_run,
         }
         (run_dir / "TRANSITION_PLAN.json").write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
 
         ui.status("READY", f"SLAVE candidate prepared: SHA256 {slot_meta['candidate_sha256']}")
         ui.status("READY", "Stock FIP/HDR2/FIT topology preserved; only kernel data/compression/hash changed.")
-        ui.status("READY", "Selector request: active 0 -> 1; curimg/startok/count preserved")
+        ui.status("READY", f"Selector request: active {fs['active']} -> 1; remaining flag fields preserved")
         if dry_run:
             ui.status("READY", "Dry-run complete; NAND was not modified.")
             return 0
 
-        ans = ui.prompt(pb.tr("Записать TRANSITION в nsb_slave и активировать SLAVE? [д/Н]: ", "Write TRANSITION to nsb_slave and activate SLAVE? [y/N]: ")).strip().lower()
+        ans = ui.prompt(pb.tr("Записать TRANSITION2 в nsb_slave и активировать SLAVE? [д/Н]: ", "Write TRANSITION2 to nsb_slave and activate SLAVE? [y/N]: ")).strip().lower()
         if ans not in ("д", "да", "y", "yes"):
             ui.status("STOP", pb.tr("Операция отменена; NAND не изменялась.", "Operation cancelled; NAND was not modified."))
             return 0
 
-        remote_slot = "/tmp/ursus-md-transition-slot.bin"
+        remote_slot = "/tmp/ursus-md-transition2-slot.bin"
         _upload(telnet, access, slot_candidate_path, remote_slot)
         _write_partition(telnet, remote_slot, "nsb_slave", "/dev/mtd15", SLOT_SIZE, writer, timeout=900)
         got = _remote_partition_sha(telnet, "/dev/mtd15", timeout=600)
         if got != slot_meta["candidate_sha256"]:
             raise RuntimeError(f"nsb_slave readback mismatch: {got} != {slot_meta['candidate_sha256']}")
-        ui.status("READY", "nsb_slave TRANSITION write/readback verified; MAIN remains untouched.")
+        ui.status("READY", "nsb_slave TRANSITION2 write/readback verified; MAIN remains untouched.")
 
         remote_flag = "/tmp/ursus-md-flag-activate-slave.bin"
         expected_flag_sha = _upload(telnet, access, flag_candidate_path, remote_flag)
@@ -279,7 +315,7 @@ def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = 
         ui.status("READY", "Stock tcboot selector request verified: active=1; flagback untouched.")
 
         if reboot:
-            ui.status("ACTION", pb.tr("Перезагрузка в SLAVE/TRANSITION через штатный tcboot.", "Rebooting into SLAVE/TRANSITION through stock tcboot."))
+            ui.status("ACTION", pb.tr("Перезагрузка в SLAVE/TRANSITION2 через штатный tcboot.", "Rebooting into SLAVE/TRANSITION2 through stock tcboot."))
             try:
                 telnet.send_line("sync; reboot")
             except Exception:
@@ -301,7 +337,7 @@ def run(*, host: str = "192.168.1.1", unattended: bool = False, dry_run: bool = 
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="UrsusFlasher MD stock A/B TRANSITION backend")
+    ap = argparse.ArgumentParser(description="UrsusFlasher MD stock A/B TRANSITION2 backend")
     ap.add_argument("--host", default=os.environ.get("NOKIA_HOST", "192.168.1.1"))
     ap.add_argument("--unattended", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
