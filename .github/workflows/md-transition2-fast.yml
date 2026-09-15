@@ -40,7 +40,7 @@ jobs:
         run: |
           bash ursusboot/scripts/build_md_transition1.sh
           test -s work/md-transition2/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION2.linuximg
-          grep -Fq 'BOOTCOMMAND=ursusweb; true' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
+          grep -Fq 'TRANSITION_ENTRY=ursusdispatch->ursusweb' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
           grep -Fq 'HANDOFF_ONLY=0' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
 
       - name: Stage payload and metadata
@@ -57,7 +57,7 @@ jobs:
             'runtime_role':'transition','persistence_target':'NONE',
             'final_target':'VANILLA_OPENWRT_FUDAN','stock_inner_format':'ARM64_LINUX_IMAGE_HANDOFF',
             'stock_kernel_load':'0x80088000','text_base':'0x81e00000',
-            'bootcommand':'ursusweb; true','handoff_only':False,
+            'transition_entry':'ursusdispatch->ursusweb','handoff_only':False,
             'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
             'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
             'hardware_status':'HW_PENDING_TRANSITION2_WEB'
@@ -67,7 +67,7 @@ jobs:
           PYTHONPATH=ursusflasher/src python3 - <<'PY'
           import stock_ab_transition
           data, meta=stock_ab_transition._load_payload()
-          assert meta['bootcommand']=='ursusweb; true'
+          assert meta['transition_entry']=='ursusdispatch->ursusweb'
           assert meta['handoff_only'] is False
           print('TRANSITION2_QA=PASS', len(data), meta['sha256'])
           PY
@@ -88,7 +88,7 @@ jobs:
             failed SLOT2 attempts fall back automatically to untouched stock SLOT1.
 
           This TRANSITION2 changes:
-            bootcmd=ursusweb; true
+            ursusdispatch -> direct Ursus Web entry (no stock boot chain)
             ENV_IS_NOWHERE
             TRANSITION_HANDOFF_ONLY=0
             A/B selector state is advisory, not a gate
