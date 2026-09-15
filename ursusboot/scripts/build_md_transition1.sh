@@ -35,10 +35,6 @@ tar --zstd -xf "$SDK_BUNDLE" -C "$WORK/sdk"
 tar --zstd -xf "$SOURCE_BUNDLE" -C "$WORK/u-boot"
 patch -d "$WORK/u-boot" -p1 < "$PATCH"
 
-echo '=== TRANSITION2 dispatch source ==='
-sed -n '110,185p' "$WORK/u-boot/cmd/ursusdispatch.c"
-echo '=== end dispatch source ==='
-
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
 [ -n "$SDK_ROOT" ] || { echo "SDK root not found" >&2; exit 1; }
 TC="$SDK_ROOT/staging_dir/toolchain-aarch64_cortex-a53_gcc-14.4.0_musl/bin"
@@ -54,7 +50,6 @@ cd "$WORK/u-boot"
 make olddefconfig
 
 grep -q '^CONFIG_ENV_IS_NOWHERE=y$' .config || { echo 'TRANSITION2: ENV_IS_NOWHERE missing' >&2; exit 1; }
-grep -q '^CONFIG_BOOTCOMMAND="ursusweb; true"$' .config || { echo 'TRANSITION2: ursusweb bootcmd missing' >&2; exit 1; }
 for sym in CONFIG_ENV_IS_IN_UBI CONFIG_ENV_REDUNDANT CONFIG_CMD_SAVEENV CONFIG_CMD_ERASEENV; do
     if grep -q "^${sym}=y$" .config; then
         echo "TRANSITION2: forbidden ${sym}=y" >&2
@@ -64,9 +59,14 @@ done
 grep -q '^CONFIG_NET_LWIP=y$' .config || { echo 'TRANSITION2: NET_LWIP missing' >&2; exit 1; }
 grep -q '^CONFIG_MTD=y$' .config || { echo 'TRANSITION2: MTD missing' >&2; exit 1; }
 grep -q '^CONFIG_TEXT_BASE=0x81e00000$' .config || { echo 'TRANSITION2: unexpected TEXT_BASE' >&2; exit 1; }
+grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h || { echo 'TRANSITION2: Web-only dispatcher marker missing' >&2; exit 1; }
+grep -Fq 'URSUS_TRANSITION_WEB_BEGIN' cmd/ursusdispatch.c || { echo 'TRANSITION2: dispatcher Web entry missing' >&2; exit 1; }
 
 make -j"${JOBS:-$(nproc)}"
 
+# Stock-tcboot-compatible handoff image. tcboot continues down its proven
+# ARM64 Linux kernel path at 0x80088000. The position-independent shim copies
+# TRANSITION U-Boot to its linked TEXT_BASE 0x81e00000 and branches there.
 cat > "$WORK/transition-linux-handoff.S" <<'EOF_ASM'
 .section .text,"ax"
 .global _start
@@ -135,8 +135,9 @@ cp u-boot u-boot.bin u-boot.map u-boot.sym System.map "$OUT/"
 [ "$(cat .scmversion)" = "-UrsusBoot-${VERSION}" ]
 grep -Fq "#define URSUS_VERSION \"${VERSION}\"" include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_HANDOFF_ONLY 0' include/ursus_version.h
+grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h
 strings u-boot.bin > "$WORK/u-boot.strings"
-for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT'; do
+for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT' 'URSUS_TRANSITION_WEB_BEGIN'; do
     grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "missing transition marker: $marker" >&2; exit 1; }
 done
 
@@ -161,7 +162,7 @@ printf '%s\n' \
     "PERSISTENCE_TARGET=NONE" \
     "FINAL_TARGET=OFFICIAL_OPENWRT" \
     "HANDOFF_ONLY=0" \
-    "BOOTCOMMAND=ursusweb; true" \
+    "TRANSITION_ENTRY=ursusdispatch->ursusweb" \
     "ENV_IS_NOWHERE=PASS" \
     "STOCK_INNER_FORMAT=ARM64_LINUX_IMAGE_HANDOFF" \
     "STOCK_KERNEL_LOAD=${STOCK_KERNEL_LOAD}" \
