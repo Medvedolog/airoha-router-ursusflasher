@@ -109,9 +109,33 @@ Do not commit backups, plaintext credentials, serial/GPON secrets or unique devi
 
 Do not merge the two products conceptually.
 
+### Shared OpenWrt firmware bundle
+
+OpenWrt firmware artifacts are shared whenever the exact same artifact is compatible with multiple board profiles. Do not duplicate identical files merely because bootstrap/bootchain differs between MD and MF.
+
+Shared classes include, where compatible:
+
+```text
+OpenWrt factory/non-UBI image
+OpenWrt initramfs recovery image
+OpenWrt sysupgrade/UBI image
+firmware manifest / provenance / SHA256
+```
+
+Board-specific artifacts remain separate only when they really differ:
+
+```text
+TRANSITION stock-slot wrapper/image
+BL2/preloader
+FIP/BL31/U-Boot
+stock A/B/HDR/FIT policy
+write spans and final layout policy
+NAND-specific enablement/provenance
+```
+
 ### Persistent UrsusBoot product
 
-Persistent UrsusBoot remains supported and keeps its OpenWrt payloads:
+Persistent UrsusBoot remains supported and consumes the shared OpenWrt firmware bundle:
 
 ```text
 persistent UrsusBoot
@@ -206,11 +230,11 @@ Only then run the first final Vanilla destructive migration test.
 
 ## 6. Final Vanilla migration contract — MD and MF
 
-The same high-level transaction applies to MD and MF, with board-specific layout/payload policy:
+The same high-level transaction applies to MD and MF, with a **shared OpenWrt firmware bundle** plus board-specific transition/bootchain policy:
 
 ```text
 TRANSITION running entirely from RAM
--> receive pre-packaged board-specific vanilla payload set from UrsusFlasher
+-> receive shared OpenWrt firmware bundle + board-specific bootchain payloads from UrsusFlasher
 -> verify manifest/SHA/profile/NAND geometry
 -> verify complete stock backup is present
 -> one y/N
@@ -220,7 +244,7 @@ TRANSITION running entirely from RAM
 -> write canonical OpenWrt FIP/BL31/U-Boot
 -> full readback
 -> canonical OpenWrt UBI repartition/format
--> deploy OpenWrt UBI/sysupgrade payload
+-> deploy compatible OpenWrt UBI/sysupgrade payload from shared firmware bundle
 -> verify UBI attach/volumes/FIT/rootfs contract
 -> sync
 -> reboot
@@ -243,11 +267,26 @@ All payloads must be bundled ahead of time. Do not download boot-critical payloa
 Expected bundle classes:
 
 ```text
-payloads/md/transition/*
-payloads/md/vanilla/{bl2,fip-or-u-boot,sysupgrade,manifest}
-payloads/mf/transition/*
-payloads/mf/vanilla/{bl2,fip-or-u-boot,sysupgrade,manifest}
+payloads/openwrt/shared/
+  factory-or-nonubi.*
+  initramfs.*
+  sysupgrade-or-ubi.*
+  OPENWRT_FIRMWARE_MANIFEST.json
+
+payloads/transition/xg040-md/
+  transition.*
+  bl2-or-preloader.*
+  fip-or-u-boot.*
+  BOARD_MANIFEST.json
+
+payloads/transition/xg040-mf/
+  transition.*
+  bl2-or-preloader.*
+  fip-or-u-boot.*
+  BOARD_MANIFEST.json
 ```
+
+If an OpenWrt firmware artifact is genuinely identical/compatible for MD and MF, it exists only once under the shared bundle. Separate MD/MF copies are allowed only when the actual OpenWrt target artifact differs.
 
 Provenance must record OpenWrt commit, U-Boot version/commit, ATF/BL2 commit, required NAND patches, board profile, SHA256 and expected write spans/layout.
 
@@ -272,10 +311,10 @@ full stock backup of all /proc/mtd
 MF stock secondary-slot wrapper/HDR policy
 MF A/B selector policy
 TRANSITION runtime in RAM
-MF vanilla BL2/preloader
-MF vanilla FIP/BL31/U-Boot
-MF canonical UBI layout
-MF OpenWrt UBI/sysupgrade payload
+MF vanilla BL2/preloader where board-specific
+MF vanilla FIP/BL31/U-Boot where board-specific
+MF canonical UBI layout policy
+shared compatible OpenWrt UBI/sysupgrade payload
 readback/verification
 ```
 
@@ -382,10 +421,10 @@ identity/MAC/RI/BOSA       verified/preserved as required
 4. Implement MD `TRANSITION -> vanilla BL2/FIP -> UBI -> OpenWrt` backend; UBI only.
 5. Refactor transition staging into common board-profile-driven code.
 6. Build MF stock-secondary TRANSITION from common runtime + MF policy.
-7. Package MF vanilla BL2/FIP/U-Boot/UBI OpenWrt payload set.
+7. Package shared OpenWrt firmware bundle once, plus only the board-specific MF/MD transition/bootchain artifacts that actually differ.
 8. HW-accept MF transition bootstrap.
 9. HW-test MF final UBI-only vanilla migration.
-10. Keep persistent UrsusBoot + OpenWrt factory and initramfs recovery payload paths intact.
+10. Keep persistent UrsusBoot + shared OpenWrt factory and initramfs recovery payload paths intact.
 11. Continue XG140 persistent emergency/hardware acceptance independently.
 
 ---
@@ -403,3 +442,4 @@ identity/MAC/RI/BOSA       verified/preserved as required
 - Never retry a different writer automatically after destructive write begins.
 - Vanilla MD/MF final target is **UBI only**.
 - Persistent UrsusBoot product keeps OpenWrt factory/non-UBI support and initramfs recovery images.
+- OpenWrt firmware artifacts are shared across MD/MF whenever the same artifact is genuinely compatible; only transition/bootchain/layout artifacts remain board-specific when required.
