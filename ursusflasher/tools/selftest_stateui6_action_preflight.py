@@ -15,10 +15,13 @@ assert app[2].enabled, app[2]
 assert app[5].enabled, app[5]
 # Action-specific gates remain action-specific.
 assert not app[3].enabled and 'openwrt' in app[3].reason.lower(), app[3]
-# Item 4 is now a real canonical action, not the historical alias to item 2.
-assert ds.ACTION_KEYS[4] == 'restore_factory_bootarea', ds.ACTION_KEYS
-assert app[4].key == 'restore_factory_bootarea', app[4]
+# Canonical shipped routing: item 4 is Vanilla TRANSITION, item 9 is factory boot-area restore.
+assert ds.ACTION_KEYS[4] == 'vanilla_transition', ds.ACTION_KEYS
+assert app[4].key == 'vanilla_transition', app[4]
 assert app[4].write_capable, app[4]
+assert ds.ACTION_KEYS[9] == 'restore_factory_bootarea', ds.ACTION_KEYS
+assert app[9].key == 'restore_factory_bootarea', app[9]
+assert app[9].enabled and app[9].write_capable, app[9]
 # Informational/read-only actions stay reachable.
 assert app[7].enabled and app[10].enabled and app[11].enabled and app[12].enabled
 
@@ -26,6 +29,7 @@ expert=(DATA/'expert.py').read_text(encoding='utf-8')
 assert 'print_state_header(state)\n\n        ui.section' not in expert
 assert 'subtitle=tr(' not in expert
 terms=(DATA/'UI_TERMS.json').read_text(encoding='utf-8') if (DATA/'UI_TERMS.json').is_file() else (ROOT.parent/'config'/'UI_TERMS.json').read_text(encoding='utf-8')
+assert 'Stock Nokia → Vanilla OpenWrt (TRANSITION)' in terms
 assert 'Что этот роутер позволяет сделать' in terms
 assert 'Состояние устройства и доступные операции' not in terms
 print('STATEUI6_ACTION_PREFLIGHT_QA=PASS')
