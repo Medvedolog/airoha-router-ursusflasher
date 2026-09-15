@@ -67,7 +67,7 @@ def test_shipped_item4_dispatch_behavior() -> None:
         patch(em.base.network_guidance, "show", lambda: None)
         patch(em, "_show_action", lambda *args, **kwargs: None)
         patch(em.base, "_show_transition_action", lambda _state: None)
-        patch(em, "ask_menu", lambda _max: next(choices))
+        patch(em.base, "ask_menu", lambda _max: next(choices))
         patch(
             em.stock_ab_transition,
             "run_expert",
