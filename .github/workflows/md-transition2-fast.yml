@@ -14,6 +14,7 @@ on:
       - 'ursusflasher/src/stock_ab_transition.py'
       - 'ursusflasher/src/stock_fit_wrapper.py'
       - 'ursusflasher/tools/selftest_transition_expert_item4.py'
+      - 'ursusflasher/tools/selftest_transition_write_safety.py'
       - 'config/**'
 
 permissions:
@@ -39,8 +40,11 @@ jobs:
           python3 -m py_compile \
             ursusflasher/src/expert.py \
             ursusflasher/src/stock_ab_transition.py \
-            ursusflasher/src/stock_fit_wrapper.py
+            ursusflasher/src/stock_fit_wrapper.py \
+            ursusflasher/tools/selftest_transition_expert_item4.py \
+            ursusflasher/tools/selftest_transition_write_safety.py
           python3 ursusflasher/tools/selftest_transition_expert_item4.py
+          python3 ursusflasher/tools/selftest_transition_write_safety.py
 
       - name: Build TRANSITION2
         run: |
@@ -106,8 +110,9 @@ jobs:
             proven transfer backend selected and both candidate files SHA-verified before y/N
             writer and transfer backend frozen before destructive boundary
             one ordinary y/N
-            full nsb_slave readback
-            selector readback; flagback untouched
+            exact destructive targets: nsb_slave then flag; nsb_master and flagback untouched
+            full nsb_slave readback mismatch aborts before selector write
+            flag readback mismatch aborts completion
 
           Previous hardware evidence remains limited to the bootstrap mechanism:
             tcboot can select SLOT2, stock-compatible FIT/hash passes, TRANSITION shim starts,
