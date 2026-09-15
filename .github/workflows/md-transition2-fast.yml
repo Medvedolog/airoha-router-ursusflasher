@@ -1,0 +1,116 @@
+name: MD TRANSITION2 no-UART fast kit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - '.github/workflows/md-transition2-fast.yml'
+      - 'ursusboot/configs/ursusboot-transition-handoff.cfg'
+      - 'ursusboot/patches/190-md-transition1-handoff.patch'
+      - 'ursusboot/scripts/build_md_transition1.sh'
+      - 'ursusflasher/src/stock_ab_transition.py'
+      - 'ursusflasher/src/stock_fit_wrapper.py'
+      - 'START_MD_TRANSITION.*'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  transition2-kit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc g++ make perl python3 git patch xz-utils zstd liblzma-dev device-tree-compiler zip
+
+      - name: Python syntax QA
+        run: |
+          python3 -m py_compile ursusflasher/src/stock_ab_transition.py ursusflasher/src/stock_fit_wrapper.py
+
+      - name: Build TRANSITION2
+        run: |
+          bash ursusboot/scripts/build_md_transition1.sh
+          test -s work/md-transition2/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION2.linuximg
+          grep -Fq 'BOOTCOMMAND=ursusweb; true' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
+          grep -Fq 'HANDOFF_ONLY=0' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
+
+      - name: Stage payload and metadata
+        run: |
+          set -eux
+          mkdir -p payloads/md/transition
+          rm -f payloads/md/transition/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg payloads/md/transition/TRANSITION1.json
+          cp work/md-transition2/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION2.linuximg payloads/md/transition/
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          p=pathlib.Path('payloads/md/transition/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION2.linuximg')
+          info={
+            'schema':2,'board':'MD','board_profile':'xg040-md','mode':'TRANSITION',
+            'runtime_role':'transition','persistence_target':'NONE',
+            'final_target':'VANILLA_OPENWRT_FUDAN','stock_inner_format':'ARM64_LINUX_IMAGE_HANDOFF',
+            'stock_kernel_load':'0x80088000','text_base':'0x81e00000',
+            'bootcommand':'ursusweb; true','handoff_only':False,
+            'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
+            'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+            'hardware_status':'HW_PENDING_TRANSITION2_WEB'
+          }
+          pathlib.Path('payloads/md/transition/TRANSITION2.json').write_text(json.dumps(info,indent=2)+'\n')
+          PY
+          PYTHONPATH=ursusflasher/src python3 - <<'PY'
+          import stock_ab_transition
+          data, meta=stock_ab_transition._load_payload()
+          assert meta['bootcommand']=='ursusweb; true'
+          assert meta['handoff_only'] is False
+          print('TRANSITION2_QA=PASS', len(data), meta['sha256'])
+          PY
+
+      - name: Assemble no-UART kit
+        run: |
+          set -eux
+          ART=/tmp/ursus-transition2
+          mkdir -p "$ART"
+          cp -a START_MD_TRANSITION.cmd START_MD_TRANSITION.sh VERSION README.md "$ART/"
+          cp -a config fw payloads ursusflasher docs "$ART/"
+          cat > "$ART/TRANSITION2-READ-ME-FIRST.txt" <<EOF
+          MD TRANSITION2 NO-UART TEST KIT
+          Source commit: ${GITHUB_SHA}
+
+          Proven on previous hardware test:
+            stock tcboot -> SLOT2 handoff works on XG-040G-MD/Fudan;
+            failed SLOT2 attempts fall back automatically to untouched stock SLOT1.
+
+          This TRANSITION2 changes:
+            bootcmd=ursusweb; true
+            ENV_IS_NOWHERE
+            TRANSITION_HANDOFF_ONLY=0
+            A/B selector state is advisory, not a gate
+            stock Telnet backup captures flag, flagback, nsb_master and nsb_slave before write
+            one y/N immediately before writing
+            full nsb_slave and flag readback verification
+            console transcript saved under logs/
+            CMD waits for Enter on both success and failure
+
+          MAIN/SLOT1 and flagback are not written by the transition stager.
+          TRANSITION2 Web entry is HW_PENDING until this build is tested.
+          EOF
+          (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          cd /tmp
+          zip -qr UrsusFlasher-MD-TRANSITION2-NOUART-${GITHUB_SHA}.zip ursus-transition2
+          sha256sum UrsusFlasher-MD-TRANSITION2-NOUART-${GITHUB_SHA}.zip > UrsusFlasher-MD-TRANSITION2-NOUART-${GITHUB_SHA}.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UrsusFlasher-MD-TRANSITION2-NOUART-${{ github.sha }}
+          path: |
+            /tmp/UrsusFlasher-MD-TRANSITION2-NOUART-${{ github.sha }}.zip
+            /tmp/UrsusFlasher-MD-TRANSITION2-NOUART-${{ github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
