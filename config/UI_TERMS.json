@@ -1,5 +1,5 @@
 {
-  "version": 16,
+  "version": 17,
   "layouts": {
     "STOCK": {"ru": "Заводская прошивка Nokia", "en": "Nokia factory firmware"},
     "NOKIA_STOCK": {"ru": "Заводская прошивка Nokia", "en": "Nokia factory firmware"},
@@ -13,17 +13,17 @@
     "install_openwrt": {"number": 1, "ru": "Установить OpenWrt", "en": "Install OpenWrt"},
     "install_or_repair_bootloader": {"number": 2, "ru": "Установить или обновить UrsusBoot", "en": "Install or update UrsusBoot"},
     "custom_openwrt": {"number": 3, "ru": "Установить свою прошивку OpenWrt", "en": "Install a custom OpenWrt image"},
-    "restore_factory_bootarea": {"number": 4, "ru": "Вернуть заводской загрузчик Nokia (UrsusBoot будет удалён)", "en": "Restore Nokia factory bootloader (removes UrsusBoot)"},
+    "vanilla_transition": {"number": 4, "ru": "Stock Nokia → Vanilla OpenWrt (TRANSITION)", "en": "Stock Nokia → Vanilla OpenWrt (TRANSITION)"},
     "recover_bootloader": {"number": 5, "ru": "Починить UrsusBoot, если он не запускается", "en": "Repair UrsusBoot if it does not start"},
     "restore_nokia": {"number": 6, "ru": "Вернуть роутер к заводскому состоянию целиком", "en": "Restore the entire router to factory state"},
     "full_backup": {"number": 7, "ru": "Снять полную копию памяти роутера", "en": "Capture a complete router memory backup"},
     "validate_backup": {"number": 8, "ru": "Проверить резервную копию", "en": "Validate a backup"},
-    "disaster_kit": {"number": 9, "ru": "Собрать комплект восстановления", "en": "Build a recovery kit"},
+    "restore_factory_bootarea": {"number": 9, "ru": "Вернуть заводской загрузчик Nokia (UrsusBoot будет удалён)", "en": "Restore Nokia factory bootloader (removes UrsusBoot)"},
     "capabilities": {"number": 10, "ru": "Что этот роутер позволяет сделать", "en": "What this router can do"},
     "flash_diagnostics": {"number": 11, "ru": "Память, разметка и сбойные блоки", "en": "Memory, layout and bad blocks"},
     "package_files": {"number": 12, "ru": "Проверить файлы программы", "en": "Check program files"}
   },
-  "contract": "STATEUI16 MF TEST62: MF Recovery may perform device-derived UrsusBoot self-update only from a validated backup of this device; item 4 is board-aware Nokia factory boot-area/mtd0 restore; final EXPERT action keys and methods are canonical; unknown presentation values degrade to raw text plus session warning instead of crashing the recovery menu; disabled actions show reason only; note/reason/detail are separate UI lines; visible actions derive from the canonical action registry; task-oriented menu; passive DeviceState is informational; explicit items 7/10/11 may authenticate read-only via system OpenSSH; authorization remains per-action; ! means persistent-write-capable only",
+  "contract": "STATEUI17: shipped START_EXPERT routing is canonical: item 4 is Stock Nokia -> Vanilla OpenWrt TRANSITION; item 9 is board-aware Nokia factory boot-area/mtd0 restore; final EXPERT action keys and methods are canonical; unknown presentation values degrade to raw text plus session warning instead of crashing the recovery menu; disabled actions show reason only; note/reason/detail are separate UI lines; visible actions derive from the canonical action registry; task-oriented menu; passive DeviceState is informational; explicit items 7/10/11 may authenticate read-only via system OpenSSH; authorization remains per-action; ! means persistent-write-capable only",
   "systems": {
     "NOKIA_STOCK": {"ru": "Заводская прошивка Nokia", "en": "Nokia factory firmware"},
     "OPENWRT_UBI": {"ru": "OpenWrt с разметкой UBI", "en": "OpenWrt with UBI layout"},
@@ -65,7 +65,7 @@
     "FALSE": {"ru": "нет", "en": "no"},
     "UNKNOWN": {"ru": "не определён", "en": "not determined"}
   },
-  "generic_values": {"UNKNOWN": {"ru": "не определено", "en": "not determined"}},
+  "generic_values": {"UNKNOWN": {"ru": "не определено", "en": "Not determined"}},
   "probe_reasons": {
     "URSUS_MODEL_UNCONFIRMED": {"ru": "UrsusBoot отвечает, но модель не подтверждена", "en": "UrsusBoot responds, but the model was not confirmed"},
     "STOCK_MODEL_SOC_MISMATCH": {"ru": "Заводской веб-интерфейс отвечает, но пара модель/SoC не совпала с поддерживаемым профилем MD/AN7581 или MF/AN7583", "en": "The factory web interface responds, but the model/SoC pair does not match the supported MD/AN7581 or MF/AN7583 profile"},
