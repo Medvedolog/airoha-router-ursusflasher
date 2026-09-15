@@ -18,6 +18,7 @@ import mf_persistent
 import mf_runtime_install
 import one_key_multi
 import runtime_kit
+import stock_ab_transition
 import stock_bootarea_restore
 import uart_bootarea_restore
 import ursus_web_client as uw
@@ -142,9 +143,9 @@ _original_applicability = base.ds.action_applicability
 
 def action_applicability(state: ds.DeviceState):
     out = _original_applicability(state)
-    old4 = out[4]
-    out[4] = ds.ActionApplicability(
-        old4.number, ds.ACTION_KEYS[4], True, "", "",
+    old9 = out[9]
+    out[9] = ds.ActionApplicability(
+        old9.number, "restore_factory_bootarea", True, "", "",
         True, "UART_BOOTAREA_FACTORY_RESTORE",
     )
     if _family(state) == "mf" and state.current_system == "RECOVERY":
@@ -163,17 +164,24 @@ def _show_action(number: int, app: dict[int, ds.ActionApplicability], detail_ru:
     base._show_action(number, app, detail_ru, detail_en)
 
 
+def _show_factory_restore_action(app: dict[int, ds.ActionApplicability]) -> None:
+    a = app[9]
+    base.ui.menu_item(
+        9,
+        tr("Вернуть заводской загрузчик Nokia (UrsusBoot будет удалён)", "Restore Nokia factory bootloader (UrsusBoot will be removed)"),
+        tr("Через USB-UART. Вернёт заводскую загрузочную область с полной проверкой.", "Via USB-UART. Restores the factory boot area with full verification."),
+        write_capable=True,
+        enabled=a.enabled,
+        reason=a.reason if not a.enabled else "",
+    )
+
+
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     family = _family(state)
     if number == 2 and family == "mf" and state.current_system == "RECOVERY":
         return (
             "Через запущенный UrsusBoot Recovery; device-derived FIP собирается из вашего mtd0 backup и записывается штатным updater с readback.",
             "Through the running UrsusBoot Recovery; a device-derived FIP is built from your mtd0 backup and written by the native updater with readback.",
-        )
-    if number == 4:
-        return (
-            "Через USB-UART. Вернёт заводскую загрузочную область с полной проверкой.",
-            "Via USB-UART. Restores the factory boot area with full verification.",
         )
     if number == 5:
         if family == "mf":
@@ -260,14 +268,15 @@ def main() -> int:
         for number in (1, 2, 3):
             detail_ru, detail_en = _menu_detail(number, state, app)
             _show_action(number, app, detail_ru, detail_en)
+        base._show_transition_action(state)
 
         base.ui.section(tr("Если роутер не загружается", "If the router does not boot"), style="amber2")
-        _show_action(4, app, *_menu_detail(4, state, app))
         _show_action(5, app, *_menu_detail(5, state, app))
         _show_action(6, app, *base._menu_detail(6, state, app))
+        _show_factory_restore_action(app)
 
         base.ui.section(tr("Резервные копии", "Backups"), style="ok")
-        for number in (7, 8, 9):
+        for number in (7, 8):
             detail_ru, detail_en = _menu_detail(number, state, app)
             _show_action(number, app, detail_ru, detail_en)
 
@@ -285,6 +294,19 @@ def main() -> int:
         if c == "0":
             return 0
         number = int(c)
+
+        if number == 4:
+            profile = base._transition_profile(state)
+            if profile not in ("xg040-md", "xg040-mf"):
+                base.ui.status(tr("СТОП", "STOP"), tr("Vanilla TRANSITION доступен только из подтверждённой Nokia stock MD/MF.", "Vanilla TRANSITION is available only from confirmed Nokia stock MD/MF."))
+                base.ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
+                continue
+            base.network_guidance.show()
+            base.ui.section(tr("Перед первым запуском на stock Nokia", "Before first run on Nokia stock"), style="amber2")
+            base.ui.note(tr("На включённом роутере удерживайте Reset не менее 30 секунд, отпустите и дождитесь полной загрузки stock Web UI.", "With the router powered on, hold Reset for at least 30 seconds, release it, and wait for the stock Web UI to boot fully."))
+            base.run_action(lambda: stock_ab_transition.run_expert(host=host, profile=profile), write_may_happen=True)
+            continue
+
         selected = app[number]
         if not selected.enabled:
             print()
@@ -322,7 +344,17 @@ def main() -> int:
                 base.ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
             base.run_action(lambda: base.run_custom_openwrt(host, fresh_state, fresh_action), write_may_happen=True)
-        elif number == 4:
+        elif number == 5:
+            base.network_guidance.show()
+            base.run_action(lambda: _run_ursus_recovery(state), write_may_happen=True)
+        elif number == 6:
+            base.network_guidance.show()
+            base.run_action(lambda: base.stock_restore.restore_nokia(base._interactive_diagnostic_state(state)), write_may_happen=True)
+        elif number == 7:
+            base.run_action(lambda: _run_backup(state))
+        elif number == 8:
+            base.run_action(base.validate_backup)
+        elif number == 9:
             base.network_guidance.show()
             base.ui.rule(tr("ВОССТАНОВЛЕНИЕ ЗАВОДСКОГО ЗАГРУЗЧИКА NOKIA", "RESTORE NOKIA FACTORY BOOTLOADER"), style="bad")
             base.ui.status(tr("ВНИМАНИЕ", "WARNING"), tr(
@@ -334,16 +366,6 @@ def main() -> int:
                 "A 3.3 V USB-UART adapter is required. Do not connect VCC. Flashing will be confirmed once after automatic preflight.",
             ))
             base.run_action(lambda: _run_factory_bootarea_restore(state), write_may_happen=True)
-        elif number == 5:
-            base.network_guidance.show()
-            base.run_action(lambda: _run_ursus_recovery(state), write_may_happen=True)
-        elif number == 6:
-            base.network_guidance.show()
-            base.run_action(lambda: base.stock_restore.restore_nokia(base._interactive_diagnostic_state(state)), write_may_happen=True)
-        elif number == 7:
-            base.run_action(lambda: _run_backup(state))
-        elif number == 8:
-            base.run_action(base.validate_backup)
         elif number == 10:
             base.run_action(lambda: base.capability_report(base._interactive_diagnostic_state(state)))
         elif number == 11:
