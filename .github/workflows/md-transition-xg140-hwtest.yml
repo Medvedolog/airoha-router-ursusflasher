@@ -1,0 +1,243 @@
+name: MD vanilla transition + XG140 brick recovery HW test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - '.github/workflows/md-transition-xg140-hwtest.yml'
+      - 'openwrt/patches/24025.patch'
+      - 'ursusboot/scripts/build_md_transition1.sh'
+      - 'ursusboot/scripts/build_xg140_native_profile.sh'
+      - 'ursusboot/**'
+      - 'ursusflasher/src/stock_ab_transition.py'
+      - 'ursusflasher/src/stock_fit_wrapper.py'
+      - 'ursusflasher/src/xg140_**'
+      - 'START_MD_TRANSITION.*'
+      - 'START_EXPERT.*'
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  OPENWRT_REPO: openwrt/openwrt
+  OPENWRT_REF: 3d1645ee26d6a2e20be71d7fa1716721bac78e53
+  XG140_BASE_RUN: '34900134319'
+  XG140_BASE_ARTIFACT: UrsusFlasher-Airoha-Multimodel-HWTEST-5993429874f7ec2287931a4a5bcba199de826fe2
+
+jobs:
+  vanilla-md-uboot:
+    name: vanilla OpenWrt U-Boot + Fudan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - name: Checkout UrsusFlasher inputs
+        uses: actions/checkout@v4
+        with:
+          path: kit
+          fetch-depth: 1
+
+      - name: Checkout pinned OpenWrt
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.OPENWRT_REPO }}
+          ref: ${{ env.OPENWRT_REF }}
+          path: openwrt
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang flex bison g++ gawk gcc-multilib gettext git \
+            libncurses-dev libssl-dev liblzma-dev python3 python3-setuptools \
+            rsync swig unzip zlib1g-dev file wget jq time xz-utils zstd \
+            device-tree-compiler perl
+
+      - name: Apply preserved Fudan FM25G01B/FM25G02B OpenWrt patch
+        run: |
+          set -eux
+          git -C openwrt apply --check ../kit/openwrt/patches/24025.patch
+          git -C openwrt apply ../kit/openwrt/patches/24025.patch
+          test -f openwrt/package/boot/uboot-airoha/patches/120-mtd-spinand-fmsh-add-support-for-FM25G01B-FM25G02B.patch
+          test -f openwrt/package/boot/uboot-airoha/patches/121-mtd-spinand-fmsh-fix-FM25G01B-FM25G02B-Quad-IO-read-dummy-cycles.patch
+
+      - name: Configure Nokia XG-040G-MD
+        working-directory: openwrt
+        run: |
+          cat > .config <<'EOF'
+          CONFIG_TARGET_airoha=y
+          CONFIG_TARGET_airoha_an7581=y
+          CONFIG_TARGET_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi=y
+          EOF
+          make defconfig
+          grep -q '^CONFIG_TARGET_airoha=y' .config
+          grep -q '^CONFIG_TARGET_airoha_an7581=y' .config
+
+      - name: Download U-Boot build sources
+        working-directory: openwrt
+        run: |
+          make download -j8
+          find dl -type f -size -1024c -delete
+
+      - name: Build vanilla OpenWrt U-Boot
+        working-directory: openwrt
+        run: |
+          set -o pipefail
+          make -j"$(nproc)" package/boot/uboot-airoha/compile V=s 2>&1 | tee ../vanilla-md-uboot.log || \
+            make -j1 package/boot/uboot-airoha/compile V=s 2>&1 | tee -a ../vanilla-md-uboot.log
+
+      - name: Stage vanilla MD U-Boot
+        run: |
+          set -eux
+          mkdir -p vanilla-out
+          LZMA="$(find openwrt/build_dir -type f -path '*uboot-airoha*' -name u-boot.lzma -print | head -n1)"
+          BIN="$(find openwrt/build_dir -type f -path '*uboot-airoha*' -name u-boot.bin -print | head -n1)"
+          test -s "$LZMA"
+          test -s "$BIN"
+          cp "$LZMA" vanilla-out/openwrt-vanilla-an7581-xg040md-fudan-u-boot.lzma
+          cp "$BIN" vanilla-out/openwrt-vanilla-an7581-xg040md-fudan-u-boot.bin
+          strings "$BIN" | grep -F 'U-Boot 2026.07' | head -n1
+          grep -R -F 'FM25G01B' openwrt/build_dir/target-*/*uboot-airoha* 2>/dev/null | head -n1
+          sha256sum vanilla-out/* > vanilla-out/SHA256SUMS
+          cat > vanilla-out/PROVENANCE.txt <<EOF
+          ROLE=FINAL_VANILLA_OPENWRT_UBOOT
+          TARGET=Nokia XG-040G-MD / Airoha AN7581
+          OPENWRT_REPO=${OPENWRT_REPO}
+          OPENWRT_REF=${OPENWRT_REF}
+          FUDAN_PATCH=kit/openwrt/patches/24025.patch
+          FUDAN_PATCH_SHA256=$(sha256sum kit/openwrt/patches/24025.patch | awk '{print $1}')
+          HARDWARE_STATUS=HW_PENDING
+          EOF
+
+      - name: Upload vanilla MD U-Boot
+        uses: actions/upload-artifact@v4
+        with:
+          name: vanilla-openwrt-md-fudan-${{ github.sha }}
+          path: vanilla-out/
+          if-no-files-found: error
+          retention-days: 14
+
+  hwtest-kit:
+    name: XG140 brick + MD TRANSITION HW test kit
+    needs: vanilla-md-uboot
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout UrsusFlasher
+        uses: actions/checkout@v4
+        with:
+          path: kit
+          fetch-depth: 1
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential gcc g++ make perl python3 git patch xz-utils zstd liblzma-dev device-tree-compiler jq unzip
+
+      - name: Download vanilla MD U-Boot
+        uses: actions/download-artifact@v4
+        with:
+          name: vanilla-openwrt-md-fudan-${{ github.sha }}
+          path: vanilla-md
+
+      - name: Download last green XG140 rescue kit
+        working-directory: kit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p ../xg140-base
+          gh run download "${XG140_BASE_RUN}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "${XG140_BASE_ARTIFACT}" \
+            --dir ../xg140-base
+          test -s ../xg140-base/ursusflasher/xg140-rescue-initramfs.itb
+
+      - name: Build MD TRANSITION runtime
+        working-directory: kit
+        run: |
+          bash ursusboot/scripts/build_md_transition1.sh
+          test -s work/md-transition1/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg
+
+      - name: Stage MD TRANSITION payload
+        working-directory: kit
+        run: |
+          set -eux
+          mkdir -p payloads/md/transition payloads/md/vanilla
+          cp work/md-transition1/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg payloads/md/transition/
+          cp ../vanilla-md/openwrt-vanilla-an7581-xg040md-fudan-u-boot.lzma payloads/md/vanilla/
+          cp ../vanilla-md/openwrt-vanilla-an7581-xg040md-fudan-u-boot.bin payloads/md/vanilla/
+          cp ../vanilla-md/PROVENANCE.txt payloads/md/vanilla/VANILLA-UBOOT-PROVENANCE.txt
+          python3 - <<'PY'
+          import hashlib, json, pathlib, subprocess
+          p=pathlib.Path('payloads/md/transition/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg')
+          info={
+            'schema':1,'board':'MD','board_profile':'xg040-md','mode':'TRANSITION',
+            'runtime_role':'transition','persistence_target':'NONE',
+            'final_target':'VANILLA_OPENWRT_FUDAN','stock_inner_format':'ARM64_LINUX_IMAGE_HANDOFF',
+            'stock_kernel_load':'0x80088000','text_base':'0x81e00000',
+            'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
+            'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
+            'hardware_status':'HW_PENDING_TCBOOT_TO_TRANSITION'
+          }
+          pathlib.Path('payloads/md/transition/TRANSITION1.json').write_text(json.dumps(info,indent=2)+'\n')
+          PY
+          PYTHONPATH=ursusflasher/src python3 - <<'PY'
+          import stock_ab_transition
+          data, meta=stock_ab_transition._load_payload()
+          assert meta['mode']=='TRANSITION'
+          print('MD_TRANSITION_PAYLOAD_QA=PASS',len(data),meta['sha256'])
+          PY
+
+      - name: Build XG140 persistent native-hybrid UrsusBoot
+        working-directory: kit
+        env:
+          URSUS_RUNTIME_ROLE: persistent
+        run: |
+          bash ursusboot/scripts/build_xg140_native_profile.sh
+          test -s work/xg140-native-profile-persistent/out/u-boot.lzma
+          test -s work/xg140-native-profile-persistent/out/u-boot.bin
+
+      - name: Assemble hardware-test kit
+        run: |
+          set -eux
+          ART=/tmp/ursus-hwtest
+          mkdir -p "$ART"
+          cp -a kit/START_*.cmd kit/START_*.sh kit/VERSION kit/README.md "$ART/"
+          cp -a kit/config kit/fw kit/payloads kit/ursusflasher kit/docs "$ART/"
+          cp xg140-base/ursusflasher/xg140-rescue-initramfs.itb "$ART/ursusflasher/xg140-rescue-initramfs.itb"
+          cp kit/work/xg140-native-profile-persistent/out/u-boot.lzma "$ART/ursusflasher/u-boot.lzma"
+          cp kit/work/xg140-native-profile-persistent/out/u-boot.bin "$ART/ursusflasher/u-boot.bin"
+          cat > "$ART/HWTEST-READ-ME-FIRST.txt" <<EOF
+          HW TEST ONLY - no release/tag
+          Source commit: ${GITHUB_SHA}
+
+          Track A: Bell/Nokia XG-140G-MD brick recovery
+            Uses last green rescue initramfs from run ${XG140_BASE_RUN}.
+            Persistent candidate keeps native device-derived BL2/FIP and replaces BL33 only.
+
+          Track B: Nokia XG-040G-MD no-UART transition
+            stock tcboot MAIN -> patched SLAVE slot -> UrsusBoot TRANSITION runtime.
+            TRANSITION itself is non-persistent/read-only.
+            Final bootloader payload included separately:
+              payloads/md/vanilla/openwrt-vanilla-an7581-xg040md-fudan-u-boot.lzma
+            This is OpenWrt U-Boot v2026.07 with only the preserved Fudan FM25G01B/FM25G02B patch.
+
+          Do not treat CI PASS as HW PASS.
+          EOF
+          (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          cd /tmp
+          zip -qr UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${GITHUB_SHA}.zip ursus-hwtest
+          sha256sum UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${GITHUB_SHA}.zip > UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${GITHUB_SHA}.zip.sha256
+
+      - name: Upload HW test kit
+        uses: actions/upload-artifact@v4
+        with:
+          name: UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${{ github.sha }}
+          path: |
+            /tmp/UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${{ github.sha }}.zip
+            /tmp/UrsusFlasher-MD-TRANSITION-XG140-BRICK-HWTEST-${{ github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
