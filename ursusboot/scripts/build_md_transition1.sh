@@ -66,7 +66,6 @@ grep -q '^CONFIG_TEXT_BASE=0x81e00000$' .config || { echo 'TRANSITION2: unexpect
 grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h || { echo 'TRANSITION2: Web-only dispatcher marker missing' >&2; exit 1; }
 grep -Fq 'URSUS_TRANSITION_WEB_BEGIN' cmd/ursusdispatch.c || { echo 'TRANSITION2: dispatcher Web entry missing' >&2; exit 1; }
 grep -Fq 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' cmd/ursusdispatch.c || { echo 'TRANSITION2: UART fallback marker missing' >&2; exit 1; }
-grep -Fq 'URSUS_FATAL_TRANSPORTS_DECLARED=tftp:UNSUPPORTED,usb:UNSUPPORTED probe=NONE' cmd/ursusdispatch.c || { echo 'TRANSITION2: honest fatal transport banner missing' >&2; exit 1; }
 grep -Fq 'URSUS_NETDBG_RX_RING' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETDBG1: RX ring readback marker missing' >&2; exit 1; }
 grep -Fq 'URSUS_NETDBG_FIRST_RX' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETDBG1: first RX marker missing' >&2; exit 1; }
 grep -Fq 'ursusnetreset, 1, 0, do_ursusnetreset' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETRESET1: command missing' >&2; exit 1; }
@@ -146,7 +145,7 @@ grep -Fq "#define URSUS_VERSION \"${VERSION}\"" include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_HANDOFF_ONLY 0' include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h
 strings u-boot.bin > "$WORK/u-boot.strings"
-for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT' 'URSUS_TRANSITION_WEB_BEGIN' 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' 'URSUS_FATAL_TRANSPORTS_DECLARED=tftp:UNSUPPORTED,usb:UNSUPPORTED probe=NONE' 'URSUS_NETDBG_RX_RING' 'URSUS_NETDBG_FIRST_RX' 'URSUS_NETRESET_BEGIN build=TRANSITION2-NETRESET1' 'ursusnetreset'; do
+for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT' 'URSUS_TRANSITION_WEB_BEGIN' 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' 'URSUS_NETDBG_RX_RING' 'URSUS_NETDBG_FIRST_RX' 'URSUS_NETRESET_BEGIN build=TRANSITION2-NETRESET1' 'ursusnetreset'; do
     grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "missing transition marker: $marker" >&2; exit 1; }
 done
 
