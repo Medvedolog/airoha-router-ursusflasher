@@ -12,7 +12,6 @@ TRANSITION_CONFIG="$ROOT/ursusboot/configs/ursusboot-transition-handoff.cfg"
 CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
 PATCH_HANDOFF="$ROOT/ursusboot/patches/190-md-transition1-handoff.patch"
 PATCH_UART_FALLBACK="$ROOT/ursusboot/patches/200-transition2-uart-fallback.patch"
-PATCH_GDM1="$ROOT/ursusboot/patches/205-transition2-an7581-gdm1-enable.patch"
 PATCH_NETDBG="$ROOT/ursusboot/patches/210-transition2-netdbg1-netreset.patch"
 OUT="$WORK/out"
 RELEASE_EPOCH=1789300800
@@ -21,7 +20,7 @@ STOCK_KERNEL_LOAD=0x80088000
 TEXT_BASE=0x81e00000
 
 for x in tar make gcc perl python3 sha256sum patch; do command -v "$x" >/dev/null; done
-for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH_HANDOFF" "$PATCH_UART_FALLBACK" "$PATCH_GDM1" "$PATCH_NETDBG"; do
+for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH_HANDOFF" "$PATCH_UART_FALLBACK" "$PATCH_NETDBG"; do
     [ -f "$f" ] || { echo "missing build input: $f" >&2; exit 1; }
 done
 
@@ -38,7 +37,6 @@ tar --zstd -xf "$SDK_BUNDLE" -C "$WORK/sdk"
 tar --zstd -xf "$SOURCE_BUNDLE" -C "$WORK/u-boot"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_HANDOFF"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_UART_FALLBACK"
-patch -d "$WORK/u-boot" -p1 < "$PATCH_GDM1"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_NETDBG"
 
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
@@ -68,6 +66,8 @@ grep -q '^CONFIG_TEXT_BASE=0x81e00000$' .config || { echo 'TRANSITION2: unexpect
 grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h || { echo 'TRANSITION2: Web-only dispatcher marker missing' >&2; exit 1; }
 grep -Fq 'URSUS_TRANSITION_WEB_BEGIN' cmd/ursusdispatch.c || { echo 'TRANSITION2: dispatcher Web entry missing' >&2; exit 1; }
 grep -Fq 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' cmd/ursusdispatch.c || { echo 'TRANSITION2: UART fallback marker missing' >&2; exit 1; }
+# TEST61 source already carries the OpenWrt AN7581 board U-Boot DT override.
+# Assert it instead of applying a duplicate patch.
 grep -Fq '&gdm1 {' arch/arm/dts/an7581-nokia-xg-040g-md-u-boot.dtsi || { echo 'TRANSITION2: board U-Boot DT does not force gdm1 okay' >&2; exit 1; }
 grep -Fq 'status = "okay";' arch/arm/dts/an7581-nokia-xg-040g-md-u-boot.dtsi || { echo 'TRANSITION2: gdm1 status override missing' >&2; exit 1; }
 grep -Fq 'URSUS_NETDBG_RX_RING' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETDBG1: RX ring readback marker missing' >&2; exit 1; }
@@ -176,7 +176,7 @@ printf '%s\n' \
     "HANDOFF_ONLY=0" \
     "TRANSITION_ENTRY=ursusdispatch->ursusweb" \
     "UART_FALLBACK=READY_UNRESTRICTED" \
-    "AN7581_GDM1_UBOOT_DTS=FORCED_OKAY" \
+    "AN7581_GDM1_UBOOT_DTS=ALREADY_PRESENT" \
     "NETDBG_BUILD=TRANSITION2-NETDBG1" \
     "NETRESET_COMMAND=ursusnetreset" \
     "NETRESET_EXPERIMENT=TRANSITION2-NETRESET1" \
