@@ -1,0 +1,24 @@
+--- a/cmd/ursusdispatch.c
++++ b/cmd/ursusdispatch.c
+@@ -86,13 +86,17 @@ static int ursus_enter_webfailsafe(const char *reason, unsigned long hold_ms)
+ 
+     ret = run_command("ursusweb", 0);
+     printf("URSUS_WEB_RETURNED ret=%d\nURSUS_RECOVERY_STILL_LATCHED=1\n", ret);
+-    if (!ret) {
+-        printf("URSUS_RECOVERY_UART_SHELL\n");
+-        return CMD_RET_SUCCESS;
+-    }
+-    ursus_led_fatal_wait("WEBFAILSAFE_RETURN");
+-    return CMD_RET_FAILURE;
++    if (ret)
++        printf("URSUS_RECOVERY_TRANSPORT_LOST source=WEBFAILSAFE ret=%d destructive_state=NOT_ASSERTED\n",
++               ret);
++
++    /* TRANSITION is an operator-present recovery runtime. A WebFailsafe
++     * return must not consume another stock tcboot retry merely to regain the
++     * UART prompt. Keep the recovery latch set, advertise the real fallback,
++     * and return to the existing unrestricted U-Boot shell. */
++    printf("URSUS_UART_FALLBACK=READY\n");
++    printf("URSUS_RECOVERY_UART_SHELL\n");
++    return CMD_RET_SUCCESS;
+ }
