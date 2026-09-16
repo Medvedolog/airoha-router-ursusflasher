@@ -13,10 +13,12 @@ on:
       - 'ursusboot/configs/ursusboot-transition-handoff.cfg'
       - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
       - 'toolchains/**'
-      - 'ursusflasher/src/stock_ab_transition.py'
-      - 'ursusflasher/src/stock_fit_wrapper.py'
-      - 'START_MD_TRANSITION.cmd'
-      - 'START_MD_TRANSITION.sh'
+      - 'ursusflasher/src/**'
+      - 'ursusflasher/tools/repack_xg140_native_fip.py'
+      - 'START_EXPERT.cmd'
+      - 'START_EXPERT.sh'
+      - 'START_ONECLICK.cmd'
+      - 'START_ONECLICK.sh'
       - 'scripts/repo_common.py'
       - 'scripts/build_transition_test_rollup.py'
   workflow_dispatch:
@@ -58,6 +60,18 @@ jobs:
             --out-dir dist-transition \
             --source-sha "${GITHUB_SHA}" \
             --run-id "${GITHUB_RUN_ID}"
+      - name: Smoke-test packaged EXPERT import closure
+        run: |
+          rm -rf smoke-root
+          mkdir smoke-root
+          unzip -q dist-transition/UrsusFlasher-0.2.63-MD-AB-TRANSITION2-NETDBG1-PUBLIC-TEST.zip -d smoke-root
+          ROOT_DIR="$(find smoke-root -mindepth 1 -maxdepth 1 -type d | head -n1)"
+          test -n "$ROOT_DIR"
+          test -f "$ROOT_DIR/START_EXPERT.cmd"
+          test -f "$ROOT_DIR/START_ONECLICK.cmd"
+          test ! -e "$ROOT_DIR/START_MD_TRANSITION.cmd"
+          test ! -e "$ROOT_DIR/START_UART_RESTORE.cmd"
+          PYTHONPATH="$ROOT_DIR/data" python3 -c 'import expert, one_key, bootloader_install_menu, xg140_profile; print("PACKED_RUNTIME_IMPORT_SMOKE=PASS")'
       - name: Upload full UrsusFlasher TRANSITION2 NETDBG1 test rollup
         uses: actions/upload-artifact@v4
         with:
