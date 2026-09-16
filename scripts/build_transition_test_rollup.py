@@ -17,6 +17,10 @@ VERSION = "0.1.0-alpha5-UBIUX1-TRANSITION2"
 PAYLOAD_NAME = f"ursusboot-md-{VERSION}.linuximg"
 META_NAME = "TRANSITION2.json"
 TEST_INFO_NAME = "TRANSITION2_NETDBG1_TEST.txt"
+CANONICAL_LAUNCHERS = (
+    "START_ONECLICK.cmd", "START_ONECLICK.sh",
+    "START_EXPERT.cmd", "START_EXPERT.sh",
+)
 
 
 def rebuild_payload_manifest(tree: Path) -> None:
@@ -47,13 +51,14 @@ def zip_tree(tree: Path, zpath: Path) -> str:
 
 
 def overlay_current_host(tree: Path) -> None:
-    for name in (
-        "START_ONECLICK.cmd", "START_ONECLICK.sh",
-        "START_EXPERT.cmd", "START_EXPERT.sh",
-        "START_MD_TRANSITION.cmd", "START_MD_TRANSITION.sh",
-        "VERSION",
-    ):
+    # The audited base ZIP can contain historical engineering launchers.
+    # TRANSITION is routed through EXPERT item 4; keep only public entrypoints.
+    for pattern in ("START_*.cmd", "START_*.sh"):
+        for stale in tree.glob(pattern):
+            stale.unlink()
+    for name in CANONICAL_LAUNCHERS:
         shutil.copy2(ROOT / name, tree / name)
+    shutil.copy2(ROOT / "VERSION", tree / "VERSION")
     shutil.copy2(ROOT / "VERSION", tree / "data" / "VERSION")
 
     src_root = ROOT / "ursusflasher" / "src"
@@ -70,6 +75,13 @@ def overlay_current_host(tree: Path) -> None:
     for packed in (tree / "data").glob("*.py"):
         if packed.name not in current_top_py:
             packed.unlink()
+
+    # xg140_profile imports this helper at module import time, so it is part of
+    # the packaged runtime closure even though the source copy lives in tools/.
+    shutil.copy2(
+        ROOT / "ursusflasher" / "tools" / "repack_xg140_native_fip.py",
+        tree / "data" / "repack_xg140_native_fip.py",
+    )
 
     for name in ("UI_TERMS.json", "FIRMWARE_CAPABILITIES.json", "BOARD_PROFILES.json", "FIRMWARE_BUNDLES.json"):
         shutil.copy2(ROOT / "config" / name, tree / "data" / name)
@@ -116,8 +128,6 @@ def main() -> None:
 
         payload_dir = tree / "data" / "payloads" / "md" / "transition"
         payload_dir.mkdir(parents=True, exist_ok=True)
-        # Remove stale engineering transition payloads from an audited base kit;
-        # the current host policy must resolve exactly one TRANSITION2 payload.
         for stale in payload_dir.glob("TRANSITION*.json"):
             stale.unlink()
         for stale in payload_dir.glob("ursusboot-md-*-TRANSITION*.linuximg"):
@@ -154,7 +164,8 @@ def main() -> None:
         (tree / "BUILD_COMMIT.txt").write_text(args.source_sha + "\n", encoding="ascii", newline="\n")
         (tree / TEST_INFO_NAME).write_text(
             "MD A/B TRANSITION2 NETDBG1 stock-FIT hardware-test bundle.\n"
-            "Run START_MD_TRANSITION.cmd (Windows) or START_MD_TRANSITION.sh (Linux/macOS), or use EXPERT item 4.\n"
+            "Run START_EXPERT.cmd (Windows) or START_EXPERT.sh (Linux/macOS), then choose item 4.\n"
+            "ONECLICK and EXPERT are the only packaged operator launchers; historical standalone engineering launchers are intentionally removed.\n"
             "This full UrsusFlasher kit is derived from the audited 0.2.62 Actions artifact.\n"
             "The live nsb_slave is used as the stock template. FIP, HDR2, FIT topology, fdt@1, filesystem@1, kernel type/os/load/entry and all declared sizes are preserved.\n"
             "Only kernel@1 data, compression (lzma->none), and the existing SHA1 value are changed.\n"
@@ -164,8 +175,6 @@ def main() -> None:
             encoding="utf-8", newline="\n",
         )
 
-        # Existing audited payloads/fw stay byte-exact except stale transition
-        # engineering files deliberately replaced above by the current payload.
         for rel, expected in frozen.items():
             if rel.startswith("data/payloads/md/transition/"):
                 continue
@@ -180,8 +189,9 @@ def main() -> None:
         assert dst.is_file() and (payload_dir / META_NAME).is_file()
         assert not list(payload_dir.glob("*TRANSITION1*"))
         assert (tree / "data" / "stock_fit_wrapper.py").read_bytes() == (ROOT / "ursusflasher" / "src" / "stock_fit_wrapper.py").read_bytes()
-        assert (tree / "START_MD_TRANSITION.cmd").read_bytes() == (ROOT / "START_MD_TRANSITION.cmd").read_bytes()
-        assert (tree / "START_MD_TRANSITION.sh").read_bytes() == (ROOT / "START_MD_TRANSITION.sh").read_bytes()
+        assert (tree / "data" / "repack_xg140_native_fip.py").is_file()
+        launchers = sorted(p.name for p in tree.iterdir() if p.is_file() and p.name.startswith("START_"))
+        assert launchers == sorted(CANONICAL_LAUNCHERS), launchers
 
         rebuild_payload_manifest(tree)
         zpath = out / f"{name}.zip"
