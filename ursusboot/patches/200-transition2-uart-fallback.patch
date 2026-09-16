@@ -1,6 +1,6 @@
 --- a/cmd/ursusdispatch.c
 +++ b/cmd/ursusdispatch.c
-@@ -86,13 +86,25 @@ static int ursus_enter_webfailsafe(const char *reason, unsigned long hold_ms)
+@@ -86,10 +86,25 @@ static int ursus_enter_webfailsafe(const char *reason, unsigned long hold_ms)
  
      ret = run_command("ursusweb", 0);
      printf("URSUS_WEB_RETURNED ret=%d\nURSUS_RECOVERY_STILL_LATCHED=1\n", ret);
