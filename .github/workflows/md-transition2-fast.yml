@@ -13,6 +13,7 @@ on:
       - 'ursusboot/patches/190-md-transition1-handoff.patch'
       - 'ursusboot/scripts/build_md_transition1.sh'
       - 'ursusflasher/src/backup_progress.py'
+      - 'ursusflasher/src/transition_trace.py'
       - 'ursusflasher/src/device_state.py'
       - 'ursusflasher/src/expert.py'
       - 'ursusflasher/src/expert_airoha.py'
@@ -20,6 +21,7 @@ on:
       - 'ursusflasher/src/stock_ab_transition.py'
       - 'ursusflasher/src/stock_fit_wrapper.py'
       - 'ursusflasher/tools/selftest_backup_progress.py'
+      - 'ursusflasher/tools/selftest_transition_trace.py'
       - 'ursusflasher/tools/selftest_transition_expert_item4.py'
       - 'ursusflasher/tools/selftest_transition_family_metadata.py'
       - 'ursusflasher/tools/selftest_transition_write_safety.py'
@@ -50,6 +52,7 @@ jobs:
         run: |
           python3 -m py_compile \
             ursusflasher/src/backup_progress.py \
+            ursusflasher/src/transition_trace.py \
             ursusflasher/src/device_state.py \
             ursusflasher/src/expert.py \
             ursusflasher/src/expert_airoha.py \
@@ -57,6 +60,7 @@ jobs:
             ursusflasher/src/stock_ab_transition.py \
             ursusflasher/src/stock_fit_wrapper.py \
             ursusflasher/tools/selftest_backup_progress.py \
+            ursusflasher/tools/selftest_transition_trace.py \
             ursusflasher/tools/selftest_transition_expert_item4.py \
             ursusflasher/tools/selftest_transition_family_metadata.py \
             ursusflasher/tools/selftest_transition_write_safety.py \
@@ -64,6 +68,7 @@ jobs:
             ursusflasher/tools/selftest_stateui6_action_preflight.py \
             ursusflasher/tools/selftest_device_state_v529.py
           python3 ursusflasher/tools/selftest_backup_progress.py
+          python3 ursusflasher/tools/selftest_transition_trace.py
           python3 ursusflasher/tools/selftest_transition_expert_item4.py
           python3 ursusflasher/tools/selftest_transition_family_metadata.py
           python3 ursusflasher/tools/selftest_transition_write_safety.py
@@ -137,6 +142,7 @@ jobs:
             proven transfer backend selected and both candidate files SHA-verified before y/N
             writer and transfer backend frozen before destructive boundary
             one ordinary y/N
+            operator trace shows payload/source, per-device SLOT2 build, selector BEFORE/AFTER, exact write target/writer and full readback SHA
             exact destructive targets: nsb_slave then flag; nsb_master and flagback untouched
             full nsb_slave readback mismatch aborts before selector write
             flag readback mismatch aborts completion
