@@ -25,11 +25,3 @@
      return CMD_RET_FAILURE;
 +#endif
  }
-@@ -300,7 +312,7 @@ void ursus_led_fatal_wait(const char *reason)
- {
-     printf("URSUS_FATAL_RECOVERY_WAIT reason=%s\n", reason ? reason : "UNKNOWN");
--    printf("URSUS_FATAL_TRANSPORTS=tftp:UNSUPPORTED,usb:UNSUPPORTED\n");
-+    printf("URSUS_FATAL_TRANSPORTS_DECLARED=tftp:UNSUPPORTED,usb:UNSUPPORTED probe=NONE\n");
-     ursus_led_start(URSUS_LED_PATTERN_SOS);
-     while (!ctrlc()) {
-         ursus_led_poll();
