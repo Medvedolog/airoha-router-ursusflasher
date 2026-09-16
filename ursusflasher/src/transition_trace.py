@@ -19,6 +19,15 @@ def _short(value: object, length: int = 12) -> str:
     return text[:length] if text else "unknown"
 
 
+def _selector_text(state: object) -> str:
+    if not isinstance(state, dict):
+        return "unknown"
+    return (
+        f"active={state.get('active', '?')}, curimg={state.get('curimg', '?')}, "
+        f"startok={state.get('startok', '?')}, count={state.get('count', '?')}"
+    )
+
+
 def install(sat) -> None:
     """Add operator-visible tracing to the stock A/B TRANSITION transaction.
 
@@ -92,11 +101,27 @@ def install(sat) -> None:
         flag_mtd = getattr(policy_obj, "flag_mtd", "?")
         master_mtd = getattr(policy_obj, "master_mtd", "?")
         flagback_mtd = getattr(policy_obj, "flagback_mtd", "?")
+        before = meta.get("before") if isinstance(meta, dict) else None
+        after = meta.get("after") if isinstance(meta, dict) else None
         sat.ui.status(
             "INFO",
             sat.pb.tr(
-                f"Selector-кандидат собран из backup flag: target active={target}; запись будет только в flag/mtd{flag_mtd}.",
-                f"Selector candidate built from backed-up flag: target active={target}; only flag/mtd{flag_mtd} will be written.",
+                f"Stock selector ДО: {_selector_text(before)}.",
+                f"Stock selector BEFORE: {_selector_text(before)}.",
+            ),
+        )
+        sat.ui.status(
+            "ACTION",
+            sat.pb.tr(
+                f"Stock selector ПОСЛЕ: {_selector_text(after)}; меняется только active -> {target}.",
+                f"Stock selector AFTER: {_selector_text(after)}; only active changes -> {target}.",
+            ),
+        )
+        sat.ui.status(
+            "INFO",
+            sat.pb.tr(
+                f"Selector-кандидат собран из backup flag; запись будет только в flag/mtd{flag_mtd} после успешной проверки SLOT2.",
+                f"Selector candidate built from backed-up flag; only flag/mtd{flag_mtd} will be written after SLOT2 verification succeeds.",
             ),
         )
         sat.ui.status(
