@@ -85,7 +85,7 @@ def _transition_profile_after_selection(_menu_state: ds.DeviceState) -> str | No
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     if number == 1:
         return (
-            "Полный переход → постоянный UrsusBoot + OpenWrt. В mtd0 остаётся аварийный «подмигивающего медведя» WebFailsafe.",
+            "Полный переход → постоянный UrsusBoot + OpenWrt. В mtd0 остаётся аварийный «подмигивающий медведь» WebFailsafe.",
             "Full transition → persistent UrsusBoot + OpenWrt. An emergency WebFailsafe remains in mtd0.",
         )
     if number == 4:
