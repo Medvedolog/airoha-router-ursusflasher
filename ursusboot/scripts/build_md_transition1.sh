@@ -36,10 +36,20 @@ rm -rf "$WORK"
 mkdir -p "$WORK/sdk" "$WORK/u-boot" "$OUT"
 tar --zstd -xf "$SDK_BUNDLE" -C "$WORK/sdk"
 tar --zstd -xf "$SOURCE_BUNDLE" -C "$WORK/u-boot"
+TEST61_WEB_SHA=$(sha256sum "$WORK/u-boot/cmd/ursusweb.c" | awk '{print $1}')
 patch -d "$WORK/u-boot" -p1 < "$PATCH_HANDOFF"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_UART_FALLBACK"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_NETDBG"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_STOCKSLOT"
+TRANSITION_WEB_SHA=$(sha256sum "$WORK/u-boot/cmd/ursusweb.c" | awk '{print $1}')
+[ "$TRANSITION_WEB_SHA" = "$TEST61_WEB_SHA" ] || {
+    echo "TRANSITION2-TEST61WEB1: cmd/ursusweb.c diverged from persistent TEST61 source" >&2
+    exit 1
+}
+if grep -Fq 'cmd/ursusweb.c' "$PATCH_HANDOFF"; then
+    echo "TRANSITION2-TEST61WEB1: handoff patch must not modify cmd/ursusweb.c" >&2
+    exit 1
+fi
 
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
 [ -n "$SDK_ROOT" ] || { echo "SDK root not found" >&2; exit 1; }
@@ -191,11 +201,13 @@ printf '%s\n' \
     "STOCKSLOT_COMMAND=ursusstockslot status|master|slave" \
     "STOCKSLOT_FLAG_OFFSET=0x05240000" \
     "STOCKSLOT_FLAGBACK_WRITE=NEVER" \
+    "WEB_SOURCE=PERSISTENT_TEST61_UNMODIFIED" \
+    "WEB_SOURCE_SHA256=${TRANSITION_WEB_SHA}" \
     "ENV_IS_NOWHERE=PASS" \
     "STOCK_INNER_FORMAT=ARM64_LINUX_IMAGE_HANDOFF" \
     "STOCK_KERNEL_LOAD=${STOCK_KERNEL_LOAD}" \
     "TEXT_BASE=${TEXT_BASE}" \
     "SOURCE_DATE_EPOCH=${RELEASE_EPOCH}" > "$OUT/TRANSITION2-BUILD_INFO.txt"
 
-echo "MD_TRANSITION2_NETFIX2_STOCKSLOT1_BUILD=PASS"
+echo "MD_TRANSITION2_NETFIX2_STOCKSLOT1_TEST61WEB1_BUILD=PASS"
 echo "Artifacts: $OUT"
