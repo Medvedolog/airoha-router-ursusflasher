@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import os
+
 import expert_multi as base
 import bootloader_install_menu as bootmenu
 import device_state as ds
 
 
 _original_applicability = base.action_applicability
+_original_transition_profile = base.base._transition_profile
 
 
 def action_applicability(state: ds.DeviceState):
@@ -36,7 +39,6 @@ def action_applicability(state: ds.DeviceState):
 
 
 def _show_transition_action_unconditionally(_state: ds.DeviceState) -> None:
-    """EXPERT menu is not a safety gate; resolve identity after item 4 is chosen."""
     base.base.ui.menu_item(
         4,
         base.tr("Stock Nokia → Vanilla OpenWrt (TRANSITION)", "Stock Nokia → Vanilla OpenWrt (TRANSITION)"),
@@ -50,9 +52,16 @@ def _show_transition_action_unconditionally(_state: ds.DeviceState) -> None:
     )
 
 
+def _transition_profile_after_selection(_menu_state: ds.DeviceState) -> str | None:
+    host = os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
+    fresh_state = ds.probe_device_state(host)
+    return _original_transition_profile(fresh_state)
+
+
 base.action_applicability = action_applicability
 base.run_bootloader_install_or_update = bootmenu.run
 base.base._show_transition_action = _show_transition_action_unconditionally
+base.base._transition_profile = _transition_profile_after_selection
 
 
 def main() -> int:
