@@ -13,6 +13,7 @@ CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
 PATCH_HANDOFF="$ROOT/ursusboot/patches/190-md-transition1-handoff.patch"
 PATCH_UART_FALLBACK="$ROOT/ursusboot/patches/200-transition2-uart-fallback.patch"
 PATCH_NETDBG="$ROOT/ursusboot/patches/210-transition2-netdbg1-netreset.patch"
+PATCH_STOCKSLOT="$ROOT/ursusboot/patches/220-transition2-stockslot-command.patch"
 OUT="$WORK/out"
 RELEASE_EPOCH=1789300800
 VERSION="0.1.0-alpha5-UBIUX1-TRANSITION2"
@@ -20,7 +21,7 @@ STOCK_KERNEL_LOAD=0x80088000
 TEXT_BASE=0x81e00000
 
 for x in tar make gcc perl python3 sha256sum patch; do command -v "$x" >/dev/null; done
-for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH_HANDOFF" "$PATCH_UART_FALLBACK" "$PATCH_NETDBG"; do
+for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH_HANDOFF" "$PATCH_UART_FALLBACK" "$PATCH_NETDBG" "$PATCH_STOCKSLOT"; do
     [ -f "$f" ] || { echo "missing build input: $f" >&2; exit 1; }
 done
 
@@ -38,6 +39,7 @@ tar --zstd -xf "$SOURCE_BUNDLE" -C "$WORK/u-boot"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_HANDOFF"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_UART_FALLBACK"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_NETDBG"
+patch -d "$WORK/u-boot" -p1 < "$PATCH_STOCKSLOT"
 
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
 [ -n "$SDK_ROOT" ] || { echo "SDK root not found" >&2; exit 1; }
@@ -68,6 +70,8 @@ grep -Fq 'URSUS_TRANSITION_WEB_BEGIN' cmd/ursusdispatch.c || { echo 'TRANSITION2
 grep -Fq 'URSUS_TRANSITION_NET_SANITIZE_BEGIN' cmd/ursusdispatch.c || { echo 'TRANSITION2-NETFIX2: startup network sanitize missing' >&2; exit 1; }
 grep -Fq 'run_command("ursusnetreset", 0)' cmd/ursusdispatch.c || { echo 'TRANSITION2-NETFIX2: startup reset command missing' >&2; exit 1; }
 grep -Fq 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' cmd/ursusdispatch.c || { echo 'TRANSITION2: UART fallback marker missing' >&2; exit 1; }
+grep -Fq 'ursusstockslot, 2, 0, do_ursusstockslot' cmd/ursusdispatch.c || { echo 'TRANSITION2-STOCKSLOT1: command missing' >&2; exit 1; }
+grep -Fq 'URSUS_STOCKSLOT_DONE' cmd/ursusdispatch.c || { echo 'TRANSITION2-STOCKSLOT1: readback marker missing' >&2; exit 1; }
 # TEST61 source already carries the OpenWrt AN7581 board U-Boot DT override.
 # Assert it instead of applying a duplicate patch.
 grep -Fq '&gdm1 {' arch/arm/dts/an7581-nokia-xg-040g-md-u-boot.dtsi || { echo 'TRANSITION2: board U-Boot DT does not force gdm1 okay' >&2; exit 1; }
@@ -151,7 +155,7 @@ grep -Fq "#define URSUS_VERSION \"${VERSION}\"" include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_HANDOFF_ONLY 0' include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h
 strings u-boot.bin > "$WORK/u-boot.strings"
-for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT' 'URSUS_TRANSITION_WEB_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_DONE' 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' 'URSUS_NETDBG_RX_RING' 'URSUS_NETDBG_FIRST_RX' 'URSUS_NETRESET_BEGIN build=TRANSITION2-NETFIX2' 'ursusnetreset'; do
+for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT' 'URSUS_TRANSITION_WEB_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_DONE' 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' 'URSUS_NETDBG_RX_RING' 'URSUS_NETDBG_FIRST_RX' 'URSUS_NETRESET_BEGIN build=TRANSITION2-NETFIX2' 'ursusnetreset' 'ursusstockslot' 'URSUS_STOCKSLOT_DONE'; do
     grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "missing transition marker: $marker" >&2; exit 1; }
 done
 
@@ -183,11 +187,15 @@ printf '%s\n' \
     "NETFIX_BUILD=TRANSITION2-NETFIX2" \
     "NETRESET_COMMAND=ursusnetreset" \
     "NETRESET_TIMING=AUTOMATIC_BEFORE_WEBFAILSAFE" \
+    "STOCKSLOT_BUILD=TRANSITION2-STOCKSLOT1" \
+    "STOCKSLOT_COMMAND=ursusstockslot status|master|slave" \
+    "STOCKSLOT_FLAG_OFFSET=0x05240000" \
+    "STOCKSLOT_FLAGBACK_WRITE=NEVER" \
     "ENV_IS_NOWHERE=PASS" \
     "STOCK_INNER_FORMAT=ARM64_LINUX_IMAGE_HANDOFF" \
     "STOCK_KERNEL_LOAD=${STOCK_KERNEL_LOAD}" \
     "TEXT_BASE=${TEXT_BASE}" \
     "SOURCE_DATE_EPOCH=${RELEASE_EPOCH}" > "$OUT/TRANSITION2-BUILD_INFO.txt"
 
-echo "MD_TRANSITION2_NETFIX2_BUILD=PASS"
+echo "MD_TRANSITION2_NETFIX2_STOCKSLOT1_BUILD=PASS"
 echo "Artifacts: $OUT"
