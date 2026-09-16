@@ -58,11 +58,11 @@ def install(pb_module) -> None:
 
     numbers = tuple(int(x) for x in getattr(pb_module, "EXPECTED_NUMBERS", tuple(range(17))))
     total = max(1, len(numbers))
-    active_backup = threading.local()
+    backup_active = threading.Event()
 
     def receive_with_progress(bind_ip, port, output, expected_name, allowed_host, ready, result, *args, **kwargs):
         number = _partition_number(expected_name)
-        enabled = bool(getattr(active_backup, "enabled", False)) and number is not None and number in numbers
+        enabled = backup_active.is_set() and number is not None and number in numbers
         if not enabled:
             return original_receive(bind_ip, port, output, expected_name, allowed_host, ready, result, *args, **kwargs)
 
@@ -101,7 +101,7 @@ def install(pb_module) -> None:
     pb_module.receive_tftp_put = receive_with_progress
 
     def backup_with_progress(access, router_host, destination, *args, **kwargs):
-        active_backup.enabled = True
+        backup_active.set()
         try:
             result = original_backup(access, router_host, destination, *args, **kwargs)
             lang = os.environ.get("NOKIA_LANG", "ru").strip().lower()
@@ -113,7 +113,7 @@ def install(pb_module) -> None:
             )
             return result
         finally:
-            active_backup.enabled = False
+            backup_active.clear()
 
     backup_with_progress._ursus_live_progress = True
     backup_with_progress._ursus_original = original_backup
