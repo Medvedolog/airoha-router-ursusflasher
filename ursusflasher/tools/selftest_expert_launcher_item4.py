@@ -23,8 +23,13 @@ def test_launcher_chain_source() -> None:
 
     assert "expert_airoha.py" in cmd
     assert "expert_airoha.py" in sh
+    assert 'set "NOKIA_LANG="' in cmd
+    assert "unset NOKIA_LANG" in sh
     assert "import expert_multi as base" in airoha
     assert "return base.main()" in airoha
+    assert "_show_transition_action_unconditionally" in airoha
+    assert "_transition_profile_after_selection" in airoha
+    assert "fresh_state = ds.probe_device_state(host)" in airoha
     assert "import stock_ab_transition" in multi
     assert "stock_ab_transition.run_expert(host=host, profile=profile)" in multi
     assert "elif number == 9:" in multi
@@ -34,7 +39,14 @@ def test_launcher_chain_source() -> None:
 def test_shipped_item4_dispatch_behavior() -> None:
     em = launcher.base
     host = "192.0.2.1"
-    state = ds.DeviceState(
+    menu_state = ds.DeviceState(
+        host=host,
+        probe_status=ds.PROBE_PARTIAL,
+        model="UNKNOWN",
+        soc="UNKNOWN",
+        current_system="UNKNOWN",
+    )
+    selected_state = ds.DeviceState(
         host=host,
         probe_status=ds.PROBE_COMPLETE,
         model="Nokia XG-040G-MD",
@@ -45,31 +57,41 @@ def test_shipped_item4_dispatch_behavior() -> None:
         evidence={"board_profile": "md"},
     )
     events: list[tuple] = []
+    rendered_item4: list[dict] = []
     old: list[tuple[object, str, object]] = []
     old_host = os.environ.get("NOKIA_ROUTER_IP")
+    probe_calls = 0
 
     def patch(obj: object, name: str, value: object) -> None:
         old.append((obj, name, getattr(obj, name)))
         setattr(obj, name, value)
 
+    def probe(_host: str):
+        nonlocal probe_calls
+        probe_calls += 1
+        return menu_state if probe_calls == 1 else selected_state
+
+    def menu_item(number, *args, **kwargs):
+        if number == 4:
+            rendered_item4.append(dict(kwargs))
+
     choices = iter(("4", "0"))
     try:
         os.environ["NOKIA_ROUTER_IP"] = host
-        patch(em.ds, "probe_device_state", lambda _host: state)
+        patch(em.ds, "probe_device_state", probe)
         patch(em.base.proven, "start_session_logging", lambda: None)
         patch(em.base.ui, "enable", lambda: None)
         patch(em.base.one_key, "choose_language", lambda: None)
         patch(em.base.ui, "package_version", lambda _root: "test")
         patch(em.base.ui, "banner", lambda *args, **kwargs: None)
         patch(em.base.ui, "section", lambda *args, **kwargs: None)
-        patch(em.base.ui, "menu_item", lambda *args, **kwargs: None)
+        patch(em.base.ui, "menu_item", menu_item)
         patch(em.base.ui, "note", lambda *args, **kwargs: None)
         patch(em.base.ui, "rule", lambda *args, **kwargs: None)
         patch(em.base.ui, "status", lambda *args, **kwargs: None)
         patch(em.base.ui, "prompt", lambda _text: "")
         patch(em.base.network_guidance, "show", lambda: None)
         patch(em, "_show_action", lambda *args, **kwargs: None)
-        patch(em.base, "_show_transition_action", lambda _state: None)
         patch(em.base, "ask_menu", lambda _max: next(choices))
         patch(
             em.stock_ab_transition,
@@ -80,6 +102,8 @@ def test_shipped_item4_dispatch_behavior() -> None:
 
         rc = launcher.main()
         assert rc == 0
+        assert rendered_item4 and rendered_item4[0].get("enabled") is True, rendered_item4
+        assert probe_calls >= 2, probe_calls
         assert events == [("transition", host, "xg040-md")]
     finally:
         if old_host is None:
