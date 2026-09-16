@@ -20,6 +20,7 @@ import one_key_multi
 import runtime_kit
 import stock_ab_transition
 import stock_bootarea_restore
+import stock_slot_uart
 import uart_bootarea_restore
 import ursus_web_client as uw
 import ursusboot_install
@@ -176,6 +177,20 @@ def _show_factory_restore_action(app: dict[int, ds.ActionApplicability]) -> None
     )
 
 
+def _show_stock_slot_uart_action() -> None:
+    base.ui.menu_item(
+        13,
+        tr("Переключить заводской SLOT через UART", "Switch Nokia stock SLOT over UART"),
+        tr(
+            "Без Web/SSH: читает selector flag, меняет только active, делает полный readback и перезагружает.",
+            "No Web/SSH: reads the selector flag, changes active only, performs full readback, then reboots.",
+        ),
+        write_capable=True,
+        enabled=True,
+        reason="",
+    )
+
+
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     family = _family(state)
     if number == 2 and family == "mf" and state.current_system == "RECOVERY":
@@ -274,6 +289,7 @@ def main() -> int:
         _show_action(5, app, *_menu_detail(5, state, app))
         _show_action(6, app, *base._menu_detail(6, state, app))
         _show_factory_restore_action(app)
+        _show_stock_slot_uart_action()
 
         base.ui.section(tr("Резервные копии", "Backups"), style="ok")
         for number in (7, 8):
@@ -290,7 +306,7 @@ def main() -> int:
         base.ui.note(tr("! — операция может выполнять запись во flash-память (NAND)", "! — operation may modify flash/NAND"))
         base.ui.rule(style="amber")
 
-        c = base.ask_menu(12)
+        c = base.ask_menu(13)
         if c == "0":
             return 0
         number = int(c)
@@ -305,6 +321,10 @@ def main() -> int:
             base.ui.section(tr("Перед первым запуском на stock Nokia", "Before first run on Nokia stock"), style="amber2")
             base.ui.note(tr("На включённом роутере удерживайте Reset не менее 30 секунд, отпустите и дождитесь полной загрузки stock Web UI.", "With the router powered on, hold Reset for at least 30 seconds, release it, and wait for the stock Web UI to boot fully."))
             base.run_action(lambda: stock_ab_transition.run_expert(host=host, profile=profile), write_may_happen=True)
+            continue
+
+        if number == 13:
+            base.run_action(stock_slot_uart.run, write_may_happen=True)
             continue
 
         selected = app[number]
