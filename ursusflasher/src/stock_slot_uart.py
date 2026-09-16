@@ -56,26 +56,52 @@ def _console_write(data: bytes, log) -> None:
 
 
 def _acquire_uboot_prompt(serial_port: proven.RecoverySerial, log, timeout: float = 120.0) -> None:
-    """Acquire an interactive stock/Ursus/OpenWrt U-Boot prompt without pressing Enter.
+    """Acquire an interactive stock/Ursus/OpenWrt U-Boot prompt.
 
-    Ctrl-C/ESC is safe at a prompt and avoids the Airoha boot-menu trap where an
-    Enter key can select the highlighted boot item. If Linux is already running,
-    the operator only needs to reset/power-cycle the router; the flasher then
-    catches U-Boot automatically.
+    An already stopped U-Boot/tcboot shell is often silent until it receives CR,
+    so first do a short passive read: if no boot-menu text is visible, send one
+    empty line (Enter) to make the prompt appear. If a boot menu/autoboot banner
+    is visible, never press Enter because it may select the highlighted item;
+    use the proven Ctrl-C/ESC break sequence instead.
     """
     print(tr(
-        "[READY] Ловлю U-Boot по UART. Если уже загружен Linux, нажмите RESET/перезапустите роутер; Enter в UART не нужен.",
-        "[READY] Waiting for U-Boot over UART. If Linux is already running, reset/power-cycle the router; no UART Enter is needed.",
+        "[READY] Ловлю U-Boot по UART. Если shell уже остановлен и молчит, UrsusFlasher сам пошлёт Enter; если идёт boot menu — перехватит его без выбора пункта.",
+        "[READY] Waiting for U-Boot over UART. If an already-stopped shell is silent, UrsusFlasher will send Enter itself; if a boot menu is active it will intercept it without selecting an item.",
     ))
     try:
         serial_port.reset_input()
     except Exception:
         pass
-    proven._uboot_send_break(serial_port, menu_visible=True)
+
+    # First inspect the line briefly. A stopped shell may have printed its prompt
+    # before we opened COM and therefore gives us no bytes until CR is sent.
+    initial = bytearray()
+    passive_deadline = time.time() + 0.45
+    while time.time() < passive_deadline:
+        data = serial_port.read(4096, 0.10)
+        if data:
+            _console_write(data, log)
+            initial.extend(data)
+    low_initial = bytes(initial).lower()
+    menu_visible = (
+        b"u-boot boot menu" in low_initial
+        or b"press up/down" in low_initial
+        or b"hit any key to stop autoboot" in low_initial
+    )
+    if proven._uboot_prompt_present(bytes(initial)):
+        print(tr("\n[OK] U-Boot prompt уже виден.", "\n[OK] U-Boot prompt is already visible."))
+        return
+    if not menu_visible:
+        print(tr("[UART] Посылаю Enter, чтобы проявить молчащий U-Boot prompt.", "[UART] Sending Enter to reveal a silent U-Boot prompt."))
+        proven._uboot_send_line(serial_port, "")
+    else:
+        proven._uboot_send_break(serial_port, menu_visible=True)
+
     deadline = time.time() + timeout
-    tail = bytearray()
-    uboot_seen = False
+    tail = bytearray(initial)
+    uboot_seen = bool(menu_visible or b"u-boot" in low_initial)
     last_break = 0.0
+    last_wake = time.time()
     while time.time() < deadline:
         data = serial_port.read(4096, 0.20)
         if data:
@@ -98,10 +124,21 @@ def _acquire_uboot_prompt(serial_port: proven.RecoverySerial, log, timeout: floa
             if (b"u-boot" in low or b"hit any key to stop autoboot" in low or
                     b"u-boot boot menu" in low or b"press up/down" in low):
                 uboot_seen = True
+                menu_visible = (
+                    b"u-boot boot menu" in low
+                    or b"press up/down" in low
+                    or b"hit any key to stop autoboot" in low
+                )
         now = time.time()
-        if uboot_seen and now - last_break >= 0.20:
+        if uboot_seen and menu_visible and now - last_break >= 0.20:
             proven._uboot_send_break(serial_port, menu_visible=True)
             last_break = now
+        elif not menu_visible and now - last_wake >= 2.0:
+            # A stopped shell can remain silent after opening COM. Re-issuing an
+            # empty line is non-destructive at the command prompt and makes it
+            # print the prompt again.
+            proven._uboot_send_line(serial_port, "")
+            last_wake = now
     raise proven.Error(tr(
         "U-Boot prompt не получен. Проверьте UART и повторите с перезагрузкой роутера.",
         "U-Boot prompt was not acquired. Check UART and retry while resetting the router.",
@@ -179,10 +216,8 @@ def _switch(serial_port: proven.RecoverySerial, log, target_active: int) -> None
         ))
         return
 
-    # Keep an untouched RAM copy, then build the exact desired block in RAM_EXPECTED.
     proven.uboot_command(serial_port, log, f"cp.b 0x{RAM_EXPECTED:08x} 0x{RAM_ORIGINAL:08x} 0x{FLAG_SIZE:08x}", timeout=20)
     proven.uboot_command(serial_port, log, f"mw.l 0x{RAM_EXPECTED:08x} 0x{target_active:08x} 1", timeout=15)
-    # Prove that the tail (everything except active) is still byte-identical before NAND write.
     proven.uboot_command(
         serial_port, log,
         f"cmp.b 0x{RAM_EXPECTED + 4:08x} 0x{RAM_ORIGINAL + 4:08x} 0x{FLAG_SIZE - 4:08x}",
