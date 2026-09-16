@@ -10,7 +10,8 @@ COMMON_CONFIG="$ROOT/ursusboot/configs/ursusboot-common.cfg"
 BOARD_CONFIG="$ROOT/ursusboot/configs/ursusboot-board-md.cfg"
 TRANSITION_CONFIG="$ROOT/ursusboot/configs/ursusboot-transition-handoff.cfg"
 CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
-PATCH="$ROOT/ursusboot/patches/190-md-transition1-handoff.patch"
+PATCH_HANDOFF="$ROOT/ursusboot/patches/190-md-transition1-handoff.patch"
+PATCH_UART_FALLBACK="$ROOT/ursusboot/patches/200-transition2-uart-fallback.patch"
 OUT="$WORK/out"
 RELEASE_EPOCH=1789300800
 VERSION="0.1.0-alpha5-UBIUX1-TRANSITION2"
@@ -18,7 +19,7 @@ STOCK_KERNEL_LOAD=0x80088000
 TEXT_BASE=0x81e00000
 
 for x in tar make gcc perl python3 sha256sum patch; do command -v "$x" >/dev/null; done
-for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH"; do
+for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH_HANDOFF" "$PATCH_UART_FALLBACK"; do
     [ -f "$f" ] || { echo "missing build input: $f" >&2; exit 1; }
 done
 
@@ -33,7 +34,8 @@ rm -rf "$WORK"
 mkdir -p "$WORK/sdk" "$WORK/u-boot" "$OUT"
 tar --zstd -xf "$SDK_BUNDLE" -C "$WORK/sdk"
 tar --zstd -xf "$SOURCE_BUNDLE" -C "$WORK/u-boot"
-patch -d "$WORK/u-boot" -p1 < "$PATCH"
+patch -d "$WORK/u-boot" -p1 < "$PATCH_HANDOFF"
+patch -d "$WORK/u-boot" -p1 < "$PATCH_UART_FALLBACK"
 
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
 [ -n "$SDK_ROOT" ] || { echo "SDK root not found" >&2; exit 1; }
@@ -61,6 +63,8 @@ grep -q '^CONFIG_MTD=y$' .config || { echo 'TRANSITION2: MTD missing' >&2; exit 
 grep -q '^CONFIG_TEXT_BASE=0x81e00000$' .config || { echo 'TRANSITION2: unexpected TEXT_BASE' >&2; exit 1; }
 grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h || { echo 'TRANSITION2: Web-only dispatcher marker missing' >&2; exit 1; }
 grep -Fq 'URSUS_TRANSITION_WEB_BEGIN' cmd/ursusdispatch.c || { echo 'TRANSITION2: dispatcher Web entry missing' >&2; exit 1; }
+grep -Fq 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' cmd/ursusdispatch.c || { echo 'TRANSITION2: UART fallback marker missing' >&2; exit 1; }
+grep -Fq 'URSUS_FATAL_TRANSPORTS_DECLARED=tftp:UNSUPPORTED,usb:UNSUPPORTED probe=NONE' cmd/ursusdispatch.c || { echo 'TRANSITION2: honest fatal transport banner missing' >&2; exit 1; }
 
 make -j"${JOBS:-$(nproc)}"
 
@@ -137,7 +141,7 @@ grep -Fq "#define URSUS_VERSION \"${VERSION}\"" include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_HANDOFF_ONLY 0' include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h
 strings u-boot.bin > "$WORK/u-boot.strings"
-for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT' 'URSUS_TRANSITION_WEB_BEGIN'; do
+for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT' 'URSUS_TRANSITION_WEB_BEGIN' 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' 'URSUS_FATAL_TRANSPORTS_DECLARED=tftp:UNSUPPORTED,usb:UNSUPPORTED probe=NONE'; do
     grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "missing transition marker: $marker" >&2; exit 1; }
 done
 
@@ -163,6 +167,7 @@ printf '%s\n' \
     "FINAL_TARGET=OFFICIAL_OPENWRT" \
     "HANDOFF_ONLY=0" \
     "TRANSITION_ENTRY=ursusdispatch->ursusweb" \
+    "UART_FALLBACK=READY_UNRESTRICTED" \
     "ENV_IS_NOWHERE=PASS" \
     "STOCK_INNER_FORMAT=ARM64_LINUX_IMAGE_HANDOFF" \
     "STOCK_KERNEL_LOAD=${STOCK_KERNEL_LOAD}" \
