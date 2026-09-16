@@ -7,6 +7,7 @@ import expert_multi as base
 import bootloader_install_menu as bootmenu
 import backup_progress
 import transition_trace
+import transition_fastpath
 import device_state as ds
 
 
@@ -83,7 +84,7 @@ def _transition_profile_after_selection(_menu_state: ds.DeviceState) -> str | No
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     if number == 1:
         return (
-            "Полный переход → постоянный UrsusBoot + OpenWrt. В mtd0 остаётся аварийный «подмигивающий медведь» WebFailsafe.",
+            "Полный переход → постоянный UrsusBoot + OpenWrt. В mtd0 остаётся аварийный «подмигивающего медведь» WebFailsafe.",
             "Full transition → persistent UrsusBoot + OpenWrt. An emergency WebFailsafe remains in mtd0.",
         )
     if number == 4:
@@ -101,6 +102,7 @@ base.base._transition_profile = _transition_profile_after_selection
 base.base._menu_detail = _menu_detail
 backup_progress.install(base.base.proven)
 transition_trace.install(base.stock_ab_transition)
+transition_fastpath.install(base.stock_ab_transition)
 
 
 def main() -> int:
