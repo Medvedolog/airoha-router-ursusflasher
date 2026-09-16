@@ -41,19 +41,23 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --name ursusflasher-md-ab-transition2-netdbg1-public-test-870cd49753c0b3e15508416b025f517a0a231014 \
             --dir baseline
-          test -f baseline/START_EXPERT.cmd
-          test -d baseline/ursusflasher/src
+          START="$(find baseline -type f -name START_EXPERT.cmd -print -quit)"
+          test -n "$START"
+          ROOT="$(dirname "$START")"
+          test -d "$ROOT/ursusflasher/src"
+          echo "ROLLUP_ROOT=$ROOT" >> "$GITHUB_ENV"
+          echo "BASELINE_ROLLUP_ROOT=$ROOT"
 
       - name: Overlay current operator sources only
         run: |
           set -euxo pipefail
-          rsync -a --delete current/ursusflasher/src/ baseline/ursusflasher/src/
+          rsync -a --delete current/ursusflasher/src/ "$ROLLUP_ROOT/ursusflasher/src/"
           for f in current/START_*.cmd current/START_*.sh; do
             test -f "$f" || continue
-            cp "$f" baseline/
+            cp "$f" "$ROLLUP_ROOT/"
           done
-          printf '%s\n' "$GITHUB_SHA" > baseline/URSUSFLASHER_COMMIT.txt
-          cat > baseline/OPERATOR_OVERLAY_PROVENANCE.txt <<EOF
+          printf '%s\n' "$GITHUB_SHA" > "$ROLLUP_ROOT/URSUSFLASHER_COMMIT.txt"
+          cat > "$ROLLUP_ROOT/OPERATOR_OVERLAY_PROVENANCE.txt" <<EOF
           BASELINE_RUN=35112133778
           BASELINE_COMMIT=870cd49753c0b3e15508416b025f517a0a231014
           BASELINE_ARTIFACT=ursusflasher-md-ab-transition2-netdbg1-public-test-870cd49753c0b3e15508416b025f517a0a231014
@@ -66,27 +70,27 @@ jobs:
       - name: Verify UART slot operator overlay
         run: |
           set -euxo pipefail
-          test -f baseline/ursusflasher/src/stock_slot_uart.py
-          test -f baseline/ursusflasher/src/uart_prompt_fix.py
-          grep -F 'Переключить заводской SLOT через UART' baseline/ursusflasher/src/expert_multi.py
-          grep -F 'URSUS_STOCKSLOT_UART_DONE' baseline/ursusflasher/src/stock_slot_uart.py
-          grep -F 'uart_prompt_fix.install' baseline/ursusflasher/src/expert_airoha.py
-          python3 -m compileall -q baseline/ursusflasher/src
-          find baseline -type d -name __pycache__ -prune -exec rm -rf {} +
-          find baseline -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+          test -f "$ROLLUP_ROOT/ursusflasher/src/stock_slot_uart.py"
+          test -f "$ROLLUP_ROOT/ursusflasher/src/uart_prompt_fix.py"
+          grep -F 'Переключить заводской SLOT через UART' "$ROLLUP_ROOT/ursusflasher/src/expert_multi.py"
+          grep -F 'URSUS_STOCKSLOT_UART_DONE' "$ROLLUP_ROOT/ursusflasher/src/stock_slot_uart.py"
+          grep -F 'uart_prompt_fix.install' "$ROLLUP_ROOT/ursusflasher/src/expert_airoha.py"
+          python3 -m compileall -q "$ROLLUP_ROOT/ursusflasher/src"
+          find "$ROLLUP_ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
+          find "$ROLLUP_ROOT" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
       - name: Regenerate package manifest
         run: |
           set -euxo pipefail
-          rm -f baseline/SHA256SUMS
-          (cd baseline && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
-          (cd baseline && sha256sum -c SHA256SUMS >/dev/null)
-          du -sh baseline
+          rm -f "$ROLLUP_ROOT/SHA256SUMS"
+          (cd "$ROLLUP_ROOT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          (cd "$ROLLUP_ROOT" && sha256sum -c SHA256SUMS >/dev/null)
+          du -sh "$ROLLUP_ROOT"
 
       - name: Upload operator rollup
         uses: actions/upload-artifact@v4
         with:
           name: UrsusFlasher-TRANSITION2-UART-STOCKSLOT-${{ github.sha }}
-          path: baseline
+          path: ${{ env.ROLLUP_ROOT }}
           if-no-files-found: error
           retention-days: 14
