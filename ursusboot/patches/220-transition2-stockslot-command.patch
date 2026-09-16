@@ -1,0 +1,96 @@
+--- a/cmd/ursusdispatch.c
++++ b/cmd/ursusdispatch.c
+@@ -136,6 +136,78 @@
+     return ret;
+ }
+ 
++#if URSUS_TRANSITION_WEB_ONLY
++#define URSUS_STOCK_FLAG_OFFSET 0x05240000UL
++#define URSUS_STOCK_FLAG_SIZE   0x00040000UL
++#define URSUS_STOCK_FLAG_BUF    0x90000000UL
++
++static int do_ursusstockslot(struct cmd_tbl *cmdtp, int flag, int argc,
++                             char *const argv[])
++{
++    volatile u32 *state = (volatile u32 *)URSUS_STOCK_FLAG_BUF;
++    u32 curimg, startok, count, reserved;
++    u32 target;
++    int ret;
++
++    if (argc != 2 || (strcmp(argv[1], "master") && strcmp(argv[1], "slave") &&
++                      strcmp(argv[1], "status")))
++        return CMD_RET_USAGE;
++
++    ret = run_commandf("mtd read spi-nand0 0x%08lx 0x%08lx 0x%08lx",
++                       URSUS_STOCK_FLAG_BUF, URSUS_STOCK_FLAG_OFFSET,
++                       URSUS_STOCK_FLAG_SIZE);
++    if (ret) {
++        printf("URSUS_STOCKSLOT_FAIL stage=READ_FLAG ret=%d\n", ret);
++        return CMD_RET_FAILURE;
++    }
++
++    printf("URSUS_STOCKSLOT_STATE active=%u curimg=%u startok=%u count=%u reserved=0x%08x\n",
++           state[0], state[1], state[2], state[3], state[4]);
++
++    if (!strcmp(argv[1], "status"))
++        return CMD_RET_SUCCESS;
++
++    target = !strcmp(argv[1], "master") ? 0 : 1;
++    if (state[0] == target) {
++        printf("URSUS_STOCKSLOT_ALREADY target=%s active=%u action=NONE\n",
++               argv[1], target);
++        return CMD_RET_SUCCESS;
++    }
++
++    curimg = state[1];
++    startok = state[2];
++    count = state[3];
++    reserved = state[4];
++    printf("URSUS_STOCKSLOT_PREWRITE target=%s active=%u->%u preserve=curimg,startok,count,reserved\n",
++           argv[1], state[0], target);
++
++    ret = run_commandf("mw.l 0x%08lx 0x%08x 1", URSUS_STOCK_FLAG_BUF, target);
++    if (ret)
++        goto fail_modify;
++    ret = run_commandf("mtd erase spi-nand0 0x%08lx 0x%08lx",
++                       URSUS_STOCK_FLAG_OFFSET, URSUS_STOCK_FLAG_SIZE);
++    if (ret) {
++        printf("URSUS_STOCKSLOT_FAIL stage=ERASE_FLAG ret=%d\n", ret);
++        return CMD_RET_FAILURE;
++    }
++    ret = run_commandf("mtd write spi-nand0 0x%08lx 0x%08lx 0x%08lx",
++                       URSUS_STOCK_FLAG_BUF, URSUS_STOCK_FLAG_OFFSET,
++                       URSUS_STOCK_FLAG_SIZE);
++    if (ret) {
++        printf("URSUS_STOCKSLOT_FAIL stage=WRITE_FLAG ret=%d\n", ret);
++        return CMD_RET_FAILURE;
++    }
++    ret = run_commandf("mtd read spi-nand0 0x%08lx 0x%08lx 0x%08lx",
++                       URSUS_STOCK_FLAG_BUF, URSUS_STOCK_FLAG_OFFSET,
++                       URSUS_STOCK_FLAG_SIZE);
++    if (ret || state[0] != target || state[1] != curimg || state[2] != startok ||
++        state[3] != count || state[4] != reserved) {
++        printf("URSUS_STOCKSLOT_FAIL stage=READBACK ret=%d active=%u curimg=%u startok=%u count=%u reserved=0x%08x\n",
++               ret, state[0], state[1], state[2], state[3], state[4]);
++        return CMD_RET_FAILURE;
++    }
++
++    printf("URSUS_STOCKSLOT_DONE target=%s active=%u readback=PASS next=RESET\n",
++           argv[1], target);
++    return CMD_RET_SUCCESS;
++
++fail_modify:
++    printf("URSUS_STOCKSLOT_FAIL stage=MODIFY_BUFFER ret=%d\n", ret);
++    return CMD_RET_FAILURE;
++}
++
++U_BOOT_CMD(
++    ursusstockslot, 2, 0, do_ursusstockslot,
++    "show or switch Nokia stock A/B active slot",
++    "status | master | slave"
++);
++#endif
++
+ static int do_ursusdispatch(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
+ {
+     int ret;
