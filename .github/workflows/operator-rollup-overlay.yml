@@ -31,27 +31,30 @@ jobs:
           path: current
           fetch-depth: 1
 
-      - name: Download last green TRANSITION2 operator kit
+      - name: Download and unpack last green TRANSITION2 operator kit
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euxo pipefail
-          mkdir -p baseline
+          mkdir -p baseline unpacked
           gh run download 35112133778 \
             --repo "$GITHUB_REPOSITORY" \
             --name ursusflasher-md-ab-transition2-netdbg1-public-test-870cd49753c0b3e15508416b025f517a0a231014 \
             --dir baseline
-          START="$(find baseline -type f -name START_EXPERT.cmd -print -quit)"
+          INNER="$(find baseline -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$INNER" && test -s "$INNER"
+          unzip -q "$INNER" -d unpacked
+          START="$(find unpacked -type f -name START_EXPERT.cmd -print -quit)"
           test -n "$START"
           ROOT="$(dirname "$START")"
-          test -d "$ROOT/ursusflasher/src"
+          test -d "$ROOT/data"
           echo "ROLLUP_ROOT=$ROOT" >> "$GITHUB_ENV"
           echo "BASELINE_ROLLUP_ROOT=$ROOT"
 
       - name: Overlay current operator sources only
         run: |
           set -euxo pipefail
-          rsync -a --delete current/ursusflasher/src/ "$ROLLUP_ROOT/ursusflasher/src/"
+          find current/ursusflasher/src -maxdepth 1 -type f -name '*.py' -exec cp {} "$ROLLUP_ROOT/data/" \;
           for f in current/START_*.cmd current/START_*.sh; do
             test -f "$f" || continue
             cp "$f" "$ROLLUP_ROOT/"
@@ -62,7 +65,7 @@ jobs:
           BASELINE_COMMIT=870cd49753c0b3e15508416b025f517a0a231014
           BASELINE_ARTIFACT=ursusflasher-md-ab-transition2-netdbg1-public-test-870cd49753c0b3e15508416b025f517a0a231014
           OPERATOR_SOURCE_COMMIT=${GITHUB_SHA}
-          OVERLAY_SCOPE=ursusflasher/src,START_*.cmd,START_*.sh
+          OVERLAY_SCOPE=ursusflasher/src/*.py,START_*.cmd,START_*.sh
           BINARY_PAYLOADS=UNCHANGED_FROM_BASELINE
           HARDWARE_STATUS=HW_PENDING
           EOF
@@ -70,12 +73,12 @@ jobs:
       - name: Verify UART slot operator overlay
         run: |
           set -euxo pipefail
-          test -f "$ROLLUP_ROOT/ursusflasher/src/stock_slot_uart.py"
-          test -f "$ROLLUP_ROOT/ursusflasher/src/uart_prompt_fix.py"
-          grep -F 'Переключить заводской SLOT через UART' "$ROLLUP_ROOT/ursusflasher/src/expert_multi.py"
-          grep -F 'URSUS_STOCKSLOT_UART_DONE' "$ROLLUP_ROOT/ursusflasher/src/stock_slot_uart.py"
-          grep -F 'uart_prompt_fix.install' "$ROLLUP_ROOT/ursusflasher/src/expert_airoha.py"
-          python3 -m compileall -q "$ROLLUP_ROOT/ursusflasher/src"
+          test -f "$ROLLUP_ROOT/data/stock_slot_uart.py"
+          test -f "$ROLLUP_ROOT/data/uart_prompt_fix.py"
+          grep -F 'Переключить заводской SLOT через UART' "$ROLLUP_ROOT/data/expert_multi.py"
+          grep -F 'URSUS_STOCKSLOT_UART_DONE' "$ROLLUP_ROOT/data/stock_slot_uart.py"
+          grep -F 'uart_prompt_fix.install' "$ROLLUP_ROOT/data/expert_airoha.py"
+          python3 -m compileall -q "$ROLLUP_ROOT/data"
           find "$ROLLUP_ROOT" -type d -name __pycache__ -prune -exec rm -rf {} +
           find "$ROLLUP_ROOT" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
