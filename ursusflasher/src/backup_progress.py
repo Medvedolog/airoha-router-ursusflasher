@@ -2,104 +2,108 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
-from pathlib import Path
 
 
-def _human_bytes(value: int) -> str:
-    value = max(0, int(value))
+def _human_bytes(value: float | int) -> str:
+    value = max(0.0, float(value))
     if value >= 1024 * 1024:
         return f"{value / 1048576:.1f} MiB"
     if value >= 1024:
         return f"{value / 1024:.1f} KiB"
-    return f"{value} B"
+    return f"{int(value)} B"
 
 
-def _snapshot(destination: Path, numbers: tuple[int, ...]) -> tuple[int | None, int, int]:
-    """Return active MTD, active compressed bytes and completed-file count.
+def _partition_number(name: str) -> int | None:
+    match = re.match(r"^mtd(\d+)_.*\.bin\.gz$", str(name))
+    return int(match.group(1)) if match else None
 
-    A TFTP receiver writes the .bin.gz file while the transfer is in progress,
-    so the newest/highest currently changing file is a useful UI signal.  The
-    byte count is deliberately labelled as gzip/compressed bytes: the final
-    compression ratio is unknowable until the stream ends, so it must not be
-    presented as a fake per-partition percentage.
-    """
-    found: list[tuple[int, Path]] = []
-    for number in numbers:
-        matches = sorted(destination.glob(f"mtd{number}_*.bin.gz"))
-        if matches:
-            found.append((number, matches[-1]))
-    if not found:
-        return None, 0, 0
-    active_number, active_path = found[-1]
+
+def _progress_line(number: int, total: int, numbers: tuple[int, ...], size: int, rate: float, elapsed: int) -> str:
     try:
-        size = active_path.stat().st_size
-    except OSError:
-        size = 0
-    # The active file is not counted complete until the backend advances to the
-    # next partition (or returns).  This keeps the stage percentage honest.
-    completed = max(0, len(found) - 1)
-    return active_number, size, completed
+        stage_index = numbers.index(number) + 1
+    except ValueError:
+        stage_index = min(total, number + 1)
+    completed = max(0, stage_index - 1)
+    overall = int(completed * 100 / max(1, total))
+    lang = os.environ.get("NOKIA_LANG", "ru").strip().lower()
+    if lang == "en":
+        return (
+            f"[PROGRESS] {stage_index}/{total} · completed {overall}% of partitions · "
+            f"mtd{number}: {_human_bytes(size)} gzip · {_human_bytes(rate)}/s · {elapsed}s"
+        )
+    return (
+        f"[ПРОГРЕСС] {stage_index}/{total} · готово {overall}% разделов · "
+        f"mtd{number}: {_human_bytes(size)} gzip · {_human_bytes(rate)}/с · {elapsed} с"
+    )
 
 
 def install(pb_module) -> None:
-    """Decorate proven_backend.backup_tftp with UI-only live progress.
+    """Add UI-only live progress to full stock TFTP backups.
 
-    Transport, verification and error semantics remain entirely inside the
-    proven backend.  This wrapper only observes local output-file growth.
+    The authoritative progress source is TftpResult.bytes_transferred from the
+    currently active PUT, not the destination directory. Some receiver paths do
+    not publish the final .bin.gz until transfer completion; observing files can
+    therefore lag one partition and report a bogus initial rate followed by 0 B/s.
+
+    Transport, verification, retry and error semantics stay inside proven_backend.
+    This decorator only observes the result object passed to receive_tftp_put().
     """
-    original = pb_module.backup_tftp
-    if getattr(original, "_ursus_live_progress", False):
+    original_backup = pb_module.backup_tftp
+    original_receive = pb_module.receive_tftp_put
+    if getattr(original_backup, "_ursus_live_progress", False):
         return
 
     numbers = tuple(int(x) for x in getattr(pb_module, "EXPECTED_NUMBERS", tuple(range(17))))
     total = max(1, len(numbers))
+    active_backup = threading.local()
 
-    def wrapped(access, router_host, destination, *args, **kwargs):
-        destination = Path(destination)
+    def receive_with_progress(bind_ip, port, output, expected_name, allowed_host, ready, result, *args, **kwargs):
+        number = _partition_number(expected_name)
+        enabled = bool(getattr(active_backup, "enabled", False)) and number is not None and number in numbers
+        if not enabled:
+            return original_receive(bind_ip, port, output, expected_name, allowed_host, ready, result, *args, **kwargs)
+
         stop = threading.Event()
         started = time.monotonic()
 
         def monitor() -> None:
-            last_number: int | None = None
-            last_size = 0
+            last_bytes = int(getattr(result, "bytes_transferred", 0) or 0)
             last_time = started
-            # Give the backend a moment to create the first receiver file.
             while not stop.wait(2.0):
-                number, size, completed = _snapshot(destination, numbers)
-                if number is None:
-                    continue
                 now = time.monotonic()
-                if number != last_number:
-                    last_number = number
-                    last_size = 0
-                    last_time = now
+                current = int(getattr(result, "bytes_transferred", 0) or 0)
                 dt = max(0.001, now - last_time)
-                delta = max(0, size - last_size)
-                rate = delta / dt
-                stage_index = numbers.index(number) + 1 if number in numbers else min(total, completed + 1)
-                overall = int(completed * 100 / total)
-                elapsed = int(now - started)
-                lang = os.environ.get("NOKIA_LANG", "ru").strip().lower()
-                if lang == "en":
-                    text = (
-                        f"[PROGRESS] {stage_index}/{total} · completed {overall}% of partitions · "
-                        f"mtd{number}: {_human_bytes(size)} gzip · {_human_bytes(rate)}/s · {elapsed}s"
+                delta = max(0, current - last_bytes)
+                # Print only while the current transfer has actually advanced.
+                # The backend already emits its own WAIT/READY messages, so a
+                # repeated 0 B/s heartbeat adds noise and looks like a stall.
+                if delta > 0:
+                    print(
+                        _progress_line(number, total, numbers, current, delta / dt, int(now - started)),
+                        flush=True,
                     )
-                else:
-                    text = (
-                        f"[ПРОГРЕСС] {stage_index}/{total} · готово {overall}% разделов · "
-                        f"mtd{number}: {_human_bytes(size)} gzip · {_human_bytes(rate)}/с · {elapsed} с"
-                    )
-                print(text, flush=True)
-                last_size = size
+                last_bytes = current
                 last_time = now
 
-        watcher = threading.Thread(target=monitor, name="ursus-backup-progress", daemon=True)
+        watcher = threading.Thread(target=monitor, name=f"ursus-tftp-progress-mtd{number}", daemon=True)
         watcher.start()
         try:
-            result = original(access, router_host, destination, *args, **kwargs)
+            return original_receive(bind_ip, port, output, expected_name, allowed_host, ready, result, *args, **kwargs)
+        finally:
+            stop.set()
+            watcher.join(timeout=3)
+
+    receive_with_progress._ursus_live_progress = True
+    receive_with_progress._ursus_original = original_receive
+    pb_module.receive_tftp_put = receive_with_progress
+
+    def backup_with_progress(access, router_host, destination, *args, **kwargs):
+        active_backup.enabled = True
+        try:
+            result = original_backup(access, router_host, destination, *args, **kwargs)
             lang = os.environ.get("NOKIA_LANG", "ru").strip().lower()
             print(
                 f"[PROGRESS] {total}/{total} · completed 100% of partitions"
@@ -109,9 +113,8 @@ def install(pb_module) -> None:
             )
             return result
         finally:
-            stop.set()
-            watcher.join(timeout=3)
+            active_backup.enabled = False
 
-    wrapped._ursus_live_progress = True
-    wrapped._ursus_original = original
-    pb_module.backup_tftp = wrapped
+    backup_with_progress._ursus_live_progress = True
+    backup_with_progress._ursus_original = original_backup
+    pb_module.backup_tftp = backup_with_progress
