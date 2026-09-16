@@ -35,8 +35,24 @@ def action_applicability(state: ds.DeviceState):
     return forced
 
 
+def _show_transition_action_unconditionally(_state: ds.DeviceState) -> None:
+    """EXPERT menu is not a safety gate; resolve identity after item 4 is chosen."""
+    base.base.ui.menu_item(
+        4,
+        base.tr("Stock Nokia → Vanilla OpenWrt (TRANSITION)", "Stock Nokia → Vanilla OpenWrt (TRANSITION)"),
+        base.tr(
+            "полный all-MTD backup → stock-compatible SLOT2 → TRANSITION в RAM; профиль проверяется после выбора",
+            "full all-MTD backup → stock-compatible SLOT2 → TRANSITION in RAM; profile is checked after selection",
+        ),
+        write_capable=True,
+        enabled=True,
+        reason="",
+    )
+
+
 base.action_applicability = action_applicability
 base.run_bootloader_install_or_update = bootmenu.run
+base.base._show_transition_action = _show_transition_action_unconditionally
 
 
 def main() -> int:
