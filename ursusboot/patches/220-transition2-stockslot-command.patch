@@ -1,6 +1,6 @@
 --- a/cmd/ursusdispatch.c
 +++ b/cmd/ursusdispatch.c
-@@ -136,6 +136,78 @@
+@@ -136,6 +136,93 @@
      return ret;
  }
  
