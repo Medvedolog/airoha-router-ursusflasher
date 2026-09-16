@@ -67,6 +67,9 @@ backup_progress.install(base.base.proven)
 
 
 def main() -> int:
+    # EXPERT is an interactive operator UI: always ask the language on entry.
+    # NOKIA_LANG is set again by choose_language() for the selected session.
+    os.environ.pop("NOKIA_LANG", None)
     return base.main()
 
 
