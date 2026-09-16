@@ -1,0 +1,226 @@
+--- a/drivers/net/airoha_eth.c
++++ b/drivers/net/airoha_eth.c
+@@ -8,6 +8,7 @@
+  */
+ 
++#include <command.h>
+ #include <dm.h>
+ #include <dm/device-internal.h>
+ #include <dm/devres.h>
+@@ -491,6 +492,7 @@ static int airoha_qdma_init_rx_queue(struct airoha_queue *q,
+ {
+ 	int qid = q - &qdma->q_rx[0];
+ 	unsigned long dma_addr;
++	u32 ring_base;
+ 
+ 	q->ndesc = ndesc;
+ 	q->head = 0;
+@@ -503,6 +505,15 @@ static int airoha_qdma_init_rx_queue(struct airoha_queue *q,
+ 	dma_map_single(q->desc, q->ndesc * sizeof(*q->desc), DMA_TO_DEVICE);
+ 
+ 	airoha_qdma_wr(qdma, REG_RX_RING_BASE(qid), dma_addr);
++	ring_base = airoha_qdma_rr(qdma, REG_RX_RING_BASE(qid));
++	printf("URSUS_NETDBG_RX_RING qid=%d expected=0x%08lx readback=0x%08x verdict=%s\n",
++	       qid, dma_addr, ring_base,
++	       ring_base == 0xdeadbeef ? "FEMEM_INACCESSIBLE" :
++	       ring_base == (u32)dma_addr ? "OK" : "WRITE_NOT_LANDING");
++	if (ring_base == 0xdeadbeef)
++		printf("URSUS_NETDBG_FEMEM verdict=INACCESSIBLE source=RX_RING_READBACK\n");
++	else if (ring_base != (u32)dma_addr)
++		printf("URSUS_NETDBG_QDMA verdict=WRITE_NOT_LANDING register=RX_RING_BASE\n");
+ 	airoha_qdma_rmw(qdma, REG_RX_RING_SIZE(qid),
+ 			RX_RING_SIZE_MASK,
+ 			FIELD_PREP(RX_RING_SIZE_MASK, ndesc));
+@@ -844,27 +855,43 @@ static int airoha_hw_init(struct udevice *dev,
+ {
+ 	int ret, i;
+ 
++	printf("URSUS_NETDBG_RESET_BEGIN\n");
++
+ 	/* disable xsi */
+ 	ret = reset_assert_bulk(&eth->xsi_rsts);
++	printf("URSUS_NETDBG_RESET_XSI_ASSERT ret=%d\n", ret);
+ 	if (ret)
+ 		return ret;
+ 
+ 	ret = reset_assert_bulk(&eth->rsts);
++	printf("URSUS_NETDBG_RESET_FE_PDMA_QDMA_ASSERT ret=%d\n", ret);
+ 	if (ret)
+ 		return ret;
+ 
+ 	mdelay(20);
+ 
+ 	ret = reset_deassert_bulk(&eth->rsts);
++	printf("URSUS_NETDBG_RESET_FE_PDMA_QDMA_DEASSERT ret=%d\n", ret);
+ 	if (ret)
+ 		return ret;
+ 
+ 	ret = reset_deassert_bulk(&eth->xsi_rsts);
++	printf("URSUS_NETDBG_RESET_XSI_DEASSERT ret=%d\n", ret);
+ 	if (ret)
+ 		return ret;
+ 
+ 	mdelay(20);
++	printf("URSUS_NETDBG_RESET_DONE\n");
+ 
+ 	for (i = 0; i < ARRAY_SIZE(eth->qdma); i++) {
++		printf("URSUS_NETDBG_QDMA_INIT_BEGIN index=%d\n", i);
+ 		ret = airoha_qdma_init(dev, eth, &eth->qdma[i]);
+ 		if (ret)
+ 			return ret;
++		printf("URSUS_NETDBG_QDMA_INIT_DONE index=%d\n", i);
+ 	}
+ 
+ 	return 0;
+@@ -918,6 +945,7 @@ static int airoha_eth_probe(struct udevice *dev)
+ 	struct udevice *mdio_dev;
+ 	ofnode node;
+ 	int i, ret;
++	u32 femem_sel = 0xffffffff;
+ 
+ 	scu_regmap = airoha_get_scu_regmap();
+ 	if (IS_ERR(scu_regmap))
+@@ -929,6 +957,13 @@ static int airoha_eth_probe(struct udevice *dev)
+ 	 * reporting all 0xdeadbeef (poor cow :( )
+ 	 */
+ 	regmap_write(scu_regmap, SCU_SHARE_FEMEM_SEL, 0x0);
++	ret = regmap_read(scu_regmap, SCU_SHARE_FEMEM_SEL, &femem_sel);
++	printf("URSUS_NETDBG_FEMEM_SEL read_ret=%d value=0x%08x verdict=%s\n",
++	       ret, femem_sel,
++	       ret ? "READ_FAILED" :
++	       femem_sel == 0 ? "ACCESS_EXPECTED" : "UNEXPECTED_VALUE");
++	if (ret)
++		return ret;
+ 
+ 	eth->soc = data;
+@@ -1155,6 +1190,8 @@ static int airoha_eth_recv(struct udevice *dev, int flags, uchar **packetp)
+ 	u16 length;
+ 	int qid;
++	static bool ursus_netdbg_empty_seen;
++	static bool ursus_netdbg_packet_seen;
+ 
+ 	qid = 0;
+ 	q = &qdma->q_rx[qid];
+@@ -1164,12 +1201,21 @@ static int airoha_eth_recv(struct udevice *dev, int flags, uchar **packetp)
+ 	dma_unmap_unaligned(virt_to_phys(desc), sizeof(*desc),
+ 			    DMA_FROM_DEVICE);
+ 
+-	if (!(desc->ctrl & QDMA_DESC_DONE_MASK))
++	if (!(desc->ctrl & QDMA_DESC_DONE_MASK)) {
++		if (!ursus_netdbg_empty_seen) {
++			ursus_netdbg_empty_seen = true;
++			printf("URSUS_NETDBG_FIRST_RX ret=%d desc_done=0 head=%d\n",
++			       -EAGAIN, q->head);
++		}
+ 		return -EAGAIN;
++	}
+ 
+ 	length = FIELD_GET(QDMA_DESC_LEN_MASK, desc->ctrl);
+ 	dma_unmap_single(desc->addr, length,
+ 			 DMA_FROM_DEVICE);
++	if (!ursus_netdbg_packet_seen) {
++		ursus_netdbg_packet_seen = true;
++		printf("URSUS_NETDBG_FIRST_RX_PACKET len=%u desc_done=1 head=%d\n",
++		       length, q->head);
++	}
+ 
+ 	*packetp = phys_to_virt(desc->addr);
+ 
+@@ -1281,6 +1327,76 @@ static const struct eth_ops airoha_eth_ops = {
+ 	.write_hwaddr = arht_eth_write_hwaddr,
+ };
+ 
++static bool ursus_netreset_used;
++
++static int do_ursusnetreset(struct cmd_tbl *cmdtp, int flag, int argc,
++			    char *const argv[])
++{
++	struct udevice *dev = eth_get_dev();
++	struct airoha_gdm_port *port;
++	struct airoha_qdma *qdma;
++	struct airoha_eth *eth;
++	struct regmap *scu_regmap;
++	u32 femem_sel = 0xffffffff;
++	int ret;
++
++	if (!dev || !dev->driver || strcmp(dev->driver->name, "airoha-eth-port")) {
++		printf("URSUS_NETRESET_FAIL reason=NO_ACTIVE_AIROHA_ETH\n");
++		return CMD_RET_FAILURE;
++	}
++
++	if (ursus_netreset_used) {
++		printf("URSUS_NETRESET_FAIL reason=ONE_SHOT_ALREADY_USED\n");
++		return CMD_RET_FAILURE;
++	}
++	ursus_netreset_used = true;
++
++	port = dev_get_priv(dev);
++	qdma = port->qdma;
++	eth = qdma->eth;
++
++	printf("URSUS_NETRESET_BEGIN build=TRANSITION2-NETRESET1 dev=%s\n",
++	       dev->name);
++	printf("URSUS_NETRESET_STAGE=STOP_CURRENT_DMA\n");
++	airoha_eth_stop(dev);
++
++	scu_regmap = airoha_get_scu_regmap();
++	if (IS_ERR(scu_regmap)) {
++		ret = PTR_ERR(scu_regmap);
++		printf("URSUS_NETRESET_FAIL stage=SCU_GET ret=%d\n", ret);
++		return CMD_RET_FAILURE;
++	}
++
++	ret = regmap_write(scu_regmap, SCU_SHARE_FEMEM_SEL, 0x0);
++	printf("URSUS_NETRESET_STAGE=FEMEM_SEL_WRITE ret=%d\n", ret);
++	if (ret)
++		return CMD_RET_FAILURE;
++	ret = regmap_read(scu_regmap, SCU_SHARE_FEMEM_SEL, &femem_sel);
++	printf("URSUS_NETRESET_STAGE=FEMEM_SEL_READ ret=%d value=0x%08x\n",
++	       ret, femem_sel);
++	if (ret || femem_sel != 0)
++		return CMD_RET_FAILURE;
++
++	printf("URSUS_NETRESET_STAGE=HARD_RESET_REINIT\n");
++	ret = airoha_hw_init(dev->parent, eth);
++	if (ret) {
++		printf("URSUS_NETRESET_FAIL stage=HW_INIT ret=%d\n", ret);
++		return CMD_RET_FAILURE;
++	}
++
++	ret = airoha_switch_init(dev->parent, eth);
++	if (ret) {
++		printf("URSUS_NETRESET_FAIL stage=SWITCH_INIT ret=%d\n", ret);
++		return CMD_RET_FAILURE;
++	}
++
++	ret = airoha_fe_init(port);
++	if (ret) {
++		printf("URSUS_NETRESET_FAIL stage=GDM_INIT ret=%d\n", ret);
++		return CMD_RET_FAILURE;
++	}
++
++	ret = arht_eth_write_hwaddr(dev);
++	if (ret) {
++		printf("URSUS_NETRESET_FAIL stage=HWADDR ret=%d\n", ret);
++		return CMD_RET_FAILURE;
++	}
++
++	ret = airoha_eth_init(dev);
++	if (ret) {
++		printf("URSUS_NETRESET_FAIL stage=ETH_START ret=%d\n", ret);
++		return CMD_RET_FAILURE;
++	}
++
++	printf("URSUS_NETRESET_DONE result=PASS next=RUN_URSUSWEB\n");
++	return CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(
++	ursusnetreset, 1, 0, do_ursusnetreset,
++	"one-shot Airoha FE/PDMA/QDMA cleanup and re-init for TRANSITION2 NET debug",
++	""
++);
++
+ U_BOOT_DRIVER(airoha_eth_port) = {
+ 	.name = "airoha-eth-port",
+ 	.id = UCLASS_ETH,
