@@ -8,6 +8,7 @@ on:
       - '.github/workflows/md-transition1-build.yml'
       - 'ursusboot/scripts/build_md_transition1.sh'
       - 'ursusboot/patches/190-md-transition1-handoff.patch'
+      - 'ursusboot/patches/200-transition2-uart-fallback.patch'
       - 'ursusboot/configs/ursusboot-transition-handoff.cfg'
       - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
       - 'toolchains/**'
