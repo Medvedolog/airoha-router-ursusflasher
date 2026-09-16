@@ -25,8 +25,10 @@ def validate_linux_image(data: bytes) -> dict:
         )
     if flags != 0:
         raise RuntimeError(f"TRANSITION Linux Image flags are unexpected: {flags:#x}")
-    if b"TRANSITION2" not in data or b"OFFICIAL_OPENWRT" not in data:
-        raise RuntimeError("TRANSITION2 identity markers are missing from Linux Image handoff")
+    # Payload identity is already pinned by TRANSITION2.json + SHA256 and the
+    # mode/board/stock_inner_format metadata in stock_ab_transition._load_payload().
+    # Do not require arbitrary printable strings inside BL33: the TEST61 Web
+    # control build intentionally removed the old OFFICIAL_OPENWRT marker.
     return {"size": len(data), "text_offset": text_offset, "image_size": image_size, "flags": flags}
 
 
