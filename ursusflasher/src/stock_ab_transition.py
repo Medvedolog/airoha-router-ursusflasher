@@ -321,9 +321,19 @@ def run(
     access = telnet = None
     try:
         access, telnet = ubi.open_root_auto(host) if unattended else ubi.open_root()
-        if access.family != policy.family:
-            raise RuntimeError(f"board profile mismatch: selected {policy.profile}, stock Web reports {access.family}")
+        reported_family = str(getattr(access, "family", "") or "").strip().lower()
+        if reported_family not in ("", "unknown", policy.family):
+            raise RuntimeError(f"board profile mismatch: selected {policy.profile}, stock Web reports {reported_family}")
+        if reported_family != policy.family:
+            ui.status(
+                "INFO",
+                f"Stock Web family metadata is {reported_family or 'missing'}; exact stock model/root access is already proven, checking {policy.profile} MTD geometry before continuing.",
+            )
         _require_stock_geometry(telnet, policy)
+        # Some stock Web builds omit the family field even after exact XG-040G-MD
+        # identity has been proven over Web/Telnet. Geometry is the authoritative
+        # board-policy proof for this transaction; normalize only after it passes.
+        access.family = policy.family
         writer = _mtd_writer_preflight(telnet)
 
         # Complete stock backup is the authoritative source for all staging
@@ -333,7 +343,7 @@ def run(
             access,
             access.host,
             full_backup,
-            expected_family=access.family,
+            expected_family=policy.family,
             allow_service_provisioning=True,
         )
         backup_result = pb.verify_stock_restore_backup(full_backup)
