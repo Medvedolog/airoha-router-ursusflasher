@@ -65,6 +65,8 @@ grep -q '^CONFIG_MTD=y$' .config || { echo 'TRANSITION2: MTD missing' >&2; exit 
 grep -q '^CONFIG_TEXT_BASE=0x81e00000$' .config || { echo 'TRANSITION2: unexpected TEXT_BASE' >&2; exit 1; }
 grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h || { echo 'TRANSITION2: Web-only dispatcher marker missing' >&2; exit 1; }
 grep -Fq 'URSUS_TRANSITION_WEB_BEGIN' cmd/ursusdispatch.c || { echo 'TRANSITION2: dispatcher Web entry missing' >&2; exit 1; }
+grep -Fq 'URSUS_TRANSITION_NET_SANITIZE_BEGIN' cmd/ursusdispatch.c || { echo 'TRANSITION2-NETFIX2: startup network sanitize missing' >&2; exit 1; }
+grep -Fq 'run_command("ursusnetreset", 0)' cmd/ursusdispatch.c || { echo 'TRANSITION2-NETFIX2: startup reset command missing' >&2; exit 1; }
 grep -Fq 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' cmd/ursusdispatch.c || { echo 'TRANSITION2: UART fallback marker missing' >&2; exit 1; }
 # TEST61 source already carries the OpenWrt AN7581 board U-Boot DT override.
 # Assert it instead of applying a duplicate patch.
@@ -72,7 +74,7 @@ grep -Fq '&gdm1 {' arch/arm/dts/an7581-nokia-xg-040g-md-u-boot.dtsi || { echo 'T
 grep -Fq 'status = "okay";' arch/arm/dts/an7581-nokia-xg-040g-md-u-boot.dtsi || { echo 'TRANSITION2: gdm1 status override missing' >&2; exit 1; }
 grep -Fq 'URSUS_NETDBG_RX_RING' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETDBG1: RX ring readback marker missing' >&2; exit 1; }
 grep -Fq 'URSUS_NETDBG_FIRST_RX' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETDBG1: first RX marker missing' >&2; exit 1; }
-grep -Fq 'ursusnetreset, 1, 0, do_ursusnetreset' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETRESET1: command missing' >&2; exit 1; }
+grep -Fq 'ursusnetreset, 1, 0, do_ursusnetreset' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETFIX2: reset command missing' >&2; exit 1; }
 
 make -j"${JOBS:-$(nproc)}"
 
@@ -149,7 +151,7 @@ grep -Fq "#define URSUS_VERSION \"${VERSION}\"" include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_HANDOFF_ONLY 0' include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h
 strings u-boot.bin > "$WORK/u-boot.strings"
-for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT' 'URSUS_TRANSITION_WEB_BEGIN' 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' 'URSUS_NETDBG_RX_RING' 'URSUS_NETDBG_FIRST_RX' 'URSUS_NETRESET_BEGIN build=TRANSITION2-NETRESET1' 'ursusnetreset'; do
+for marker in "$VERSION" 'TRANSITION' 'NONE' 'OFFICIAL_OPENWRT' 'URSUS_TRANSITION_WEB_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_DONE' 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' 'URSUS_NETDBG_RX_RING' 'URSUS_NETDBG_FIRST_RX' 'URSUS_NETRESET_BEGIN build=TRANSITION2-NETFIX2' 'ursusnetreset'; do
     grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "missing transition marker: $marker" >&2; exit 1; }
 done
 
@@ -174,17 +176,18 @@ printf '%s\n' \
     "PERSISTENCE_TARGET=NONE" \
     "FINAL_TARGET=OFFICIAL_OPENWRT" \
     "HANDOFF_ONLY=0" \
-    "TRANSITION_ENTRY=ursusdispatch->ursusweb" \
+    "TRANSITION_ENTRY=ursusdispatch->net-sanitize->ursusweb" \
     "UART_FALLBACK=READY_UNRESTRICTED" \
     "AN7581_GDM1_UBOOT_DTS=ALREADY_PRESENT" \
     "NETDBG_BUILD=TRANSITION2-NETDBG1" \
+    "NETFIX_BUILD=TRANSITION2-NETFIX2" \
     "NETRESET_COMMAND=ursusnetreset" \
-    "NETRESET_EXPERIMENT=TRANSITION2-NETRESET1" \
+    "NETRESET_TIMING=AUTOMATIC_BEFORE_WEBFAILSAFE" \
     "ENV_IS_NOWHERE=PASS" \
     "STOCK_INNER_FORMAT=ARM64_LINUX_IMAGE_HANDOFF" \
     "STOCK_KERNEL_LOAD=${STOCK_KERNEL_LOAD}" \
     "TEXT_BASE=${TEXT_BASE}" \
     "SOURCE_DATE_EPOCH=${RELEASE_EPOCH}" > "$OUT/TRANSITION2-BUILD_INFO.txt"
 
-echo "MD_TRANSITION2_NETDBG1_BUILD=PASS"
+echo "MD_TRANSITION2_NETFIX2_BUILD=PASS"
 echo "Artifacts: $OUT"
