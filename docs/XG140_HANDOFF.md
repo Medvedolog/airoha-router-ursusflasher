@@ -1,17 +1,17 @@
 # UrsusBoot / UrsusFlasher — active development handoff
 
-**Updated:** 2026-09-15  
+**Updated:** 2026-09-16  
 **Repository:** `Medvedolog/airoha-router-ursusflasher`  
 **Active branch:** `feature/ursusboot-modular-airoha`  
-**Do not touch:** `main`, tags, releases unless explicitly requested  
-**Primary active targets:** Nokia XG-040G-MD / XG-040G-MF  
-**Independent recovery target:** Bell/Nokia XG-140G-MD
+**Pre-doc code baseline:** `7524a951f0fafd0c57fd91bc66c1b51e9bd8158e`  
+**Normative addendum:** `docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.44_TRANSITION2_STABILIZATION.md`  
+**Do not touch:** `main`, tags, releases unless explicitly requested.
 
-This handoff supersedes the old XG140-only context. Current priority is the multimodel UrsusBoot/UrsusFlasher architecture and safe no-UART Vanilla transition for MD/MF.
+This file is the current cross-model handoff despite the historical filename. Primary active target is Nokia XG-040G-MD TRANSITION2 stabilization. XG-040G-MF remains required but not production-ready. XG-140G-MD remains an independent persistent/native-hybrid track.
 
 ---
 
-## 1. Core architecture
+## 1. Architecture and product split
 
 ```text
 common core
@@ -19,434 +19,513 @@ common core
   -> board/DTS module
   -> storage/env policy
   -> boot/layout board policy
-  -> runtime role
+  -> boot-time runtime role
 ```
+
+Boot-time roles are `persistent` and `ram-recovery`. `transition` is a payload/product lifecycle, not a third boot-time registry role.
 
 Profiles:
 
 ```text
-xg040-md  -> AN7581/AN7581DT family
-xg040-mf  -> AN7583
-xg140-md  -> AN7581DT family
+xg040-md  Nokia XG-040G-MD, AN7581/AN7581DT family
+xg040-mf  Nokia XG-040G-MF, AN7583
+xg140-md  Bell/Nokia XG-140G-MD, AN7581DT family
 ```
 
-Runtime roles:
-
-```text
-persistent    normal UrsusBoot supervisor
-ram-recovery  RAM-only WebFailsafe/recovery
-transition    one-shot RAM migration environment, persistence target NONE
-```
-
-UrsusFlasher owns policy/orchestration. UrsusBoot owns compact execution/recovery functions.
-
----
-
-## 2. Product separation
-
-### Persistent UrsusBoot
-
-Keep supported:
-
-```text
-persistent UrsusBoot
-OpenWrt factory/non-UBI payload path
-OpenWrt initramfs recovery/rescue payloads
-OpenWrt sysupgrade/UBI payloads where supported
-```
-
-### Vanilla Transition
-
-Separate one-shot product:
+MD/MF Vanilla target:
 
 ```text
 stock Nokia
--> temporary TRANSITION UrsusBoot in RAM
+-> temporary TRANSITION in RAM
 -> canonical OpenWrt BL2/FIP/U-Boot
 -> canonical OpenWrt UBI
 -> OpenWrt
 ```
 
-Vanilla final layout is **UBI only**. No factory/non-UBI final option, no factory-vs-UBI menu, no persistent UrsusBoot in final boot chain.
+No persistent UrsusBoot, Nokia A/B or factory/non-UBI final layout in the MD/MF Vanilla target.
 
-### Shared OpenWrt firmware bundle
-
-Use one shared firmware artifact wherever the exact artifact is compatible with MD and MF:
+XG140 remains intentionally different:
 
 ```text
-factory/non-UBI image
-initramfs image
-sysupgrade/UBI image
-manifest/provenance/SHA256
-```
-
-Board-specific only where actually different:
-
-```text
-TRANSITION wrapper
-BL2/preloader
-FIP/BL31/U-Boot
-stock A/B/HDR/FIT policy
-write spans/layout policy
-NAND-specific enablement
-```
-
----
-
-## 3. Mandatory stock first-run preparation
-
-Before the first UrsusFlasher run on Nokia stock:
-
-```text
-router powered on
--> hold Reset >= 30 seconds
--> release
--> wait until stock Web UI is fully available
--> start UrsusFlasher
-```
-
-Hardware observation: shorter holds may not perform a complete Nokia factory reset.
-
----
-
-## 4. Full backup contract
-
-Before any stock -> TRANSITION/destructive migration, use the proven UrsusFlasher full backup backend.
-
-Backup means **all live `/proc/mtd` partitions**, not only A/B service partitions.
-
-Required:
-
-```text
-/proc/mtd snapshot
-mtd0..mtdN complete dumps
-partition names
-exact sizes
-erase sizes
-SHA256 each
-DEVICE_IDENTITY / MAC / serial / RI / factory metadata where applicable
-BACKUP_MANIFEST.json
-```
-
-Every live partition must exist on the PC with exact-size and SHA verification before destructive staging.
-
-Do not commit backups, credentials, serial/GPON identity data or device secrets.
-
----
-
-## 5. EXPERT is the production UI for Vanilla Transition
-
-Do **not** evolve `START_MD_TRANSITION.cmd/.sh` into a second user-facing flasher.
-
-Production operator flow:
-
-```text
-START_EXPERT.cmd / START_EXPERT.sh
--> UrsusFlasher EXPERT
--> item 4: Stock Nokia -> Vanilla OpenWrt (TRANSITION)
-```
-
-Why item 4: current `expert.py` no longer displays item 4 and maps a typed `4` to item 2 because bootloader install/update were merged. Reclaim item 4 for Vanilla Transition.
-
-Item 4 must reuse existing UrsusFlasher infrastructure:
-
-```text
-DeviceState
-board_profiles
-stock Web auth
-Telnet credentials/enablement
-root/su acquisition
-full_backup_readonly/proven backup backend
-proven transfer backends
-common logging
-common y/N
-common readback/verification
-```
-
-Standalone transition launcher becomes developer/HWTEST-only or is removed from public package after EXPERT integration.
-
----
-
-## 6. Gate policy
-
-Hard stops only for real destructive invariants:
-
-```text
-wrong model/profile
-NAND geometry / exact span mismatch
-candidate structurally invalid
-protected boundary violation
-payload does not fit
-full backup missing/invalid
-upload SHA mismatch
-post-write readback mismatch
-selector readback mismatch
-```
-
-Do not gate on firmware fingerprints or advisory state alone:
-
-```text
-compression none vs lzma
-active/curimg/startok/count differs from previous sample
-HW_PENDING
-partial passive probe
-one transport unavailable while another proven transport is still available before write
-```
-
-One meaningful `y/N` after automatic preflight. Once destructive write starts, do not auto-switch writer/backend.
-
----
-
-## 7. MD hardware facts proven so far
-
-Real XG-040G-MD with Fudan FM25G02B proved:
-
-```text
-stock tcboot selects SLOT2 when requested
-stock-compatible FIT/hash passes
-the ARM64 Linux Image shim starts UrsusBoot TRANSITION
-Fudan NAND is detected
-stock failure counter decreases on failed SLOT2 boots
-tcboot eventually rolls back automatically to untouched SLOT1
-```
-
-TRANSITION1 itself was rejected as final runtime because it continued into stock boot policy and produced a hybrid MASTER-kernel/SLAVE-rootfs failure.
-
-Required TRANSITION2 behavior:
-
-```text
-shim -> UrsusBoot TRANSITION
--> enter/stay in WebFailsafe/transition execution
--> do not default to stock MASTER boot
-```
-
----
-
-## 8. 2026-09-15 regression findings
-
-### Regression A — overly strict FIT validator
-
-`stock_fit_wrapper.py` was added in commit:
-
-```text
-db18eb3b99005d3a8916687c5da49cc43d578f6b
-transition: add stock FIT wrapper contract
-```
-
-It hard-coded:
-
-```text
-/images/kernel@1/compression == lzma
-```
-
-Real factory-reset MD stock returned:
-
-```text
-/images/kernel@1/compression == none
-```
-
-The strict fingerprint was not a valid safety invariant. Fixed direction: retain structural FIP/HDR2/FIT validation, but accept supported stock compression variants and always inject TRANSITION Linux Image as `compression=none`, recomputing hash while preserving all non-allowed bytes.
-
-Latest corrective commit at time of this handoff:
-
-```text
-9398c87fce8a32d4c9591bf92e96f96d7d32da2c
-transition2: accept stock FIT none compression
-```
-
-### Regression B — standalone mandatory TFTP upload
-
-Next hardware attempt reached:
-
-```text
-SLAVE candidate prepared
-operator y/N accepted
-send_file_to_router_tftp(... port=1069, block_size=4096)
--> TFTP client returned ERROR
-```
-
-No flash write had started. Candidate/selector were not written in that failed attempt.
-
-Root architectural problem: standalone `stock_ab_transition.py` duplicated transfer orchestration and made TFTP mandatory instead of using the existing UrsusFlasher proven transport model.
-
-Production fix is not another TFTP-specific hotfix. Integrate transition into EXPERT item 4 and reuse common proven transport selection/preflight.
-
----
-
-## 9. MD production transition flow
-
-```text
-EXPERT item 4
--> detect/confirm xg040-md
--> stock Web/Telnet/root through existing backend
--> mandatory full backup all live /proc/mtd
--> build stock-compatible secondary candidate
--> transfer via preflighted proven transport
--> verify uploaded candidate SHA
--> one y/N at latest safe point
--> write nsb_slave
--> full readback
--> request SLAVE using board selector policy
-   MD proven rule: change active only
--> selector readback
--> reboot
--> tcboot -> SLOT2
--> shim -> TRANSITION2 RAM
--> reconnect through common network/Web API
-```
-
-Only after TRANSITION2 Web/API acceptance proceed to final Vanilla migration.
-
----
-
-## 10. MF requirement
-
-MF is not optional follow-up work.
-
-Same product flow:
-
-```text
-EXPERT item 4
--> xg040-mf board policy
--> full all-MTD backup
--> MF stock secondary-slot candidate
--> MF selector policy
--> TRANSITION RAM
--> vanilla OpenWrt bootchain
--> canonical UBI
-```
-
-Do not copy MD MTD indices/offsets/HDR assumptions. Make transition staging board-profile driven.
-
-Reuse existing AN7583 RAM/persistent groundwork and MF backup/identity helpers.
-
----
-
-## 11. Final Vanilla transaction — MD/MF
-
-All payloads are bundled ahead of time. No live Internet download during destructive migration.
-
-```text
-TRANSITION fully in RAM
--> receive shared OpenWrt firmware bundle + board-specific bootchain payloads
--> verify manifest/SHA/profile/NAND geometry/spans
--> verify complete stock backup
--> one y/N
----------------- destructive boundary ----------------
--> write canonical OpenWrt BL2/preloader
--> full readback
--> write canonical OpenWrt FIP/BL31/U-Boot
--> full readback
--> canonical UBI repartition/format
--> deploy compatible OpenWrt UBI/sysupgrade payload
--> verify UBI attach/volumes/FIT/rootfs
--> sync
--> reboot
-```
-
-Final target:
-
-```text
-BootROM
--> OpenWrt BL2/preloader
--> OpenWrt FIP/BL31
--> OpenWrt U-Boot
+preserved native trusted envelope
+-> persistent modular UrsusBoot as BL33
 -> canonical OpenWrt UBI
 -> OpenWrt
 ```
 
-UrsusBoot/tcboot/Nokia A/B are absent from the active final boot target.
+---
+
+## 2. Current TRANSITION2 build baseline
+
+Functional version stays:
+
+```text
+TRANSITION2
+```
+
+Engineering labels:
+
+```text
+TRANSITION2-NETDBG1
+TRANSITION2-NETFIX2
+```
+
+Do not rename this work to TRANSITION3 merely because of diagnostic iterations.
+
+TRANSITION source baseline:
+
+```text
+ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst
+```
+
+Current build script:
+
+```text
+ursusboot/scripts/build_md_transition1.sh
+```
+
+Relevant patches:
+
+```text
+190  stock-tcboot-compatible transition handoff/dispatcher
+200  UART fallback after WebFailsafe transport loss
+210  NETDBG + ursusnetreset + NETFIX2 pre-Web sanitize
+220  ursusstockslot selector command
+```
+
+Stock handoff parameters:
+
+```text
+kernel load = 0x80088000
+U-Boot TEXT_BASE = 0x81e00000
+ARM64 shim copies u-boot.bin to TEXT_BASE and branches
+```
 
 ---
 
-## 12. Nokia selector contract
+## 3. Critical identity rule
 
-Known fields:
+TRANSITION startup does **not** import board/network identity from stock RI and must not require it.
+
+Reason: recovery may run with clean or damaged NAND. TRANSITION must still come up as a RAM recovery environment.
+
+Therefore:
 
 ```text
-active   requested slot
-curimg   actually booted slot
-startok  userspace success state
-count    retry/state counter
+stock RI import        NOT prerequisite
+factory MAC import     NOT prerequisite
+serial/GPON identity   NOT prerequisite for WebFailsafe startup
+random/local MAC       acceptable for recovery network
 ```
 
-For MD proven request pattern: change only `active`. Do not manually mirror `flagback`; tcboot owns reconciliation.
+Identity/factory data remains important for final migration preservation/restore, but not for booting TRANSITION.
 
-The values of `curimg/startok/count` are diagnostics, not generic stop-gates unless a specific board-policy invariant proves otherwise.
+Commit removing the stale embedded identity marker gate:
+
+```text
+7524a951f0fafd0c57fd91bc66c1b51e9bd8158e
+transition: drop stale embedded identity marker gate
+```
 
 ---
 
-## 13. XG140 independent path
+## 4. MD stock SLOT2 staging and fail-safe ordering
 
-Known lab target:
+Known MD geometry/policy:
 
 ```text
-Bell/Nokia XG-140G-MD
-XG140GMC2P5G
-AN7581DT
-512 MiB
-SkyHigh S35ML02G3 256 MiB NAND
+flag        offset 0x05240000 size 0x00040000
+flagback    offset 0x05280000
+nsb_master  offset 0x000c0000
+nsb_slave   offset 0x02940000
+slot size   0x02880000
 ```
 
-Persistent boot area:
+`flag` offset is NAND address space, not mapped RAM. Do not use direct `md.l 0x05240000` as selector read. Read the NAND eraseblock to RAM first.
+
+Proven selector request rule on MD:
 
 ```text
-mtd0 size          0x80000
-native FIP start   0x800
-vendor env         0x7c000..0x7ffff
+change only active
+active=0 -> MASTER/SLOT1
+active=1 -> SLAVE/SLOT2
 ```
 
-Persistent candidate is device-derived native-hybrid: preserve live prefix/native trusted FIP entries/vendor env; replace only NT_FW/BL33.
+Do not manually mirror `flagback`. Preserve `curimg`, `startok`, `count` and reserved fields.
 
-Rejected UART method:
-
-```text
-tcboot -> loadx raw u-boot.bin -> go 0x81e00000
-```
-
-Correct emergency path:
+Safe staging order:
 
 ```text
-stock tcboot
--> XMODEM Linux FIT initramfs @0x85000000
--> bootm
--> rescue Linux in RAM
--> native-hybrid FIP write
--> full 0x80000 readback
+candidate/preflight
+-> write nsb_slave
+-> readback/SHA verify nsb_slave
+-> only then write primary flag selector
+-> selector readback
 -> reboot
 ```
+
+A previous real write lost the TCP/Telnet session during `nsb_slave` write. Because selector write is last, `active` stayed on SLOT1 and stock booted safely. After any interrupted slot write, treat `nsb_slave` as unknown/possibly partial until readback.
+
+---
+
+## 5. Backup and retry policy
+
+Before destructive stock staging a **verified full stock backup must exist**.
+
+A new full backup is no longer forced on every engineering attempt. EXPERT item 4 supports:
+
+```text
+A. create new full backup -> verify
+B. select existing full stock backup -> verify
+```
+
+Skip path still requires an existing verified full backup. This is not a zero-backup mode.
+
+Current optional-backup/retry work:
+
+```text
+2580ae1133b59bdf4f5dd16448ad202ac120d6b2
+transition: optional backup reuse and bounded stock write retries
+
+6edff79093a40644547d3da90088cf0608af374a
+expert: enable optional transition backup and write retries
+```
+
+Bounded write retry:
+
+```text
+max 3 attempts
+reconnect
+read target SHA first
+if already expected -> continue without rewrite
+else retry same write
+```
+
+No automatic writer/backend switching after destructive write begins.
+
+---
+
+## 6. EXPERT item 4 status
+
+Vanilla Transition is an EXPERT operation, not ONE-CLICK.
+
+Current operator path:
+
+```text
+START_EXPERT.cmd / START_EXPERT.sh
+-> item 4: Vanilla transition / Stock Nokia -> Vanilla OpenWrt
+```
+
+Item 4 must keep reusing common UrsusFlasher auth/root/backup/transport/logging/readback infrastructure.
+
+Passive network/device discovery is advisory and must not block item 4 by itself. Real backend geometry/profile/root checks remain authoritative.
+
+Relevant commit:
+
+```text
+ac4d15b8bf396bbd853b58f0a141375783e7a9f2
+fix: do not gate transition on passive network probe
+```
+
+MF production transition is **not ready** yet: current `stock_ab_transition` production policy is still MD-only. Do not claim MF support until board-profile-driven staging and HW acceptance exist.
+
+---
+
+## 7. Airoha network lifecycle: what is actually proven
+
+The observed Web-killing `-22` mechanism is established:
+
+```text
+UrsusWeb owns eth0
+-> UART standard ping
+-> NetLoop()
+-> eth_halt()
+-> device no longer ACTIVE
+-> UrsusWeb eth_rx()
+-> eth-uclass returns -EINVAL (-22)
+```
+
+Therefore standard U-Boot `ping` must not be used while WebFailsafe owns network.
+
+Interpretation:
+
+```text
+-11 / EAGAIN  packet not ready at that instant
+-22 / EINVAL  device lifecycle/ownership invalid; in proven case eth was halted
+```
+
+Do not reinterpret `-22` as evidence of RX descriptor/ring/DMA/cache corruption.
+
+Source-level basis: `airoha_eth_recv()` itself returns positive RX or `-EAGAIN`; inactive-device `-EINVAL` comes from Ethernet uclass.
+
+---
+
+## 8. NETFIX2
+
+Commits:
+
+```text
+c22bcc3b0a272e1b566c7ca20cd801b545279f4d
+net: sanitize Airoha datapath before TRANSITION WebFailsafe
+
+8b1bbc948cf1146327c96482e94e383706b0d264
+ci: assert TRANSITION pre-Web network sanitize
+```
+
+Startup order:
+
+```text
+URSUS_TRANSITION_WEB_BEGIN
+-> URSUS_TRANSITION_NET_SANITIZE_BEGIN
+-> stop DMA
+-> force FEMEM_SEL=0
+-> reset FE/PDMA/QDMA/XSI using existing Airoha init path
+-> switch_init
+-> fe_init
+-> restore runtime MAC
+-> eth_init
+-> URSUS_TRANSITION_NET_SANITIZE_DONE
+-> WebFailsafe/lwIP
+```
+
+This fixes the lifecycle mistake of resetting Ethernet underneath an already-running lwIP/Web state.
+
+---
+
+## 9. Latest real MD hardware evidence
+
+Stock tcboot successfully selected second image:
+
+```text
+active = 1
+curimg = 0
+startok = 1
+count = 15
+...
+new flag:
+active = 1
+curimg = 1
+startok = 0
+count = 15
+...
+bootflag==1 --> booting from second image
+```
+
+TRANSITION2 then reached:
+
+```text
+U-Boot 2026.07-UrsusBoot-0.1.0-alpha5-UBIUX1-TRANSITION2
+URSUS_NETDBG_FEMEM_SEL ... value=0x00000000 verdict=ACCESS_EXPECTED
+URSUS_NETDBG_RX_RING ... verdict=OK
+random MAC assigned
+URSUS_TRANSITION_NET_SANITIZE_BEGIN
+URSUS_NETRESET_BEGIN build=TRANSITION2-NETFIX2 dev=airoha-gdm1
+URSUS_NETRESET_DONE result=PASS next=START_URSUSWEB
+URSUS_TRANSITION_NET_SANITIZE_DONE
+URSUS_HTTP_HEADER_SELFTEST_PASS
+URSUS_HTTP_LISTEN_OK port=80
+URSUS_WEBFAILSAFE_READY
+URSUS_NETDBG_FIRST_RX ret=-11 ...
+```
+
+Random MAC is acceptable by design.
+
+Acceptance matrix:
+
+```text
+PASS  tcboot SLOT2 selection
+PASS  stock FIT/hash
+PASS  shim -> TRANSITION2
+PASS  NAND detection
+PASS  FEMEM accessibility
+PASS  RX ring programming/readback
+PASS  NETFIX2 pre-Web reset path
+PASS  Web listener reaches port-80-ready marker
+PASS  tcboot rollback path to untouched SLOT1
+```
+
+---
+
+## 10. HTTP regression: current boundary
+
+A separate manual `ursusnetreset` experiment proved after reset:
+
+```text
+PASS  host ping / ICMP
+PASS  TCP connect to port 80
+FAIL  GET / -> curl (52) Empty reply from server
+FAIL  GET /api/status -> Empty reply
+FAIL  HTTP/1.0 /api/status -> Empty reply
+```
+
+So the remaining known defect is currently above basic Ethernet/IP/TCP connectivity. Exact HTTP/lwIP callback root cause is not yet proven.
+
+Current control strategy:
+
+```text
+persistent TEST61 Web
++ minimal TRANSITION wrapper
+```
+
+Commits:
+
+```text
+5647308769e978b76ca13e84c63d8b6b088ae2dd
+test: restore persistent TEST61 web in transition
+
+1701ff32cd50390cbfe0a3cb1eedecae541301ce
+ci: pin transition web to persistent TEST61 source
+
+870cd49753c0b3e15508416b025f517a0a231014
+ci: drop stale web-only binary markers
+```
+
+Do not rewrite HTTP from scratch. First determine whether the unmodified persistent TEST61 `cmd/ursusweb.c` restores actual HTTP response bytes.
+
+Hardware Web test from host:
+
+```powershell
+ping 192.168.1.1
+curl.exe -v --max-time 5 http://192.168.1.1/
+curl.exe -v --max-time 5 http://192.168.1.1/api/status
+curl.exe -v --http1.0 --max-time 5 http://192.168.1.1/api/status
+```
+
+Do not execute U-Boot `ping` during Web ownership.
+
+---
+
+## 11. Stock-slot recovery command / host integration
+
+TRANSITION command:
+
+```text
+ursusstockslot status
+ursusstockslot master
+ursusstockslot slave
+```
+
+Backend contract:
+
+```text
+read full primary flag eraseblock to RAM
+report selector fields
+modify active only
+preserve curimg/startok/count/reserved
+write primary flag only
+readback and verify
+never write flagback manually
+```
+
+Relevant commits:
+
+```text
+4e535688baa53defe2fabe5b5ceb48cea515d967  transition: add stock slot selector command
+a1aeeb9ef30c22ef91221f263b8303455ff3f66b  ci: build and assert transition stock slot command
+b0374ed2e2562825130875b89b4c251eb4225ba1  fix: repair transition stock slot patch
+3dba8620a0c7f9a4b29b7ae0f0343dce28abfd64  expert: add UART stock slot selector
+62da13604975b40b52f2271efd3b84d62df514b4  expert: expose UART stock slot switching
+40072e5e3ad113b5000f8d8d8e1f8803c3c29121  fix: tolerate ANSI tail after recovery U-Boot prompt
+59a67dae8971ab9a987e97eeb2cc3643539c7e9b  fix: install ANSI-tolerant recovery prompt detector
+686fb0396bc6ee8a06fcb92fd02b8e26d6a1b2f4  uart stockslot: wake idle U-Boot prompt with Enter
+```
+
+The requested Web button for return to stock SLOT1 is still a follow-up. Do not claim it exists until it is implemented and tested.
+
+---
+
+## 12. Packaging status
+
+Previously missing XG140 helper/import was fixed:
+
+```text
+703a987f2eda1e89cd31891affddb86d1f8b91ac
+a01858d4febe38a57ac4799ad0c8e52ed85d13c7
+```
+
+Canonical launchers remain:
+
+```text
+START_ONECLICK.cmd
+START_ONECLICK.sh
+START_EXPERT.cmd
+START_EXPERT.sh
+```
+
+Recent operator-rollup CI fixes:
+
+```text
+8f81f18c01fbf2b707d3925a16f263f180744aee  decouple operator rollup from fastscan BL2
+5aad0e412908cd56ddff97e05c5d8ffe34316625  locate nested baseline rollup root
+53330b219072f109a593c1ae26838e6548b35864  unpack baseline operator zip before overlay
+```
+
+Known prior successful CI evidence is not equivalent to the current branch HEAD and must not be presented as current-HW proof.
+
+Known earlier successful runs:
+
+```text
+35102324176 @ 8b1bbc948cf1146327c96482e94e383706b0d264
+35107012785 @ 7cebcd83c8c1263c8e59f0eea820ddf1d8c91e23
+```
+
+Always query exact current SHA/run before saying current CI is green.
+
+---
+
+## 13. XG140 independent track
+
+XG140 remains device-derived native-hybrid persistent work.
+
+Known boot area:
+
+```text
+mtd0 size        0x80000
+native FIP start 0x800
+vendor env       0x7c000..0x7ffff
+```
+
+Candidate policy:
+
+```text
+preserve BootROM prefix
+preserve native trusted FIP entries
+replace only approved NT_FW/BL33 span
+preserve live vendor env
+```
+
+Before first persistent destructive write, prove an independent BootROM/UART recovery ingress on stock hardware. XG140 work must not be forced into the MD SLOT2 TRANSITION architecture without new hardware necessity.
 
 ---
 
 ## 14. Immediate next work
 
 ```text
-1. Integrate Vanilla Transition into EXPERT item 4.
-2. Remove production dependency on standalone START_MD_TRANSITION.
-3. Reuse common stock auth/root/full-backup/logging/transport plumbing.
-4. Make transition staging board-profile driven.
-5. Add structural FIT tests for both none and lzma stock compression variants.
-6. HW-test MD stock -> TRANSITION2 without UART through EXPERT.
-7. Implement/accept MD TRANSITION -> vanilla BL2/FIP -> UBI -> OpenWrt.
-8. Add MF secondary-slot transition policy and HW acceptance.
-9. HW-test MF final UBI-only Vanilla migration.
-10. Preserve persistent UrsusBoot factory/non-UBI and initramfs recovery paths.
-11. Continue XG140 work independently.
+1. Verify live branch HEAD before every write.
+2. Build current TRANSITION2 control image with persistent TEST61 Web baseline.
+3. Check exact CI run for that SHA; CI PASS is build/package proof only.
+4. Boot it in MD SLOT2 and test external curl without U-Boot ping.
+5. If HTTP works, reintroduce TRANSITION Web metadata only incrementally and retain the working callback path.
+6. If HTTP is still Empty reply, instrument the TEST61-compatible HTTP/lwIP callback path rather than reopening ETH as the primary hypothesis without new evidence.
+7. HW-verify ursusstockslot status/master and EXPERT UART wrapper, preserving active-only selector semantics.
+8. Add Web return-to-SLOT1 control only after the common backend is hardware accepted.
+9. After TRANSITION2 Web/API HW_PASS, implement MD final Vanilla BL2/FIP/UBI migration.
+10. Then refactor staging for MF board policy and HW-accept MF independently.
 ```
 
 ---
 
-## 15. Repository rules
+## 15. Repository/operator rules
 
-- Do not change `main` without explicit instruction.
-- Do not merge/tag/release without explicit instruction.
-- Do not commit backups, credentials, serial/GPON data or unique device identity.
-- Before first UrsusFlasher run on Nokia stock: Reset **30+ seconds**, then wait for full stock Web boot.
-- Stock -> transition requires full verified backup of **all** live `/proc/mtd` partitions.
-- Vanilla Transition belongs in **EXPERT item 4**, not ONE-CLICK.
-- Avoid unnecessary gates; keep real structure/geometry/boundary/readback checks.
-- One meaningful `y/N` per normal destructive transaction.
-- No automatic backend/writer switch after write starts.
-- Vanilla MD/MF final storage = canonical **UBI only**.
-- Persistent UrsusBoot keeps factory/non-UBI support and initramfs recovery payloads.
-- OpenWrt firmware artifacts are shared across MD/MF when genuinely compatible.
+- Work on `feature/ursusboot-modular-airoha` only unless explicitly told otherwise.
+- Never modify `main`, merge, tag or release without explicit instruction.
+- Never commit device backups, plaintext credentials, serial/GPON secrets or unique device identity.
+- Minimum operator ceremony: one meaningful `y/N` after automatic preflight for a normal destructive operation.
+- Do not introduce policy gates where automatic geometry/boundary/readback checks suffice.
+- A verified full stock backup must exist before stock destructive staging; it may be newly created or an existing validated backup.
+- Selector is written only after verified `nsb_slave` readback.
+- No automatic writer/backend switching after destructive write starts.
+- TRANSITION does not depend on stock RI/factory MAC identity to start.
+- Never use standard U-Boot `ping` while UrsusWeb owns network.
+- Distinguish `CI PASS` from `HW PASS`.
+- Functional label remains `TRANSITION2`.
