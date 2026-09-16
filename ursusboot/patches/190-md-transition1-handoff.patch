@@ -33,23 +33,3 @@
      printf("URSUS_RESET_POLICY=HELD_AT_BOOT debounce_ms=%lu legacy_hold_ms=%lu\n",
             URSUS_RESET_BOOT_DEBOUNCE_MS, URSUS_RESET_HOLD_MS);
      if (ursus_recovery_latched)
---- a/cmd/ursusweb.c
-+++ b/cmd/ursusweb.c
-@@ -1593,6 +1593,7 @@
- 
-     snprintf(ursus_status_body, sizeof(ursus_status_body),
-              "{\"product\":\"%s\",\"version\":\"%s\"," 
-+             "\"mode\":\"%s\",\"persistence_target\":\"%s\",\"final_target\":\"%s\"," 
-              "\"build\":\"%s %s\",\"target\":\"Nokia XG-040G-MD\",\"board\":\"Nokia XG-040G-MD\"," 
-              "\"soc\":\"Airoha AN7581\",\"boot_fdt_compatible\":\"%s\",\"dram_mib\":%u,"
-              "\"current_layout\":\"%s\",\"recovery_latched\":true,\"boot_reason\":\"%s\",\"recovery_reason\":\"%s\"," 
-@@ -1626,7 +1627,8 @@
-              "\"operation_failed_at_stage\":\"%s\",\"operation_last_success_stage\":\"%s\","
-              "\"operation_error_code\":\"%s\",\"operation_transaction_state\":\"%s\","
-              "\"api_version\":200}\n",
--             URSUS_PRODUCT_NAME, URSUS_VERSION, U_BOOT_DATE, U_BOOT_TIME, profile_compatible,
-+             URSUS_PRODUCT_NAME, URSUS_VERSION, URSUS_MODE, URSUS_PERSISTENCE_TARGET, URSUS_FINAL_TARGET,
-+             U_BOOT_DATE, U_BOOT_TIME, profile_compatible,
-              (unsigned int)(gd->ram_size >> 20), ursus_current_layout,
-              ursus_dispatch_boot_reason(), ursus_dispatch_recovery_reason(),
-              ursus_boot_fip ? "true" : "false", ursus_stock_fip ? "true" : "false",
