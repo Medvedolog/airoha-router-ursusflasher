@@ -158,7 +158,7 @@
 +	qdma = port->qdma;
 +	eth = qdma->eth;
 +
-+	printf("URSUS_NETRESET_BEGIN build=TRANSITION2-NETRESET1 dev=%s\n",
++	printf("URSUS_NETRESET_BEGIN build=TRANSITION2-NETFIX2 dev=%s\n",
 +	       dev->name);
 +	printf("URSUS_NETRESET_STAGE=STOP_CURRENT_DMA\n");
 +	airoha_eth_stop(dev);
@@ -211,16 +211,32 @@
 +		return CMD_RET_FAILURE;
 +	}
 +
-+	printf("URSUS_NETRESET_DONE result=PASS next=RUN_URSUSWEB\n");
++	printf("URSUS_NETRESET_DONE result=PASS next=START_URSUSWEB\n");
 +	return CMD_RET_SUCCESS;
 +}
 +
 +U_BOOT_CMD(
 +	ursusnetreset, 1, 0, do_ursusnetreset,
-+	"one-shot Airoha FE/PDMA/QDMA cleanup and re-init for TRANSITION2 NET debug",
++	"one-shot Airoha FE/PDMA/QDMA cleanup and re-init for TRANSITION2",
 +	""
 +);
 +
  U_BOOT_DRIVER(airoha_eth_port) = {
  	.name = "airoha-eth-port",
  	.id = UCLASS_ETH,
+--- a/cmd/ursusdispatch.c
++++ b/cmd/ursusdispatch.c
+@@ -143,6 +143,14 @@ static int do_ursusdispatch(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
+ #if URSUS_TRANSITION_WEB_ONLY
+     printf("URSUS_TRANSITION_WEB_BEGIN\n");
++    printf("URSUS_TRANSITION_NET_SANITIZE_BEGIN\n");
++    ret = run_command("ursusnetreset", 0);
++    printf("URSUS_TRANSITION_NET_SANITIZE_RESULT ret=%d\n", ret);
++    if (ret) {
++        printf("URSUS_TRANSITION_NET_SANITIZE_FAIL\n");
++        return CMD_RET_FAILURE;
++    }
++    printf("URSUS_TRANSITION_NET_SANITIZE_DONE\n");
+     return ursus_enter_webfailsafe("TRANSITION_WEB_ONLY", 0);
+ #endif
+ 
