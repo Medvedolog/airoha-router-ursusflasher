@@ -5,6 +5,7 @@ import os
 
 import expert_multi as base
 import bootloader_install_menu as bootmenu
+import backup_progress
 import device_state as ds
 
 
@@ -62,6 +63,7 @@ base.action_applicability = action_applicability
 base.run_bootloader_install_or_update = bootmenu.run
 base.base._show_transition_action = _show_transition_action_unconditionally
 base.base._transition_profile = _transition_profile_after_selection
+backup_progress.install(base.base.proven)
 
 
 def main() -> int:
