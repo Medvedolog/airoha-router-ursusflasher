@@ -1,4 +1,4 @@
-name: MD TRANSITION1 build
+name: MD TRANSITION2 NETDBG1 build
 
 on:
   push:
@@ -9,6 +9,7 @@ on:
       - 'ursusboot/scripts/build_md_transition1.sh'
       - 'ursusboot/patches/190-md-transition1-handoff.patch'
       - 'ursusboot/patches/200-transition2-uart-fallback.patch'
+      - 'ursusboot/patches/210-transition2-netdbg1-netreset.patch'
       - 'ursusboot/configs/ursusboot-transition-handoff.cfg'
       - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
       - 'toolchains/**'
@@ -29,13 +30,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build MD TRANSITION1 stock Linux handoff
+      - name: Build MD TRANSITION2 NETDBG1 stock Linux handoff
         run: bash ursusboot/scripts/build_md_transition1.sh
-      - name: Upload TRANSITION1 engineering artifact
+      - name: Upload TRANSITION2 NETDBG1 engineering artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ursusboot-md-transition1-stockfit-${{ github.sha }}
-          path: work/md-transition1/out/
+          name: ursusboot-md-transition2-netdbg1-stockfit-${{ github.sha }}
+          path: work/md-transition2/out/
           if-no-files-found: error
           retention-days: 14
       - name: Download audited 0.2.62 full hardware kit artifact
@@ -48,19 +49,19 @@ jobs:
             --name ursusflasher-0.2.62-md-mf-minimal-hwtest \
             --dir audited-base
           test -f audited-base/UrsusFlasher-0.2.62.zip
-      - name: Build full UrsusFlasher stock-FIT transition test rollup
+      - name: Build full UrsusFlasher TRANSITION2 NETDBG1 test rollup
         run: |
           python3 scripts/build_transition_test_rollup.py \
-            --linux-image work/md-transition1/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION1.linuximg \
+            --linux-image work/md-transition2/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION2.linuximg \
             --base-zip audited-base/UrsusFlasher-0.2.62.zip \
             --base-run-id 34589613011 \
             --out-dir dist-transition \
             --source-sha "${GITHUB_SHA}" \
             --run-id "${GITHUB_RUN_ID}"
-      - name: Upload full UrsusFlasher MD A/B stock-FIT test rollup
+      - name: Upload full UrsusFlasher TRANSITION2 NETDBG1 test rollup
         uses: actions/upload-artifact@v4
         with:
-          name: ursusflasher-md-ab-transition1-stockfit-public-test-${{ github.sha }}
+          name: ursusflasher-md-ab-transition2-netdbg1-public-test-${{ github.sha }}
           path: dist-transition/
           if-no-files-found: error
           retention-days: 14
