@@ -1,0 +1,92 @@
+name: UrsusFlasher operator rollup overlay
+
+on:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - '.github/workflows/operator-rollup-overlay.yml'
+      - 'START_*.cmd'
+      - 'START_*.sh'
+      - 'ursusflasher/src/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: ursusflasher-operator-overlay-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    name: operator rollup from last green TRANSITION2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout current UrsusFlasher sources
+        uses: actions/checkout@v4
+        with:
+          path: current
+          fetch-depth: 1
+
+      - name: Download last green TRANSITION2 operator kit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euxo pipefail
+          mkdir -p baseline
+          gh run download 35112133778 \
+            --repo "$GITHUB_REPOSITORY" \
+            --name ursusflasher-md-ab-transition2-netdbg1-public-test-870cd49753c0b3e15508416b025f517a0a231014 \
+            --dir baseline
+          test -f baseline/START_EXPERT.cmd
+          test -d baseline/ursusflasher/src
+
+      - name: Overlay current operator sources only
+        run: |
+          set -euxo pipefail
+          rsync -a --delete current/ursusflasher/src/ baseline/ursusflasher/src/
+          for f in current/START_*.cmd current/START_*.sh; do
+            test -f "$f" || continue
+            cp "$f" baseline/
+          done
+          printf '%s\n' "$GITHUB_SHA" > baseline/URSUSFLASHER_COMMIT.txt
+          cat > baseline/OPERATOR_OVERLAY_PROVENANCE.txt <<EOF
+          BASELINE_RUN=35112133778
+          BASELINE_COMMIT=870cd49753c0b3e15508416b025f517a0a231014
+          BASELINE_ARTIFACT=ursusflasher-md-ab-transition2-netdbg1-public-test-870cd49753c0b3e15508416b025f517a0a231014
+          OPERATOR_SOURCE_COMMIT=${GITHUB_SHA}
+          OVERLAY_SCOPE=ursusflasher/src,START_*.cmd,START_*.sh
+          BINARY_PAYLOADS=UNCHANGED_FROM_BASELINE
+          HARDWARE_STATUS=HW_PENDING
+          EOF
+
+      - name: Verify UART slot operator overlay
+        run: |
+          set -euxo pipefail
+          test -f baseline/ursusflasher/src/stock_slot_uart.py
+          test -f baseline/ursusflasher/src/uart_prompt_fix.py
+          grep -F 'Переключить заводской SLOT через UART' baseline/ursusflasher/src/expert_multi.py
+          grep -F 'URSUS_STOCKSLOT_UART_DONE' baseline/ursusflasher/src/stock_slot_uart.py
+          grep -F 'uart_prompt_fix.install' baseline/ursusflasher/src/expert_airoha.py
+          python3 -m compileall -q baseline/ursusflasher/src
+          find baseline -type d -name __pycache__ -prune -exec rm -rf {} +
+          find baseline -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+
+      - name: Regenerate package manifest
+        run: |
+          set -euxo pipefail
+          rm -f baseline/SHA256SUMS
+          (cd baseline && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          (cd baseline && sha256sum -c SHA256SUMS >/dev/null)
+          du -sh baseline
+
+      - name: Upload operator rollup
+        uses: actions/upload-artifact@v4
+        with:
+          name: UrsusFlasher-TRANSITION2-UART-STOCKSLOT-${{ github.sha }}
+          path: baseline
+          if-no-files-found: error
+          retention-days: 14
