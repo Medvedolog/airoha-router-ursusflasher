@@ -13,7 +13,6 @@ CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
 PATCH_HANDOFF="$ROOT/ursusboot/patches/190-md-transition1-handoff.patch"
 PATCH_UART_FALLBACK="$ROOT/ursusboot/patches/200-transition2-uart-fallback.patch"
 PATCH_NETDBG="$ROOT/ursusboot/patches/210-transition2-netdbg1-netreset.patch"
-PATCH_CANONICAL_WEB="$ROOT/ursusboot/patches/215-transition2-canonical-web.patch"
 PATCH_STOCKSLOT="$ROOT/ursusboot/patches/220-transition2-stockslot-command.patch"
 OUT="$WORK/out"
 RELEASE_EPOCH=1789300800
@@ -22,7 +21,7 @@ STOCK_KERNEL_LOAD=0x80088000
 TEXT_BASE=0x81e00000
 
 for x in tar make gcc perl python3 sha256sum patch; do command -v "$x" >/dev/null; done
-for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH_HANDOFF" "$PATCH_UART_FALLBACK" "$PATCH_NETDBG" "$PATCH_CANONICAL_WEB" "$PATCH_STOCKSLOT"; do
+for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH_HANDOFF" "$PATCH_UART_FALLBACK" "$PATCH_NETDBG" "$PATCH_STOCKSLOT"; do
     [ -f "$f" ] || { echo "missing build input: $f" >&2; exit 1; }
 done
 
@@ -41,7 +40,23 @@ TEST61_WEB_SHA=$(sha256sum "$WORK/u-boot/cmd/ursusweb.c" | awk '{print $1}')
 patch -d "$WORK/u-boot" -p1 < "$PATCH_HANDOFF"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_UART_FALLBACK"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_NETDBG"
-patch -d "$WORK/u-boot" -p1 < "$PATCH_CANONICAL_WEB"
+python3 - "$WORK/u-boot/cmd/ursusdispatch.c" <<'PYWEB'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+old = '    return ursus_enter_webfailsafe("TRANSITION_WEB_ONLY", 0);'
+new = '''    ursus_recovery_latched = true;
+    snprintf(ursus_recovery_reason, sizeof(ursus_recovery_reason), "%s",
+             "TRANSITION_WEB_ONLY");
+    printf("URSUS_TRANSITION_CANONICAL_RECOVERY=1 reason=%s\\n",
+           ursus_recovery_reason);'''
+count = s.count(old)
+if count != 1:
+    raise SystemExit(f"TRANSITION2-WEBLOOP1 source match count={count}, expected=1")
+p.write_text(s.replace(old, new))
+print("TRANSITION2-WEBLOOP1 source transform=PASS matches=1")
+PYWEB
 patch -d "$WORK/u-boot" -p1 < "$PATCH_STOCKSLOT"
 TRANSITION_WEB_SHA=$(sha256sum "$WORK/u-boot/cmd/ursusweb.c" | awk '{print $1}')
 [ "$TRANSITION_WEB_SHA" = "$TEST61_WEB_SHA" ] || {
@@ -91,8 +106,6 @@ grep -Fq 'URSUS_WEB_COMMAND_RETURN ret=%d' cmd/ursusdispatch.c || { echo 'TRANSI
 grep -Fq 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED after=WEB_COMMAND_RETURN' cmd/ursusdispatch.c || { echo 'TRANSITION2-WEBLOOP1: UART fallback ordering marker missing' >&2; exit 1; }
 grep -Fq 'ursusstockslot, 2, 0, do_ursusstockslot' cmd/ursusdispatch.c || { echo 'TRANSITION2-STOCKSLOT1: command missing' >&2; exit 1; }
 grep -Fq 'URSUS_STOCKSLOT_DONE' cmd/ursusdispatch.c || { echo 'TRANSITION2-STOCKSLOT1: readback marker missing' >&2; exit 1; }
-# TEST61 source already carries the OpenWrt AN7581 board U-Boot DT override.
-# Assert it instead of applying a duplicate patch.
 grep -Fq '&gdm1 {' arch/arm/dts/an7581-nokia-xg-040g-md-u-boot.dtsi || { echo 'TRANSITION2: board U-Boot DT does not force gdm1 okay' >&2; exit 1; }
 grep -Fq 'status = "okay";' arch/arm/dts/an7581-nokia-xg-040g-md-u-boot.dtsi || { echo 'TRANSITION2: gdm1 status override missing' >&2; exit 1; }
 grep -Fq 'URSUS_NETDBG_RX_RING' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETDBG1: RX ring readback marker missing' >&2; exit 1; }
@@ -101,9 +114,6 @@ grep -Fq 'ursusnetreset, 1, 0, do_ursusnetreset' drivers/net/airoha_eth.c || { e
 
 make -j"${JOBS:-$(nproc)}"
 
-# Stock-tcboot-compatible handoff image. tcboot continues down its proven
-# ARM64 Linux kernel path at 0x80088000. The position-independent shim copies
-# TRANSITION U-Boot to its linked TEXT_BASE 0x81e00000 and branches there.
 cat > "$WORK/transition-linux-handoff.S" <<'EOF_ASM'
 .section .text,"ax"
 .global _start
