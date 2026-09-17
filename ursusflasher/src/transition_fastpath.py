@@ -99,6 +99,7 @@ def install(mod) -> None:
     original_backup_tftp = mod.pb.backup_tftp
     original_verify_backup = mod.pb.verify_stock_restore_backup
     original_backup_partition_bytes = mod._backup_partition_bytes
+    original_select_and_preflight_transport = mod._select_and_preflight_transport
     original_write_partition = mod._write_partition
     original_remote_partition_sha = mod._remote_partition_sha
     original_open_root_auto = mod.ubi.open_root_auto
@@ -107,6 +108,8 @@ def install(mod) -> None:
         "access": None,
         "policy": None,
         "reuse_backup": None,
+        "transport": None,
+        "payloads": {},
     }
 
     def open_root_auto_capture(host: str = "192.168.1.1"):
@@ -132,6 +135,57 @@ def install(mod) -> None:
         reuse = state.get("reuse_backup")
         return original_backup_partition_bytes(Path(reuse) if reuse is not None else backup_dir, number, name, expected_size)
 
+    def select_and_preflight_capture(telnet, access, slot_candidate, flag_candidate):
+        backend, remote_slot, remote_flag = original_select_and_preflight_transport(
+            telnet, access, slot_candidate, flag_candidate
+        )
+        state["transport"] = backend
+        state["payloads"] = {
+            remote_slot: Path(slot_candidate),
+            remote_flag: Path(flag_candidate),
+        }
+        return backend, remote_slot, remote_flag
+
+    def ensure_remote_payload(telnet, remote: str, expected_sha: str | None = None) -> str:
+        payloads = state.get("payloads") or {}
+        local = payloads.get(remote) if isinstance(payloads, dict) else None
+        transport = state.get("transport")
+        access = state.get("access")
+        if local is None or transport is None or access is None:
+            got = _remote_file_sha(telnet, remote)
+            if expected_sha is not None and got != expected_sha:
+                raise RuntimeError(f"remote payload changed: {got} != {expected_sha}")
+            return got
+
+        local = Path(local)
+        local_sha = mod.sha256_file(local)
+        if expected_sha is not None and local_sha != expected_sha:
+            raise RuntimeError(f"local frozen payload changed: {local_sha} != {expected_sha}")
+        try:
+            got = _remote_file_sha(telnet, remote)
+            if got == local_sha:
+                return got
+            pb._write_session_only(
+                f"[TRANSITION-REMOTE-PAYLOAD-MISMATCH] remote={remote} got={got} expected={local_sha}"
+            )
+        except Exception as exc:
+            pb._write_session_only(
+                f"[TRANSITION-REMOTE-PAYLOAD-MISSING] remote={remote} error={exc!r}"
+            )
+
+        ui.status("WAIT", pb.tr(
+            f"После перезапуска stock пропал временный payload {remote}; заново передаю его тем же frozen transport={transport}.",
+            f"The temporary payload {remote} disappeared after the stock restart; re-uploading it with the same frozen transport={transport}.",
+        ))
+        uploaded_sha = mod._upload_with_backend(str(transport), telnet, access, local, remote)
+        if uploaded_sha != local_sha:
+            raise RuntimeError(f"restored remote payload SHA mismatch: {uploaded_sha} != {local_sha}")
+        ui.status("READY", pb.tr(
+            f"Временный payload восстановлен и SHA-проверен: {remote}.",
+            f"Temporary payload restored and SHA-verified: {remote}.",
+        ))
+        return local_sha
+
     def resilient_partition_sha(telnet, dev: str, timeout: int = 300) -> str:
         try:
             return original_remote_partition_sha(telnet, dev, timeout=timeout)
@@ -151,7 +205,7 @@ def install(mod) -> None:
         if access is None or policy is None:
             return original_write_partition(telnet, remote, part, dev, size, method, erase_size, timeout=timeout)
 
-        remote_sha = _remote_file_sha(telnet, remote)
+        remote_sha = ensure_remote_payload(telnet, remote)
         last = None
         for attempt in range(1, 4):
             try:
@@ -182,9 +236,9 @@ def install(mod) -> None:
                     return
                 if attempt >= 3:
                     break
-                # The partition is inactive/not yet selected at this stage. Retrying the
-                # same exact frozen writer+payload is idempotent; never switch backend here.
-                check_remote = _remote_file_sha(telnet, remote)
+                # A full stock reset clears /tmp. Restore the same exact payload with
+                # the already frozen transport, then retry the same writer only.
+                check_remote = ensure_remote_payload(telnet, remote, remote_sha)
                 if check_remote != remote_sha:
                     raise RuntimeError(f"remote payload changed after reconnect: {check_remote} != {remote_sha}")
                 ui.status("WAIT", pb.tr(
@@ -198,6 +252,8 @@ def install(mod) -> None:
         state["policy"] = policy
         state["access"] = None
         state["reuse_backup"] = None
+        state["transport"] = None
+        state["payloads"] = {}
 
         do_backup = _yes_default(
             "EXPERT: сделать полную резервную копию перед миграцией? [Д/н]: ",
@@ -218,6 +274,7 @@ def install(mod) -> None:
         mod.pb.backup_tftp = backup_tftp_optional
         mod.pb.verify_stock_restore_backup = verify_backup_optional
         mod._backup_partition_bytes = backup_partition_optional
+        mod._select_and_preflight_transport = select_and_preflight_capture
         mod._write_partition = resilient_write_partition
         mod._remote_partition_sha = resilient_partition_sha
         mod.ubi.open_root_auto = open_root_auto_capture
@@ -227,11 +284,14 @@ def install(mod) -> None:
             mod.pb.backup_tftp = original_backup_tftp
             mod.pb.verify_stock_restore_backup = original_verify_backup
             mod._backup_partition_bytes = original_backup_partition_bytes
+            mod._select_and_preflight_transport = original_select_and_preflight_transport
             mod._write_partition = original_write_partition
             mod._remote_partition_sha = original_remote_partition_sha
             mod.ubi.open_root_auto = original_open_root_auto
             state["access"] = None
             state["policy"] = None
             state["reuse_backup"] = None
+            state["transport"] = None
+            state["payloads"] = {}
 
     mod.run_expert = run_expert_fast
