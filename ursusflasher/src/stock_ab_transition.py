@@ -461,14 +461,24 @@ def run(
         ui.status("READY", "Stock tcboot selector request verified: active=1; flagback untouched.")
 
         if reboot:
-            ui.status("ACTION", pb.tr(
-                "Перезагрузка в SLAVE/TRANSITION через штатный tcboot.",
-                "Rebooting into SLAVE/TRANSITION through stock tcboot.",
-            ))
-            try:
-                telnet.send_line("sync; reboot")
-            except Exception:
-                pass
+            ans = ui.prompt(pb.tr(
+                "Запись и readback завершены. Отправить сейчас перезагрузку через stock Telnet? [Д/н]: ",
+                "Write and readback completed. Send reboot over stock Telnet now? [Y/n]: ",
+            )).strip().lower()
+            if ans not in ("н", "нет", "n", "no"):
+                ui.status("ACTION", pb.tr(
+                    "Отправляю sync; reboot через stock Telnet для загрузки SLAVE/TRANSITION.",
+                    "Sending sync; reboot over stock Telnet to boot SLAVE/TRANSITION.",
+                ))
+                try:
+                    telnet.send_line("sync; reboot")
+                except Exception:
+                    pass
+            else:
+                ui.status("ACTION", pb.tr(
+                    "Перезагрузка не отправлена. Selector уже записан и применится при следующей ручной перезагрузке или включении питания.",
+                    "Reboot was not sent. The selector is already written and will apply on the next manual reboot or power-on.",
+                ))
         else:
             ui.status("ACTION", pb.tr(
                 "Требуется перезагрузка для применения selector.",
