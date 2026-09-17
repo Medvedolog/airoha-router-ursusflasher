@@ -139,7 +139,7 @@ YES I UNDERSTAND
 отдельное подтверждение selector после уже подтверждённой transaction
 ```
 
-Все остальные safety gates — автоматические: board identity, backup validity, geometry, hashes, stock slot readback, artifact provenance, NAND preflight, identity availability и final readback.
+Все остальные safety gates — автоматические: board identity, backup validity, geometry, hashes, stock slot readback, artifact provenance, NAND preflight, identity availability, persistent migration state, rollback evidence и final readback.
 
 Если automatic preflight не проходит, операция останавливается с конкретной причиной без предложения оператору вручную «продавить» normal path.
 
@@ -181,31 +181,27 @@ Initramfs сам запускает migration service. Host не должен о
 ```text
 BOOTED
 PREFLIGHT
-READY_TO_MIGRATE
-DESTRUCTIVE_STARTED
+MIGRATION_OK
+PROD_WRITING
 PREPARING_UBI
 WRITING_FIP
 WRITING_SYSUPGRADE
 RESTORING_IDENTITY
 WRITING_BL2_LAST
 VERIFYING_FINAL
-DONE
+PROD_VERIFIED
+BOOT_CONFIRMED
 FAILED
 ```
 
-Обязательный machine-readable status, например:
+`/tmp` state является только live telemetry и **не является источником истины для rollback safety**:
 
 ```text
 /tmp/ursus-install/status.json
-```
-
-и human-readable journal, например:
-
-```text
 /tmp/ursus-install/install.log
 ```
 
-Минимальные status fields:
+Минимальные live status fields:
 
 ```text
 state
@@ -219,7 +215,26 @@ last_verified
 error
 ```
 
-Потеря SSH, закрытие UrsusFlasher на ПК или временная потеря Ethernet после `DESTRUCTIVE_STARTED` не должны останавливать migration service и не должны вызывать повторный write после reconnect.
+Критический migration state обязан иметь persistent NAND-backed representation, устанавливаемый **до первого destructive write**. Нормативные состояния:
+
+```text
+MIGRATION_OK
+PROD_WRITING
+PROD_VERIFIED
+BOOT_CONFIRMED
+```
+
+Linux пишет persistent state через штатный environment interface (`fw_setenv`/эквивалент), а readback выполняется через `fw_printenv`/эквивалент до продолжения.
+
+Текущие MD OpenWrt `ubootenv`/`ubootenv2` являются UBI volumes, поэтому они не могут быть единственным доказательством safety во время операции, которая сама может переформатировать UBI. Правило fail-safe:
+
+```text
+persistent marker missing/corrupt/inconsistent -> rollback_allowed=false
+```
+
+После создания нового canonical UBI environment volumes должны быть восстановлены/созданы и persistent marker должен быть записан туда повторно до перехода к последующим destructive стадиям. Никакое отсутствие marker после reset не трактуется как «migration ещё не началась».
+
+Потеря SSH, закрытие UrsusFlasher на ПК или временная потеря Ethernet после `PROD_WRITING` не должны останавливать migration service и не должны вызывать повторный write после reconnect.
 
 ## 8. SSH contract
 
@@ -230,7 +245,7 @@ status polling
 stream/tail install log
 progress rendering
 reconnect after transient link loss
-pre-destructive recovery action when explicitly allowed by status
+pre-destructive recovery action when доказан rollback contract
 final production detection/verification
 ```
 
@@ -241,7 +256,7 @@ SSH не является обязательным транспортом produc
 ```text
 migration continues locally
 host reconnects
-host re-reads status.json
+host re-reads live status + persistent state
 host never blindly repeats a write command
 ```
 
@@ -263,6 +278,14 @@ ursusstockslot slave
 status  -> read-only decode current stock selector
 master  -> set only active=0
 slave   -> set only active=1
+```
+
+Инвариант изменения selector переносится буквально:
+
+```python
+struct.pack_into("<I", out, 0, target)
+if out[4:] != flag[4:]:
+    raise RuntimeError("activation flag changed fields other than active")
 ```
 
 Утилита не должна считать `mtd8` универсальным API. Она обязана:
@@ -288,19 +311,62 @@ URSUS_STOCKSLOT_DONE target=master active=0 readback=PASS next=RESET
 
 В Linux `next=RESET` означает следующий reboot; host выполняет `sync` и штатный/forced reboot (`reboot -f` при необходимости), а не U-Boot command `reset`.
 
+### Guard обязан жить внутри утилиты
+
+`ursusstockslot master` не просто скрывается UI при опасном состоянии — сама utility обязана отказать в selector write, если rollback safety не доказана.
+
+Public/normal path не должен иметь `--force` bypass этого guard.
+
+Перед `master` utility сама проверяет persistent migration state и фактическое состояние stock layout. Caller/UrsusFlasher не может отменить эту проверку своим локальным флагом.
+
 ## 10. No-UART rollback contract
 
-До начала final destructive migration:
+`rollback_allowed` является **derived result**, а не доверенным boolean из `/tmp/status.json`.
+
+Rollback на stock SLOT1 разрешён только если **одновременно** выполнены оба независимых условия:
 
 ```text
-destructive_started=false
-stock_master_intact=true
-rollback_allowed=true
+A. persistent migration state однозначно показывает pre-destructive состояние
+   (например MIGRATION_OK, но не PROD_WRITING/PROD_VERIFIED/BOOT_CONFIRMED)
+
+B. фактический NAND probe доказывает, что stock fallback всё ещё цел:
+   expected stock partition/layout geometry matches
+   nsb_master соответствует verified stock evidence
+   critical stock regions, которые migration могла затронуть, соответствуют verified backup/evidence
+   нет признаков partially converted UBI/layout
 ```
 
-SLOT1/master является гарантированным no-UART escape path.
+Если A и B расходятся, marker отсутствует, environment повреждён, probe неполон или состояние неоднозначно:
 
-Если initramfs booted, но stage2 preflight не прошёл, предпочтительное автоматическое восстановление:
+```text
+rollback_allowed=false
+ursusstockslot master -> REFUSED
+```
+
+Таким образом reset/power-loss после начала migration не может восстановить `/tmp` в «безопасное» состояние и вызвать опасный автоматический rollback.
+
+До первого destructive write stage2 обязан выполнить и проверить:
+
+```text
+persistent state -> PROD_WRITING
+readback -> PASS
+sync
+only then first destructive NAND operation
+```
+
+После final critical readback:
+
+```text
+persistent state -> PROD_VERIFIED
+```
+
+После доказанного production boot:
+
+```text
+persistent state -> BOOT_CONFIRMED
+```
+
+Если initramfs booted, но stage2 preflight не прошёл **до `PROD_WRITING`**, и оба rollback proofs PASS, предпочтительное автоматическое восстановление:
 
 ```text
 ursusstockslot status
@@ -311,25 +377,21 @@ ursusstockslot status
 -> stock Nokia SLOT1
 ```
 
-Если автоматический rollback не отработал, UrsusFlasher через SSH выполняет тот же contract. Это действие не требует второго подтверждения, если оно выполняется как recovery внутри уже подтверждённой Vanilla transaction и `rollback_allowed=true`.
+Если автоматический rollback не отработал, UrsusFlasher через SSH выполняет тот же guarded contract. Это действие не требует второго подтверждения внутри уже подтверждённой Vanilla transaction.
 
-Для отдельной ручной EXPERT-команды вне активной transaction selector write может иметь одно обычное `y/N`.
+Для отдельной ручной EXPERT-команды вне активной transaction selector write может иметь одно обычное `y/N`, но internal rollback guard всё равно обязателен.
 
-После:
-
-```text
-destructive_started=true
-```
-
-автоматический возврат на SLOT1 запрещён. Stock rootfs/layout уже может быть частично уничтожен. В этом состоянии recovery policy — остаться в initramfs, показать точную failed stage и выполнять только доказанную repair/retry strategy; UART/BootROM остаётся последним recovery path, но не должен вызываться раньше времени автоматическим переключением на потенциально невалидный stock slot.
+После `PROD_WRITING` автоматический возврат на SLOT1 запрещён. Stock rootfs/layout уже может быть частично уничтожен. В этом состоянии recovery policy — остаться в initramfs, показать точную failed stage и выполнять только доказанную repair/retry strategy; UART/BootROM остаётся последним recovery path, но не должен вызываться раньше времени автоматическим переключением на потенциально невалидный stock slot.
 
 ## 11. Final Vanilla transaction
 
 После успешного initramfs preflight migration выполняется без дополнительных prompts:
 
 ```text
-prepare canonical OpenWrt layout
+persistent state -> PROD_WRITING + readback PASS
+-> prepare canonical OpenWrt layout
 -> create/format canonical UBI
+-> recreate/preserve ubootenv/ubootenv2 and restore persistent state before later destructive stages
 -> create required volumes
 -> restore/preserve board identity in OpenWrt-expected locations
 -> write Vanilla BL31/U-Boot FIP
@@ -337,7 +399,10 @@ prepare canonical OpenWrt layout
 -> verify critical data
 -> write BL2/preloader LAST
 -> final full/readback verification
+-> persistent state -> PROD_VERIFIED
 -> reboot
+-> verify production boot
+-> persistent state -> BOOT_CONFIRMED
 ```
 
 После начала final write запрещены automatic backend switching и blind retries другим writer implementation.
@@ -350,15 +415,20 @@ prepare canonical OpenWrt layout
 stock -> SLOT2 pregnant initramfs boot PASS
 initramfs Ethernet + SSH PASS
 status.json/log monitoring PASS
-intentional pre-destructive preflight failure -> master rollback PASS
+persistent migration marker write/readback PASS
+intentional pre-destructive preflight failure -> guarded master rollback PASS
 selector master readback PASS
 reboot to untouched stock SLOT1 PASS
+power/reset simulation after PROD_WRITING -> master rollback REFUSED PASS
+missing/corrupt marker -> master rollback REFUSED PASS
+stock-layout evidence mismatch -> master rollback REFUSED PASS
 autonomous stage2 without host commands PASS
 canonical UBI migration PASS
 identity restore PASS
 Vanilla FIP/U-Boot PASS
 Fudan/FM25G02B boot support PASS
 BL2 LAST + readback PASS
+PROD_VERIFIED/BOOT_CONFIRMED state transitions PASS
 cold boot to production OpenWrt PASS
 subsequent normal OpenWrt sysupgrade PASS
 Ursus-specific persistent code ABSENT
@@ -378,13 +448,16 @@ Known CLI network ownership problem (`ping`/`wget`/`tftpboot`/`dhcp` versus live
 1. Freeze current TRANSITION2 network investigation as completed diagnostic R&D for Vanilla needs.
 2. Import MedveFlasher proven autonomous stage2 mechanics into UrsusFlasher item 4.
 3. Build pregnant OpenWrt initramfs with embedded Vanilla artifacts and manifest.
-4. Port ursusstockslot status/master/slave semantics into Linux initramfs with full readback.
-5. Add status.json + install.log + SSH monitoring/reconnect to UrsusFlasher.
-6. Keep one y/N before the complete Vanilla transaction; remove codewords/repeated confirms.
-7. HW-test deliberate initramfs preflight failure and automatic/host-assisted return to master SLOT1.
-8. Only after rollback PASS, enable final destructive UBI migration.
-9. HW-test full autonomous Vanilla migration and production boot.
-10. Then generalize board-profile implementation for MF without copying MD offsets blindly.
+4. Port ursusstockslot status/master/slave semantics into Linux initramfs with full readback and internal rollback guard.
+5. Implement persistent migration state MIGRATION_OK/PROD_WRITING/PROD_VERIFIED/BOOT_CONFIRMED.
+6. Treat /tmp/status.json as telemetry only; derive rollback from persistent state + NAND evidence.
+7. Add install.log + SSH monitoring/reconnect to UrsusFlasher.
+8. Keep one y/N before the complete Vanilla transaction; remove codewords/repeated confirms.
+9. HW-test deliberate pre-destructive failure and automatic/host-assisted return to master SLOT1.
+10. HW-test reset/power-loss semantics after PROD_WRITING: rollback must be refused.
+11. Only after rollback/refusal guards PASS, enable final destructive UBI migration.
+12. HW-test full autonomous Vanilla migration and production boot.
+13. Then generalize board-profile implementation for MF without copying MD offsets blindly.
 ```
 
 ## 15. Repository/operator rules
@@ -394,6 +467,9 @@ Known CLI network ownership problem (`ping`/`wget`/`tftpboot`/`dhcp` versus live
 - Do not commit device backups, plaintext credentials, serial/GPON identity or other device secrets.
 - Prefer automatic evidence/readback over operator ceremony.
 - Normal destructive transaction: one meaningful `y/N`, no codewords and no repeated confirmations.
+- `/tmp` telemetry never authorizes rollback.
+- Missing/unknown persistent state is unsafe by default and must refuse stock master rollback.
+- `ursusstockslot master` itself enforces the rollback guard; caller/UI is not the trust boundary.
 - Never claim CI PASS as HW PASS.
 - Do not auto-switch to stock master after final destructive migration has begun.
 - Preserve Fudan/FMSH hardware support in final MD Vanilla U-Boot provenance.
