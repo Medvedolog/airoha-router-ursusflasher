@@ -19,12 +19,15 @@ on:
       - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
       - 'ursusflasher/src/backup_progress.py'
       - 'ursusflasher/src/transition_trace.py'
+      - 'ursusflasher/src/transition_fastpath.py'
       - 'ursusflasher/src/device_state.py'
       - 'ursusflasher/src/expert.py'
       - 'ursusflasher/src/expert_airoha.py'
       - 'ursusflasher/src/expert_multi.py'
       - 'ursusflasher/src/stock_ab_transition.py'
       - 'ursusflasher/src/stock_fit_wrapper.py'
+      - 'ursusflasher/src/stock_slot_uart.py'
+      - 'ursusflasher/src/stock_slot_telnet.py'
       - 'ursusflasher/tools/selftest_backup_progress.py'
       - 'ursusflasher/tools/selftest_transition_trace.py'
       - 'ursusflasher/tools/selftest_transition_expert_item4.py'
@@ -58,12 +61,15 @@ jobs:
           python3 -m py_compile \
             ursusflasher/src/backup_progress.py \
             ursusflasher/src/transition_trace.py \
+            ursusflasher/src/transition_fastpath.py \
             ursusflasher/src/device_state.py \
             ursusflasher/src/expert.py \
             ursusflasher/src/expert_airoha.py \
             ursusflasher/src/expert_multi.py \
             ursusflasher/src/stock_ab_transition.py \
             ursusflasher/src/stock_fit_wrapper.py \
+            ursusflasher/src/stock_slot_uart.py \
+            ursusflasher/src/stock_slot_telnet.py \
             ursusflasher/tools/selftest_backup_progress.py \
             ursusflasher/tools/selftest_transition_trace.py \
             ursusflasher/tools/selftest_transition_expert_item4.py \
@@ -150,7 +156,9 @@ jobs:
             operator trace shows payload/source, per-device SLOT2 build, selector BEFORE/AFTER, exact write target/writer and full readback SHA
             exact destructive targets: nsb_slave then flag; nsb_master and flagback untouched
             full nsb_slave readback mismatch aborts before selector write
+            a stock reset may clear /tmp; after reconnect the already written SLOT2 is SHA-checked, matching data is not rewritten, and the next frozen payload is re-uploaded with the same transport before selector write
             flag readback mismatch aborts completion
+            item 13 offers either stock root Telnet or USB-UART/U-Boot selector switching; both change active only and never write flagback/NSB slots
             shipped START_EXPERT -> expert_airoha -> expert_multi item 4 routing is behavior-tested
             missing/unknown stock Web family metadata is tolerated only after exact model/root proof and stock MTD geometry validation
             canonical registry is item4=vanilla_transition and item9=restore_factory_bootarea
