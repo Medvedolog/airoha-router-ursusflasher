@@ -46,12 +46,12 @@ import sys
 p = Path(sys.argv[1])
 s = p.read_text()
 old = '''\tret = arht_eth_write_hwaddr(dev);\n\tif (ret) {\n\t\tprintf("URSUS_NETRESET_FAIL stage=HWADDR ret=%d\\n", ret);\n\t\treturn CMD_RET_FAILURE;\n\t}\n'''
-new = '''\t{\n\t\tstruct eth_pdata *pdata = dev_get_plat(dev);\n\t\tstatic const u8 fixed_mac[ARP_HLEN] = {\n\t\t\t0x02, 0x55, 0x52, 0x53, 0x55, 0x53\n\t\t};\n\n\t\tif (!pdata) {\n\t\t\tprintf("URSUS_NETRESET_FAIL stage=FIXED_MAC reason=NO_ETH_PDATA\\n");\n\t\t\treturn CMD_RET_FAILURE;\n\t\t}\n\t\tmemcpy(pdata->enetaddr, fixed_mac, sizeof(fixed_mac));\n\t\tret = eth_env_set_enetaddr("ethaddr", fixed_mac);\n\t\tprintf("URSUS_TRANSITION_FIXED_MAC mac=%pM env_ret=%d\\n",\n\t\t       fixed_mac, ret);\n\t\tif (ret)\n\t\t\treturn CMD_RET_FAILURE;\n\t}\n\n\tret = arht_eth_write_hwaddr(dev);\n\tif (ret) {\n\t\tprintf("URSUS_NETRESET_FAIL stage=HWADDR ret=%d\\n", ret);\n\t\treturn CMD_RET_FAILURE;\n\t}\n'''
+new = '''\t{\n\t\tstruct eth_pdata *pdata = dev_get_plat(dev);\n\t\tstatic const u8 fixed_mac[ARP_HLEN] = {\n\t\t\t0x02, 0x55, 0x52, 0x53, 0x55, 0x53\n\t\t};\n\n\t\tif (!pdata) {\n\t\t\tprintf("URSUS_NETRESET_FAIL stage=FIXED_MAC reason=NO_ETH_PDATA\\n");\n\t\t\treturn CMD_RET_FAILURE;\n\t\t}\n\t\tmemcpy(pdata->enetaddr, fixed_mac, sizeof(fixed_mac));\n\t\tret = eth_env_set_enetaddr("ethaddr", fixed_mac);\n\t\tprintf("URSUS_TRANSITION_FIXED_MAC mac=%pM env_ret=%d\\n",\n\t\t       fixed_mac, ret);\n\t\tif (ret && ret != -EEXIST)\n\t\t\treturn CMD_RET_FAILURE;\n\t}\n\n\tret = arht_eth_write_hwaddr(dev);\n\tif (ret) {\n\t\tprintf("URSUS_NETRESET_FAIL stage=HWADDR ret=%d\\n", ret);\n\t\treturn CMD_RET_FAILURE;\n\t}\n'''
 count = s.count(old)
 if count != 1:
     raise SystemExit(f"TRANSITION2-FIXEDMAC1 source match count={count}, expected=1")
 p.write_text(s.replace(old, new))
-print("TRANSITION2-FIXEDMAC1 source transform=PASS mac=02:55:52:53:55:53")
+print("TRANSITION2-FIXEDMAC1 source transform=PASS mac=02:55:52:53:55:53 allow_env_eexist=1")
 PYMAC
 python3 - "$WORK/u-boot/cmd/ursusdispatch.c" <<'PYWEB'
 from pathlib import Path
@@ -125,6 +125,7 @@ grep -Fq 'URSUS_NETDBG_RX_RING' drivers/net/airoha_eth.c || { echo 'TRANSITION2-
 grep -Fq 'URSUS_NETDBG_FIRST_RX' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETDBG1: first RX marker missing' >&2; exit 1; }
 grep -Fq 'ursusnetreset, 1, 0, do_ursusnetreset' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETFIX2: reset command missing' >&2; exit 1; }
 grep -Fq 'URSUS_TRANSITION_FIXED_MAC mac=%pM env_ret=%d' drivers/net/airoha_eth.c || { echo 'TRANSITION2-FIXEDMAC1: fixed MAC marker missing' >&2; exit 1; }
+grep -Fq 'ret && ret != -EEXIST' drivers/net/airoha_eth.c || { echo 'TRANSITION2-FIXEDMAC1: EEXIST tolerance missing' >&2; exit 1; }
 
 make -j"${JOBS:-$(nproc)}"
 
@@ -233,6 +234,7 @@ printf '%s\n' \
     "NETRESET_TIMING=AUTOMATIC_BEFORE_WEBFAILSAFE" \
     "TRANSITION_FIXED_MAC=02:55:52:53:55:53" \
     "TRANSITION_FIXED_MAC_SCOPE=RAM_ENV_AND_ETH_PDATA" \
+    "TRANSITION_FIXED_MAC_ENV_EEXIST=ALLOWED" \
     "STOCKSLOT_BUILD=TRANSITION2-STOCKSLOT1" \
     "STOCKSLOT_COMMAND=ursusstockslot status|master|slave" \
     "STOCKSLOT_FLAG_OFFSET=0x05240000" \
