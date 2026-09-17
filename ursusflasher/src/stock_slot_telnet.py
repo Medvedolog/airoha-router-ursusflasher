@@ -12,6 +12,7 @@ import ursusboot_install as ubi
 
 
 REMOTE_FLAG = "/tmp/ursus-stock-slot-flag.bin"
+REMOTE_HEAD = "/tmp/ursus-stock-slot-head.bin"
 
 
 def tr(ru: str, en: str) -> str:
@@ -36,12 +37,23 @@ def _parse_words(text: str) -> tuple[int, int, int, int]:
 
 
 def _read_words(telnet, dev: str) -> tuple[int, int, int, int]:
-    rc, text = telnet.command_clean(
-        f"od -An -tx4 -N16 {shlex.quote(dev)} 2>/dev/null",
-        timeout=20,
+    qdev = shlex.quote(dev)
+    qhead = shlex.quote(REMOTE_HEAD)
+    cmd = (
+        f"rm -f {qhead}; "
+        f"dd if={qdev} of={qhead} bs=16 count=1 2>/dev/null || exit 91; "
+        f"if command -v od >/dev/null 2>&1; then od -An -tx4 -N16 {qhead}; "
+        f"elif command -v busybox >/dev/null 2>&1; then busybox od -An -tx4 -N16 {qhead}; "
+        f"elif command -v hexdump >/dev/null 2>&1; then hexdump -v -e '4/4 \"%08x \" \"\\n\"' {qhead}; "
+        f"else exit 92; fi"
     )
+    rc, text = telnet.command_clean(cmd, timeout=20)
     if rc:
-        raise RuntimeError(tr("не удалось прочитать selector flag", "failed to read the selector flag"))
+        proven._write_session_only(f"[STOCKSLOT-TELNET-READ] dev={dev} rc={rc} text={text[-1000:]!r}")
+        raise RuntimeError(tr(
+            "не удалось прочитать selector flag через dd/BusyBox",
+            "failed to read the selector flag through dd/BusyBox",
+        ))
     return _parse_words(text)
 
 
