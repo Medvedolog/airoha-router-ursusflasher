@@ -55,6 +55,11 @@ def _console_write(data: bytes, log) -> None:
         print(data.decode("utf-8", errors="replace"), end="", flush=True)
 
 
+def _send_enter(serial_port: proven.RecoverySerial) -> None:
+    """Wake an already-stopped U-Boot prompt without abusing command validation."""
+    serial_port.write(b"\r")
+
+
 def _acquire_uboot_prompt(serial_port: proven.RecoverySerial, log, timeout: float = 120.0) -> None:
     """Acquire an interactive stock/Ursus/OpenWrt U-Boot prompt.
 
@@ -91,7 +96,7 @@ def _acquire_uboot_prompt(serial_port: proven.RecoverySerial, log, timeout: floa
         return
     if not menu_visible:
         print(tr("[UART] Посылаю Enter, чтобы проявить молчащий U-Boot prompt.", "[UART] Sending Enter to reveal a silent U-Boot prompt."))
-        proven._uboot_send_line(serial_port, "")
+        _send_enter(serial_port)
     else:
         proven._uboot_send_break(serial_port, menu_visible=True)
 
@@ -132,7 +137,7 @@ def _acquire_uboot_prompt(serial_port: proven.RecoverySerial, log, timeout: floa
             proven._uboot_send_break(serial_port, menu_visible=True)
             last_break = now
         elif not menu_visible and now - last_wake >= 2.0:
-            proven._uboot_send_line(serial_port, "")
+            _send_enter(serial_port)
             last_wake = now
     raise proven.Error(tr(
         "U-Boot prompt не получен. Проверьте UART и повторите с перезагрузкой роутера.",
