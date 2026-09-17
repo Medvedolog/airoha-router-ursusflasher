@@ -96,7 +96,7 @@
      int ret;
 --- a/common/board_r.c
 +++ b/common/board_r.c
-@@ -417,6 +417,21 @@ static int initr_net(void)
+@@ -417,4 +417,19 @@ static int initr_net(void)
  {
 +	int ret;
 +
