@@ -3,9 +3,9 @@
 @@ -88,2 +88,14 @@ static int ursus_enter_webfailsafe(const char *reason, unsigned long hold_ms)
 -    ret = run_command("ursusweb", 0);
 -    printf("URSUS_WEB_RETURNED ret=%d\nURSUS_RECOVERY_STILL_LATCHED=1\n", ret);
-+    printf("URSUS_WEB_COMMAND_BEGIN time_ms=%lu\n", get_timer(0));
++    printf("URSUS_WEB_COMMAND_BEGIN\n");
 +    ret = run_command("ursusweb", 0);
-+    printf("URSUS_WEB_COMMAND_RETURN ret=%d time_ms=%lu\n", ret, get_timer(0));
++    printf("URSUS_WEB_COMMAND_RETURN ret=%d\n", ret);
 +    printf("URSUS_WEB_RETURNED ret=%d\nURSUS_RECOVERY_STILL_LATCHED=1\n", ret);
 +#if URSUS_TRANSITION_WEB_ONLY
 +    if (ret)
