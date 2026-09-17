@@ -1,16 +1,9 @@
 --- a/cmd/ursusdispatch.c
 +++ b/cmd/ursusdispatch.c
-@@ -155,7 +155,12 @@ static int do_ursusdispatch(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
-         return CMD_RET_FAILURE;
-     }
-     printf("URSUS_TRANSITION_NET_SANITIZE_DONE\n");
+@@ -157 +157,5 @@
 -    return ursus_enter_webfailsafe("TRANSITION_WEB_ONLY", 0);
 +    ursus_recovery_latched = true;
-+    memcpy(ursus_recovery_reason, "TRANSITION_WEB_ONLY",
-+           sizeof("TRANSITION_WEB_ONLY"));
++    snprintf(ursus_recovery_reason, sizeof(ursus_recovery_reason), "%s",
++             "TRANSITION_WEB_ONLY");
 +    printf("URSUS_TRANSITION_CANONICAL_RECOVERY=1 reason=%s\n",
 +           ursus_recovery_reason);
-+    /* Fall through to the canonical persistent recovery dispatch below. */
- #endif
- 
-     printf("URSUS_RESET_POLICY=HELD_AT_BOOT debounce_ms=%lu legacy_hold_ms=%lu\n",
