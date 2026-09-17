@@ -104,7 +104,7 @@
  
  	qid = 0;
  	q = &qdma->q_rx[qid];
-@@ -1164,12 +1194,29 @@ static int airoha_eth_recv(struct udevice *dev, int flags, uchar **packetp)
+@@ -1164,12 +1194,30 @@ static int airoha_eth_recv(struct udevice *dev, int flags, uchar **packetp)
  	dma_unmap_unaligned(virt_to_phys(desc), sizeof(*desc),
  			    DMA_FROM_DEVICE);
  
@@ -131,7 +131,7 @@
 +	if (!ursus_netdbg_packet_seen) {
 +		ursus_netdbg_packet_seen = true;
 +		printf("URSUS_NETDBG_FIRST_RX_PACKET len=%u desc_done=1 head=%d\n",
-+		       length, q->head);
++			       length, q->head);
 +	}
  
  	*packetp = phys_to_virt(desc->addr);
