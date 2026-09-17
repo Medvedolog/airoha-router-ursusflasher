@@ -96,7 +96,7 @@
      int ret;
 --- a/common/board_r.c
 +++ b/common/board_r.c
-@@ -417,6 +417,13 @@ static int initr_net(void)
+@@ -417,6 +417,21 @@ static int initr_net(void)
  {
 +	int ret;
 +
@@ -105,6 +105,56 @@
 +	if (ret)
 +		return ret;
 +
++	ret = env_set("ipaddr", "192.168.1.1");
++	if (ret)
++		return ret;
++	ret = env_set("netmask", "255.255.255.0");
++	if (ret)
++		return ret;
++	printf("URSUS_TRANSITION_PRENET_IPV4 ip=192.168.1.1 netmask=255.255.255.0\n");
++
  	puts("Net:   ");
  	eth_initialize();
  #if defined(CONFIG_RESET_PHY_R)
+--- a/drivers/net/airoha_eth.c
++++ b/drivers/net/airoha_eth.c
+@@ -1099,6 +1099,8 @@ static int airoha_eth_send(struct udevice *dev, void *packet, int length)
+ 	u8 fport;
+ 	u32 val;
+ 	int i;
++	static bool ursus_netdbg_tx_seen;
++	bool ursus_first_tx = !ursus_netdbg_tx_seen;
+ 
+ 	/*
+ 	 * There is no need to pad short TX packets to 60 bytes since the
+@@ -1115,6 +1117,16 @@ static int airoha_eth_send(struct udevice *dev, void *packet, int length)
+ 
+ 	fport = airoha_get_fe_port(port);
+ 
++	if (ursus_first_tx) {
++		ursus_netdbg_tx_seen = true;
++		if (length >= 14)
++			printf("URSUS_NETDBG_FIRST_TX len=%d dst=%pM src=%pM ethertype=0x%02x%02x fport=%u\n",
++			       length, packet, (u8 *)packet + 6,
++			       ((u8 *)packet)[12], ((u8 *)packet)[13], fport);
++		else
++			printf("URSUS_NETDBG_FIRST_TX len=%d frame=SHORT fport=%u\n",
++			       length, fport);
++	}
++
+ 	msg0 = 0;
+ 	msg1 = FIELD_PREP(QDMA_ETH_TXMSG_FPORT_MASK, fport) |
+ 	       FIELD_PREP(QDMA_ETH_TXMSG_METER_MASK, 0x7f);
+@@ -1145,6 +1157,13 @@ static int airoha_eth_send(struct udevice *dev, void *packet, int length)
+ 		udelay(1);
+ 	}
+ 
++	if (ursus_first_tx)
++		printf("URSUS_NETDBG_FIRST_TX_DONE done=%u head=%d next=%d cpu_idx=0x%08x dma_idx=0x%08x\n",
++		       !!(desc->ctrl & QDMA_DESC_DONE_MASK), q->head, index,
++		       airoha_qdma_rr(qdma, REG_TX_CPU_IDX(qid)),
++		       airoha_qdma_rr(qdma, REG_TX_DMA_IDX(qid)));
++
+ 	/* Return error if for some reason the descriptor never ACK */
+ 	if (!(desc->ctrl & QDMA_DESC_DONE_MASK))
+ 		return -EAGAIN;
