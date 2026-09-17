@@ -1,10 +1,11 @@
 --- a/drivers/net/airoha_eth.c
 +++ b/drivers/net/airoha_eth.c
-@@ -8,5 +8,7 @@
+@@ -8,5 +8,8 @@
   */
  
 +#include <command.h>
 +#include <net.h>
++#include <environment.h>
  #include <dm.h>
  #include <dm/device-internal.h>
  #include <dm/devres.h>
