@@ -14,6 +14,7 @@ on:
       - 'ursusboot/patches/200-transition2-uart-fallback.patch'
       - 'ursusboot/patches/205-transition2-an7581-gdm1-enable.patch'
       - 'ursusboot/patches/210-transition2-netdbg1-netreset.patch'
+      - 'ursusboot/patches/215-transition2-canonical-web.patch'
       - 'ursusboot/patches/220-transition2-stockslot-command.patch'
       - 'ursusboot/scripts/build_md_transition1.sh'
       - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
@@ -86,12 +87,19 @@ jobs:
           python3 ursusflasher/tools/selftest_expert_launcher_item4.py
           python3 ursusflasher/tools/selftest_stateui6_action_preflight.py
           python3 ursusflasher/tools/selftest_device_state_v529.py
+          grep -Fq 'serial_port.write(b"\r")' ursusflasher/src/stock_slot_uart.py
+          if grep -Fq '_uboot_send_line(serial_port, "")' ursusflasher/src/stock_slot_uart.py; then
+            echo 'stock slot UART wake regressed to rejected empty U-Boot command' >&2
+            exit 1
+          fi
 
       - name: Build TRANSITION2
         run: |
           bash ursusboot/scripts/build_md_transition1.sh
           test -s work/md-transition2/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION2.linuximg
-          grep -Fq 'TRANSITION_ENTRY=ursusdispatch->net-sanitize->ursusweb' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
+          grep -Fq 'TRANSITION_ENTRY=ursusdispatch->net-sanitize->canonical-recovery->ursusweb' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
+          grep -Fq 'WEB_LOOP_POLICY=CANONICAL_PERSISTENT_RECOVERY' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
+          grep -Fq 'UART_FALLBACK=AFTER_WEB_COMMAND_RETURN' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
           grep -Fq 'HANDOFF_ONLY=0' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
 
       - name: Stage payload and metadata
@@ -108,7 +116,7 @@ jobs:
             'product_lifecycle':'transition','persistence_target':'NONE',
             'final_target':'VANILLA_OPENWRT_UBI','stock_inner_format':'ARM64_LINUX_IMAGE_HANDOFF',
             'stock_kernel_load':'0x80088000','text_base':'0x81e00000',
-            'transition_entry':'ursusdispatch->ursusweb','handoff_only':False,
+            'transition_entry':'ursusdispatch->net-sanitize->canonical-recovery->ursusweb','handoff_only':False,
             'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),
             'source_commit':subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip(),
             'hardware_status':'HW_PENDING_EXPERT_ITEM4_TRANSITION2_WEB'
@@ -121,7 +129,7 @@ jobs:
           data, meta=stock_ab_transition._load_payload(policy)
           assert meta['product_lifecycle']=='transition'
           assert 'runtime_role' not in meta
-          assert meta['transition_entry']=='ursusdispatch->ursusweb'
+          assert meta['transition_entry']=='ursusdispatch->net-sanitize->canonical-recovery->ursusweb'
           assert meta['handoff_only'] is False
           assert meta['final_target']=='VANILLA_OPENWRT_UBI'
           print('TRANSITION2_QA=PASS', len(data), meta['sha256'])
@@ -159,6 +167,9 @@ jobs:
             a stock reset may clear /tmp; after reconnect the already written SLOT2 is SHA-checked, matching data is not rewritten, and the next frozen payload is re-uploaded with the same transport before selector write
             flag readback mismatch aborts completion
             item 13 offers either stock root Telnet or USB-UART/U-Boot selector switching; both change active only and never write flagback/NSB slots
+            UART prompt wake sends raw CR and cannot be rejected by the U-Boot command validator
+            TRANSITION2 keeps NETFIX2, then falls through into the canonical persistent recovery Web entry
+            UART fallback is reachable only after URSUS_WEB_COMMAND_RETURN
             shipped START_EXPERT -> expert_airoha -> expert_multi item 4 routing is behavior-tested
             missing/unknown stock Web family metadata is tolerated only after exact model/root proof and stock MTD geometry validation
             canonical registry is item4=vanilla_transition and item9=restore_factory_bootarea
