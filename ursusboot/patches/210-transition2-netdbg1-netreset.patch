@@ -104,7 +104,7 @@
  
  	qid = 0;
  	q = &qdma->q_rx[qid];
-@@ -1164,12 +1194,23 @@ static int airoha_eth_recv(struct udevice *dev, int flags, uchar **packetp)
+@@ -1164,12 +1194,28 @@ static int airoha_eth_recv(struct udevice *dev, int flags, uchar **packetp)
  	dma_unmap_unaligned(virt_to_phys(desc), sizeof(*desc),
  			    DMA_FROM_DEVICE);
  
@@ -114,6 +114,13 @@
 +			ursus_netdbg_empty_seen = true;
 +			printf("URSUS_NETDBG_FIRST_RX ret=%d desc_done=0 head=%d\n",
 +			       -EAGAIN, q->head);
++			printf("URSUS_SWDBG_RX qid=%d global=0x%08x ring_base=0x%08x ring_size=0x%08x cpu_idx=0x%08x dma_idx=0x%08x\n",
++			       qid,
++			       airoha_qdma_rr(qdma, REG_QDMA_GLOBAL_CFG),
++			       airoha_qdma_rr(qdma, REG_RX_RING_BASE(qid)),
++			       airoha_qdma_rr(qdma, REG_RX_RING_SIZE(qid)),
++			       airoha_qdma_rr(qdma, REG_RX_CPU_IDX(qid)),
++			       airoha_qdma_rr(qdma, REG_RX_DMA_IDX(qid)));
 +		}
  		return -EAGAIN;
 +	}
@@ -129,10 +136,42 @@
  
  	*packetp = phys_to_virt(desc->addr);
  
-@@ -1281,6 +1322,97 @@ static const struct eth_ops airoha_eth_ops = {
+@@ -1281,6 +1326,128 @@ static const struct eth_ops airoha_eth_ops = {
  	.write_hwaddr = arht_eth_write_hwaddr,
  };
  
++static void ursus_swdbg_dump(const char *stage, struct airoha_gdm_port *port)
++{
++	struct airoha_qdma *qdma = port->qdma;
++	struct airoha_eth *eth = qdma->eth;
++	int i;
++
++	printf("URSUS_SWDBG_BEGIN stage=%s\n", stage);
++	if (eth->switch_regs) {
++		printf("URSUS_SWDBG_SWITCH stage=%s mfc=0x%08x smaccr0=0x%08x smaccr1=0x%08x\n",
++		       stage,
++		       airoha_rr(eth->switch_regs, SWITCH_MFC),
++		       airoha_rr(eth->switch_regs, SWITCH_SMACCR0),
++		       airoha_rr(eth->switch_regs, SWITCH_SMACCR1));
++		for (i = 0; i <= 6; i++)
++			printf("URSUS_SWDBG_PMCR stage=%s port=%d value=0x%08x\n",
++			       stage, i, airoha_rr(eth->switch_regs, SWITCH_PMCR(i)));
++	} else {
++		printf("URSUS_SWDBG_SWITCH stage=%s state=UNMAPPED\n", stage);
++	}
++	printf("URSUS_SWDBG_FE stage=%s gdm_port=%d gdm_fwd=0x%08x\n",
++	       stage, port->id,
++	       airoha_fe_rr(eth, REG_GDM_FWD_CFG(port->id)));
++	printf("URSUS_SWDBG_QDMA stage=%s global=0x%08x ring_base=0x%08x ring_size=0x%08x cpu_idx=0x%08x dma_idx=0x%08x\n",
++	       stage,
++	       airoha_qdma_rr(qdma, REG_QDMA_GLOBAL_CFG),
++	       airoha_qdma_rr(qdma, REG_RX_RING_BASE(0)),
++	       airoha_qdma_rr(qdma, REG_RX_RING_SIZE(0)),
++	       airoha_qdma_rr(qdma, REG_RX_CPU_IDX(0)),
++	       airoha_qdma_rr(qdma, REG_RX_DMA_IDX(0)));
++	printf("URSUS_SWDBG_END stage=%s\n", stage);
++}
++
 +static bool ursus_netreset_used;
 +
 +static int do_ursusnetreset(struct cmd_tbl *cmdtp, int flag, int argc,
@@ -161,8 +200,9 @@
 +	qdma = port->qdma;
 +	eth = qdma->eth;
 +
-+	printf("URSUS_NETRESET_BEGIN build=TRANSITION2-NETFIX2 dev=%s\n",
++	printf("URSUS_NETRESET_BEGIN build=TRANSITION2-SWDBG1 dev=%s\n",
 +	       dev->name);
++	ursus_swdbg_dump("PRE_NETRESET", port);
 +	printf("URSUS_NETRESET_STAGE=STOP_CURRENT_DMA\n");
 +	airoha_eth_stop(dev);
 +
@@ -214,6 +254,7 @@
 +		return CMD_RET_FAILURE;
 +	}
 +
++	ursus_swdbg_dump("POST_NETRESET", port);
 +	printf("URSUS_NETRESET_DONE result=PASS next=START_URSUSWEB\n");
 +	return CMD_RET_SUCCESS;
 +}
