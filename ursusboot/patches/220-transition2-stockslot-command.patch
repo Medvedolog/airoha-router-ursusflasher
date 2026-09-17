@@ -94,3 +94,17 @@
  static int do_ursusdispatch(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
  {
      int ret;
+--- a/common/board_r.c
++++ b/common/board_r.c
+@@ -417,6 +417,13 @@ static int initr_net(void)
+ {
++	int ret;
++
++	ret = env_set("ethaddr", "02:55:52:53:55:53");
++	printf("URSUS_TRANSITION_PRENET_MAC mac=02:55:52:53:55:53 env_ret=%d\n", ret);
++	if (ret)
++		return ret;
++
+ 	puts("Net:   ");
+ 	eth_initialize();
+ #if defined(CONFIG_RESET_PHY_R)
