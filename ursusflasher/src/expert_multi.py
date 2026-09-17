@@ -177,13 +177,13 @@ def _show_factory_restore_action(app: dict[int, ds.ActionApplicability]) -> None
     )
 
 
-def _show_stock_slot_uart_action() -> None:
+def _show_stock_slot_action() -> None:
     base.ui.menu_item(
         13,
-        tr("Переключить заводской SLOT через UART", "Switch Nokia stock SLOT over UART"),
+        tr("Переключить заводской SLOT", "Switch Nokia stock SLOT"),
         tr(
-            "Без Web/SSH: читает selector flag, меняет только active, делает полный readback и перезагружает.",
-            "No Web/SSH: reads the selector flag, changes active only, performs full readback, then reboots.",
+            "Nokia stock MD: выбрать MASTER/SLOT1 или SLAVE/SLOT2 через stock root Telnet либо USB-UART/U-Boot. Меняется только active; после записи выполняется полный readback.",
+            "Nokia stock MD: select MASTER/SLOT1 or SLAVE/SLOT2 through stock root Telnet or USB-UART/U-Boot. Only active is changed; a full readback is performed after writing.",
         ),
         write_capable=True,
         enabled=True,
@@ -237,7 +237,7 @@ def _run_ursus_recovery(state: ds.DeviceState) -> None:
     base.ui.status("TARGET", f"{profile['model']} / {profile['soc']} / {one_key_multi.MF_TARGET}")
     base.ui.note(tr(
         "Сначала UrsusBoot запускается из RAM без записи NAND. После запуска можно восстановить persistent UrsusBoot из device-derived кандидата по вашему mtd0 backup.",
-        "UrsusBoot is first started from RAM without writing NAND. Once running, the persistent UrsusBoot can be repaired using a device-derived candidate from your mtd0 backup.",
+        "UrsusBoot is first started from RAM without writing NAND. Once running, the persistent UrsusBoot can be repaired using a device-derived candidate from an mtd0 backup.",
     ))
     sp, log, log_path = uart_bootarea_restore.boot_ram(profile)
     try:
@@ -289,12 +289,14 @@ def main() -> int:
         _show_action(5, app, *_menu_detail(5, state, app))
         _show_action(6, app, *base._menu_detail(6, state, app))
         _show_factory_restore_action(app)
-        _show_stock_slot_uart_action()
 
         base.ui.section(tr("Резервные копии", "Backups"), style="ok")
         for number in (7, 8):
             detail_ru, detail_en = _menu_detail(number, state, app)
             _show_action(number, app, detail_ru, detail_en)
+
+        base.ui.section(tr("Управление загрузкой", "Boot controls"), style="amber2")
+        _show_stock_slot_action()
 
         base.ui.section(tr("Посмотреть", "Inspect"), style="amber2")
         for number in (10, 11, 12):
