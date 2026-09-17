@@ -73,8 +73,6 @@ def _acquire_uboot_prompt(serial_port: proven.RecoverySerial, log, timeout: floa
     except Exception:
         pass
 
-    # First inspect the line briefly. A stopped shell may have printed its prompt
-    # before we opened COM and therefore gives us no bytes until CR is sent.
     initial = bytearray()
     passive_deadline = time.time() + 0.45
     while time.time() < passive_deadline:
@@ -134,9 +132,6 @@ def _acquire_uboot_prompt(serial_port: proven.RecoverySerial, log, timeout: floa
             proven._uboot_send_break(serial_port, menu_visible=True)
             last_break = now
         elif not menu_visible and now - last_wake >= 2.0:
-            # A stopped shell can remain silent after opening COM. Re-issuing an
-            # empty line is non-destructive at the command prompt and makes it
-            # print the prompt again.
             proven._uboot_send_line(serial_port, "")
             last_wake = now
     raise proven.Error(tr(
@@ -265,7 +260,7 @@ def _switch(serial_port: proven.RecoverySerial, log, target_active: int) -> None
     proven._uboot_send_line(serial_port, "reset")
 
 
-def run() -> None:
+def _run_uart() -> None:
     ui.rule(tr("ПЕРЕКЛЮЧЕНИЕ STOCK SLOT ЧЕРЕЗ UART", "SWITCH STOCK SLOT OVER UART"), style="amber2")
     ui.note(tr(
         "Работает без Web/SSH. Нужен USB-UART 3.3 V (GND/TX/RX, VCC не подключать) и доступный U-Boot/tcboot shell.",
@@ -299,3 +294,22 @@ def run() -> None:
             print(tr(f"Лог: {log_path}", f"Log: {log_path}"))
     finally:
         serial_port.close()
+
+
+def run() -> None:
+    ui.rule(tr("ПЕРЕКЛЮЧЕНИЕ ЗАВОДСКОГО SLOT", "SWITCH NOKIA STOCK SLOT"), style="amber2")
+    print(tr("  1 — Через stock root Telnet", "  1 — Through stock root Telnet"))
+    print(tr("  2 — Через USB-UART / U-Boot", "  2 — Through USB-UART / U-Boot"))
+    print(tr("  0 — Отмена", "  0 — Cancel"))
+    method = ui.prompt(tr("Способ: ", "Method: ")).strip()
+    if method == "0":
+        return
+    if method == "1":
+        import stock_slot_telnet
+        host = os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
+        stock_slot_telnet.run(host=host)
+        return
+    if method == "2":
+        _run_uart()
+        return
+    raise proven.Error(tr("неверный выбор способа", "invalid method choice"))
