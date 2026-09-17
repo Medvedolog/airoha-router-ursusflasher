@@ -34,7 +34,7 @@
  	airoha_qdma_rmw(qdma, REG_RX_RING_SIZE(qid),
  			RX_RING_SIZE_MASK,
  			FIELD_PREP(RX_RING_SIZE_MASK, ndesc));
-@@ -701,6 +712,12 @@ static int airoha_qdma_init(struct udevice *dev,
+@@ -701,7 +712,14 @@ static int airoha_qdma_init(struct udevice *dev,
  	qdma->regs = dev_remap_addr_name(dev, "qdma0");
  	if (IS_ERR(qdma->regs))
  		return PTR_ERR(qdma->regs);
@@ -48,7 +48,8 @@
  
  	err = airoha_qdma_init_rx(qdma);
  	if (err)
-@@ -844,31 +861,40 @@ static int airoha_hw_init(struct udevice *dev,
+ 		return err;
+@@ -844,31 +862,40 @@ static int airoha_hw_init(struct udevice *dev,
  {
  	int ret, i;
  
@@ -89,7 +90,7 @@
  	}
  
  	return 0;
-@@ -918,6 +945,7 @@ static int airoha_eth_probe(struct udevice *dev)
+@@ -918,6 +946,7 @@ static int airoha_eth_probe(struct udevice *dev)
  	struct udevice *mdio_dev;
  	ofnode node;
  	int i, ret;
@@ -97,7 +98,7 @@
  
  	scu_regmap = airoha_get_scu_regmap();
  	if (IS_ERR(scu_regmap))
-@@ -929,5 +957,12 @@ static int airoha_eth_probe(struct udevice *dev)
+@@ -929,5 +958,12 @@ static int airoha_eth_probe(struct udevice *dev)
  	 * reporting all 0xdeadbeef (poor cow :( )
  	 */
  	regmap_write(scu_regmap, SCU_SHARE_FEMEM_SEL, 0x0);
@@ -110,7 +111,7 @@
 +		return ret;
  
  	eth->soc = data;
-@@ -1155,5 +1190,7 @@ static int airoha_eth_recv(struct udevice *dev, int flags, uchar **packetp)
+@@ -1155,5 +1191,7 @@ static int airoha_eth_recv(struct udevice *dev, int flags, uchar **packetp)
  	u16 length;
  	int qid;
 +	static bool ursus_netdbg_empty_seen;
@@ -118,7 +119,7 @@
  
  	qid = 0;
  	q = &qdma->q_rx[qid];
-@@ -1164,12 +1201,30 @@ static int airoha_eth_recv(struct udevice *dev, int flags, uchar **packetp)
+@@ -1164,12 +1202,30 @@ static int airoha_eth_recv(struct udevice *dev, int flags, uchar **packetp)
  	dma_unmap_unaligned(virt_to_phys(desc), sizeof(*desc),
  			    DMA_FROM_DEVICE);
  
@@ -150,7 +151,7 @@
  
  	*packetp = phys_to_virt(desc->addr);
  
-@@ -1281,6 +1333,132 @@ static const struct eth_ops airoha_eth_ops = {
+@@ -1281,6 +1334,132 @@ static const struct eth_ops airoha_eth_ops = {
  	.write_hwaddr = arht_eth_write_hwaddr,
  };
  
