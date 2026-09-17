@@ -13,6 +13,7 @@ CONFIG_MERGER="$ROOT/ursusboot/scripts/apply_kconfig_fragment.py"
 PATCH_HANDOFF="$ROOT/ursusboot/patches/190-md-transition1-handoff.patch"
 PATCH_UART_FALLBACK="$ROOT/ursusboot/patches/200-transition2-uart-fallback.patch"
 PATCH_NETDBG="$ROOT/ursusboot/patches/210-transition2-netdbg1-netreset.patch"
+PATCH_CANONICAL_WEB="$ROOT/ursusboot/patches/215-transition2-canonical-web.patch"
 PATCH_STOCKSLOT="$ROOT/ursusboot/patches/220-transition2-stockslot-command.patch"
 OUT="$WORK/out"
 RELEASE_EPOCH=1789300800
@@ -21,7 +22,7 @@ STOCK_KERNEL_LOAD=0x80088000
 TEXT_BASE=0x81e00000
 
 for x in tar make gcc perl python3 sha256sum patch; do command -v "$x" >/dev/null; done
-for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH_HANDOFF" "$PATCH_UART_FALLBACK" "$PATCH_NETDBG" "$PATCH_STOCKSLOT"; do
+for f in "$SOURCE_BUNDLE" "$CONFIG" "$COMMON_CONFIG" "$BOARD_CONFIG" "$TRANSITION_CONFIG" "$CONFIG_MERGER" "$PATCH_HANDOFF" "$PATCH_UART_FALLBACK" "$PATCH_NETDBG" "$PATCH_CANONICAL_WEB" "$PATCH_STOCKSLOT"; do
     [ -f "$f" ] || { echo "missing build input: $f" >&2; exit 1; }
 done
 
@@ -40,6 +41,7 @@ TEST61_WEB_SHA=$(sha256sum "$WORK/u-boot/cmd/ursusweb.c" | awk '{print $1}')
 patch -d "$WORK/u-boot" -p1 < "$PATCH_HANDOFF"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_UART_FALLBACK"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_NETDBG"
+patch -d "$WORK/u-boot" -p1 < "$PATCH_CANONICAL_WEB"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_STOCKSLOT"
 TRANSITION_WEB_SHA=$(sha256sum "$WORK/u-boot/cmd/ursusweb.c" | awk '{print $1}')
 [ "$TRANSITION_WEB_SHA" = "$TEST61_WEB_SHA" ] || {
@@ -79,7 +81,14 @@ grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h || { echo
 grep -Fq 'URSUS_TRANSITION_WEB_BEGIN' cmd/ursusdispatch.c || { echo 'TRANSITION2: dispatcher Web entry missing' >&2; exit 1; }
 grep -Fq 'URSUS_TRANSITION_NET_SANITIZE_BEGIN' cmd/ursusdispatch.c || { echo 'TRANSITION2-NETFIX2: startup network sanitize missing' >&2; exit 1; }
 grep -Fq 'run_command("ursusnetreset", 0)' cmd/ursusdispatch.c || { echo 'TRANSITION2-NETFIX2: startup reset command missing' >&2; exit 1; }
-grep -Fq 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' cmd/ursusdispatch.c || { echo 'TRANSITION2: UART fallback marker missing' >&2; exit 1; }
+grep -Fq 'URSUS_TRANSITION_CANONICAL_RECOVERY=1' cmd/ursusdispatch.c || { echo 'TRANSITION2-WEBLOOP1: canonical recovery marker missing' >&2; exit 1; }
+if grep -Fq 'return ursus_enter_webfailsafe("TRANSITION_WEB_ONLY", 0);' cmd/ursusdispatch.c; then
+    echo 'TRANSITION2-WEBLOOP1: forbidden direct Web return still present' >&2
+    exit 1
+fi
+grep -Fq 'URSUS_WEB_COMMAND_BEGIN' cmd/ursusdispatch.c || { echo 'TRANSITION2-WEBLOOP1: Web begin marker missing' >&2; exit 1; }
+grep -Fq 'URSUS_WEB_COMMAND_RETURN ret=%d' cmd/ursusdispatch.c || { echo 'TRANSITION2-WEBLOOP1: Web return marker missing' >&2; exit 1; }
+grep -Fq 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED after=WEB_COMMAND_RETURN' cmd/ursusdispatch.c || { echo 'TRANSITION2-WEBLOOP1: UART fallback ordering marker missing' >&2; exit 1; }
 grep -Fq 'ursusstockslot, 2, 0, do_ursusstockslot' cmd/ursusdispatch.c || { echo 'TRANSITION2-STOCKSLOT1: command missing' >&2; exit 1; }
 grep -Fq 'URSUS_STOCKSLOT_DONE' cmd/ursusdispatch.c || { echo 'TRANSITION2-STOCKSLOT1: readback marker missing' >&2; exit 1; }
 # TEST61 source already carries the OpenWrt AN7581 board U-Boot DT override.
@@ -165,7 +174,7 @@ grep -Fq "#define URSUS_VERSION \"${VERSION}\"" include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_HANDOFF_ONLY 0' include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h
 strings u-boot.bin > "$WORK/u-boot.strings"
-for marker in "$VERSION" 'TRANSITION' 'URSUS_TRANSITION_WEB_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_DONE' 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED' 'URSUS_NETDBG_RX_RING' 'URSUS_NETDBG_FIRST_RX' 'URSUS_NETRESET_BEGIN build=TRANSITION2-NETFIX2' 'ursusnetreset' 'ursusstockslot' 'URSUS_STOCKSLOT_DONE'; do
+for marker in "$VERSION" 'TRANSITION' 'URSUS_TRANSITION_WEB_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_DONE' 'URSUS_TRANSITION_CANONICAL_RECOVERY=1' 'URSUS_WEB_COMMAND_BEGIN' 'URSUS_WEB_COMMAND_RETURN' 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED after=WEB_COMMAND_RETURN' 'URSUS_NETDBG_RX_RING' 'URSUS_NETDBG_FIRST_RX' 'URSUS_NETRESET_BEGIN build=TRANSITION2-NETFIX2' 'ursusnetreset' 'ursusstockslot' 'URSUS_STOCKSLOT_DONE'; do
     grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "missing transition marker: $marker" >&2; exit 1; }
 done
 
@@ -190,8 +199,9 @@ printf '%s\n' \
     "PERSISTENCE_TARGET=NONE" \
     "FINAL_TARGET=OFFICIAL_OPENWRT" \
     "HANDOFF_ONLY=0" \
-    "TRANSITION_ENTRY=ursusdispatch->net-sanitize->ursusweb" \
-    "UART_FALLBACK=READY_UNRESTRICTED" \
+    "TRANSITION_ENTRY=ursusdispatch->net-sanitize->canonical-recovery->ursusweb" \
+    "WEB_LOOP_POLICY=CANONICAL_PERSISTENT_RECOVERY" \
+    "UART_FALLBACK=AFTER_WEB_COMMAND_RETURN" \
     "AN7581_GDM1_UBOOT_DTS=ALREADY_PRESENT" \
     "NETDBG_BUILD=TRANSITION2-NETDBG1" \
     "NETFIX_BUILD=TRANSITION2-NETFIX2" \
