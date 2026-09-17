@@ -94,14 +94,14 @@ jobs:
             sys_sha="$(sha256sum "$overlay/installer/openwrt-production-sysupgrade.itb" | awk '{print $1}')"
             snap="$(cat "$dir/version.buildinfo")"
             cat > "$overlay/etc/ursus/BUILD_INFO" <<EOF
-MODE=VANILLA_INITRAMFS_BOOT_ONLY_TEST
-FAMILY=${family}
-TARGET=${target}
-STOCK_PROFILE=${profile}
-SNAPSHOT=${snap}
-EMBEDDED_SYSUPGRADE_SHA256=${sys_sha}
-DESTRUCTIVE_STAGE2=DISABLED
-EOF
+          MODE=VANILLA_INITRAMFS_BOOT_ONLY_TEST
+          FAMILY=${family}
+          TARGET=${target}
+          STOCK_PROFILE=${profile}
+          SNAPSHOT=${snap}
+          EMBEDDED_SYSUPGRADE_SHA256=${sys_sha}
+          DESTRUCTIVE_STAGE2=DISABLED
+          EOF
             make -C "$root" image PROFILE="$profile" FILES="$overlay" DISABLED_SERVICES='' V=s
             out="$(find "$root/bin/targets/airoha/$target" -maxdepth 1 -type f -name "openwrt-airoha-${target}-${device}-initramfs-uImage.itb" -print | head -n1)"
             test -s "$out"
@@ -125,12 +125,13 @@ EOF
             grep -aFq 'URSUS_INITRAMFS_TEST_READY' "work/${family}-Image"
             grep -aFq 'openwrt-production-sysupgrade.itb' "work/${family}-Image"
             PYTHONPATH=ursusflasher/src python3 - "$fit" <<'PY'
-import pathlib, sys
-import stock_fit_initramfs as s
-p=pathlib.Path(sys.argv[1]); info=s.source_fit_contract(p.read_bytes())
-print('SOURCE_FIT_QA=PASS', info)
-assert info['kernel_data_size'] > 1024*1024
-PY
+          import pathlib, sys
+          import stock_fit_initramfs as s
+          p = pathlib.Path(sys.argv[1])
+          info = s.source_fit_contract(p.read_bytes())
+          print('SOURCE_FIT_QA=PASS', info)
+          assert info['kernel_data_size'] > 1024 * 1024
+          PY
           }
           verify_fit md an7581 nokia_xg-040g-md
           verify_fit mf an7583 nokia_xg-040g-mf
@@ -139,41 +140,48 @@ PY
         run: |
           set -eux
           python3 - <<'PY'
-import hashlib, json, pathlib, subprocess
-root=pathlib.Path('.')
-commit=subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
-specs={
-  'md': ('xg040-md','an7581','nokia_xg-040g-md', True),
-  'mf': ('xg040-mf','an7583','nokia_xg-040g-mf', False),
-}
-for fam,(profile,target,device,fudan) in specs.items():
-    d=root/'payloads'/'vanilla-initramfs-test'/fam
-    img=d/f'openwrt-airoha-{target}-{device}-ursus-initramfs-test.itb'
-    snap=root/'work'/'snapshot'/fam
-    official=snap/f'openwrt-airoha-{target}-{device}-initramfs-uImage.itb'
-    sysup=snap/f'openwrt-airoha-{target}-{device}-ubi-squashfs-sysupgrade.itb'
-    info={
-      'schema':1,'mode':'VANILLA_INITRAMFS_BOOT_ONLY_TEST','family':fam,'profile':profile,
-      'target':target,'device':device,'source_commit':commit,
-      'snapshot':(snap/'version.buildinfo').read_text().strip(),
-      'sha256':hashlib.sha256(img.read_bytes()).hexdigest(),'size':img.stat().st_size,
-      'official_stock_initramfs_sha256':hashlib.sha256(official.read_bytes()).hexdigest(),
-      'embedded_ubi_sysupgrade_sha256':hashlib.sha256(sysup.read_bytes()).hexdigest(),
-      'destructive_stage2_enabled':False,'slot1_fallback_required':True,
-      'linux_fudan_expected':fudan,
-      'fudan_note':'Official snapshot Linux includes current FMSH FM25G01B/FM25G02B support; HW acceptance pending.' if fudan else None,
-      'final_bootloader_status':'NOT_USED_IN_THIS_BOOT_ONLY_TEST',
-    }
-    (d/'PAYLOAD.json').write_text(json.dumps(info,indent=2,sort_keys=True)+'\n')
-    for name in (
-      f'openwrt-airoha-{target}-{device}-initramfs-uImage.itb',
-      f'openwrt-airoha-{target}-{device}-ubi-initramfs-recovery.itb',
-      f'openwrt-airoha-{target}-{device}-ubi-squashfs-sysupgrade.itb',
-    ):
-      (d/name).write_bytes((snap/name).read_bytes())
-    (d/'OPENWRT_SHA256SUMS').write_bytes((snap/'sha256sums').read_bytes())
-    (d/'OPENWRT_VERSION').write_bytes((snap/'version.buildinfo').read_bytes())
-PY
+          import hashlib, json, pathlib, subprocess
+          root = pathlib.Path('.')
+          commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          specs = {
+              'md': ('xg040-md', 'an7581', 'nokia_xg-040g-md', True),
+              'mf': ('xg040-mf', 'an7583', 'nokia_xg-040g-mf', False),
+          }
+          for fam, (profile, target, device, fudan) in specs.items():
+              d = root / 'payloads' / 'vanilla-initramfs-test' / fam
+              img = d / f'openwrt-airoha-{target}-{device}-ursus-initramfs-test.itb'
+              snap = root / 'work' / 'snapshot' / fam
+              official = snap / f'openwrt-airoha-{target}-{device}-initramfs-uImage.itb'
+              sysup = snap / f'openwrt-airoha-{target}-{device}-ubi-squashfs-sysupgrade.itb'
+              info = {
+                  'schema': 1,
+                  'mode': 'VANILLA_INITRAMFS_BOOT_ONLY_TEST',
+                  'family': fam,
+                  'profile': profile,
+                  'target': target,
+                  'device': device,
+                  'source_commit': commit,
+                  'snapshot': (snap / 'version.buildinfo').read_text().strip(),
+                  'sha256': hashlib.sha256(img.read_bytes()).hexdigest(),
+                  'size': img.stat().st_size,
+                  'official_stock_initramfs_sha256': hashlib.sha256(official.read_bytes()).hexdigest(),
+                  'embedded_ubi_sysupgrade_sha256': hashlib.sha256(sysup.read_bytes()).hexdigest(),
+                  'destructive_stage2_enabled': False,
+                  'slot1_fallback_required': True,
+                  'linux_fudan_expected': fudan,
+                  'fudan_note': 'Official snapshot Linux includes current FMSH FM25G01B/FM25G02B support; HW acceptance pending.' if fudan else None,
+                  'final_bootloader_status': 'NOT_USED_IN_THIS_BOOT_ONLY_TEST',
+              }
+              (d / 'PAYLOAD.json').write_text(json.dumps(info, indent=2, sort_keys=True) + '\n')
+              for name in (
+                  f'openwrt-airoha-{target}-{device}-initramfs-uImage.itb',
+                  f'openwrt-airoha-{target}-{device}-ubi-initramfs-recovery.itb',
+                  f'openwrt-airoha-{target}-{device}-ubi-squashfs-sysupgrade.itb',
+              ):
+                  (d / name).write_bytes((snap / name).read_bytes())
+              (d / 'OPENWRT_SHA256SUMS').write_bytes((snap / 'sha256sums').read_bytes())
+              (d / 'OPENWRT_VERSION').write_bytes((snap / 'version.buildinfo').read_bytes())
+          PY
 
       - name: Assemble operator kit
         run: |
@@ -184,37 +192,37 @@ PY
           cp -a START_EXPERT_ITEM4_INITRAMFS_TEST.cmd START_EXPERT_ITEM4_INITRAMFS_TEST.sh VERSION README.md "$ART/"
           cp -a config fw payloads ursusflasher docs "$ART/"
           cat > "$ART/READ-ME-FIRST.txt" <<EOF
-UrsusFlasher EXPERT ITEM 4 - VANILLA PREGNANT INITRAMFS BOOT-ONLY TEST
-Source commit: ${GITHUB_SHA}
+          UrsusFlasher EXPERT ITEM 4 - VANILLA PREGNANT INITRAMFS BOOT-ONLY TEST
+          Source commit: ${GITHUB_SHA}
 
-Launch:
-  Windows: START_EXPERT_ITEM4_INITRAMFS_TEST.cmd
-  Linux:   ./START_EXPERT_ITEM4_INITRAMFS_TEST.sh
+          Launch:
+            Windows: START_EXPERT_ITEM4_INITRAMFS_TEST.cmd
+            Linux:   ./START_EXPERT_ITEM4_INITRAMFS_TEST.sh
 
-This test writes ONLY stock nsb_slave (SLOT2) and the primary stock selector flag.
-It NEVER formats UBI and NEVER writes production FIP or BL2.
-One y/N authorizes SLOT2 write/readback + selector/readback + immediate reboot.
+          This test writes ONLY stock nsb_slave (SLOT2) and the primary stock selector flag.
+          It NEVER formats UBI and NEVER writes production FIP or BL2.
+          One y/N authorizes SLOT2 write/readback + selector/readback + immediate reboot.
 
-Included fresh snapshot test images:
-  MD / AN7581 / Nokia XG-040G-MD - stock-layout initramfs, Fudan-capable Linux expected
-  MF / AN7583 / Nokia XG-040G-MF - stock-layout initramfs
-Each custom initramfs contains the fresh UBI sysupgrade payload, but destructive stage2 is physically disabled.
+          Included fresh snapshot test images:
+            MD / AN7581 / Nokia XG-040G-MD - stock-layout initramfs, Fudan-capable Linux expected
+            MF / AN7583 / Nokia XG-040G-MF - stock-layout initramfs
+          Each custom initramfs contains the fresh UBI sysupgrade payload, but destructive stage2 is physically disabled.
 
-Expected after boot:
-  192.168.1.1
-  SSH root, blank password (test initramfs only)
-  cat /tmp/ursus-install/status.json
-  cat /tmp/ursus-install/install.log
-  ursusstockslot status
+          Expected after boot:
+            192.168.1.1
+            SSH root, blank password (test initramfs only)
+            cat /tmp/ursus-install/status.json
+            cat /tmp/ursus-install/install.log
+            ursusstockslot status
 
-No-UART rollback test:
-  ursusstockslot master
-  sync
-  reboot -f
+          No-UART rollback test:
+            ursusstockslot master
+            sync
+            reboot -f
 
-Acceptance for this build is only SLOT2 Linux boot + network/SSH + stock selector rollback.
-CI PASS is not HW PASS. Do not use embedded production payload for manual destructive writes.
-EOF
+          Acceptance for this build is only SLOT2 Linux boot + network/SSH + stock selector rollback.
+          CI PASS is not HW PASS. Do not use embedded production payload for manual destructive writes.
+          EOF
           find "$ART" -type d -name __pycache__ -prune -exec rm -rf {} + || true
           find "$ART" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
           git rev-parse HEAD > "$ART/URSUSFLASHER_COMMIT.txt"
