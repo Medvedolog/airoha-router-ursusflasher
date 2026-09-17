@@ -1,11 +1,12 @@
 --- a/drivers/net/airoha_eth.c
 +++ b/drivers/net/airoha_eth.c
-@@ -8,5 +8,8 @@
+@@ -8,5 +8,9 @@
   */
  
 +#include <command.h>
 +#include <net.h>
-+#include <environment.h>
++int eth_env_set_enetaddr(const char *name, const u8 *enetaddr);
++
  #include <dm.h>
  #include <dm/device-internal.h>
  #include <dm/devres.h>
