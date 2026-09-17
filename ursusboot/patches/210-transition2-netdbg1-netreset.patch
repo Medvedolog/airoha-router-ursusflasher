@@ -136,7 +136,7 @@
  
  	*packetp = phys_to_virt(desc->addr);
  
-@@ -1281,6 +1326,128 @@ static const struct eth_ops airoha_eth_ops = {
+@@ -1281,6 +1326,130 @@ static const struct eth_ops airoha_eth_ops = {
  	.write_hwaddr = arht_eth_write_hwaddr,
  };
  
@@ -200,8 +200,9 @@
 +	qdma = port->qdma;
 +	eth = qdma->eth;
 +
-+	printf("URSUS_NETRESET_BEGIN build=TRANSITION2-SWDBG1 dev=%s\n",
++	printf("URSUS_NETRESET_BEGIN build=TRANSITION2-NETFIX2 dev=%s\n",
 +	       dev->name);
++	printf("URSUS_SWDBG_PROFILE=TRANSITION2-SWDBG1\n");
 +	ursus_swdbg_dump("PRE_NETRESET", port);
 +	printf("URSUS_NETRESET_STAGE=STOP_CURRENT_DMA\n");
 +	airoha_eth_stop(dev);
