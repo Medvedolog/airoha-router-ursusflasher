@@ -40,6 +40,19 @@ TEST61_WEB_SHA=$(sha256sum "$WORK/u-boot/cmd/ursusweb.c" | awk '{print $1}')
 patch -d "$WORK/u-boot" -p1 < "$PATCH_HANDOFF"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_UART_FALLBACK"
 patch -d "$WORK/u-boot" -p1 < "$PATCH_NETDBG"
+python3 - "$WORK/u-boot/drivers/net/airoha_eth.c" <<'PYMAC'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+s = p.read_text()
+old = '''\tret = arht_eth_write_hwaddr(dev);\n\tif (ret) {\n\t\tprintf("URSUS_NETRESET_FAIL stage=HWADDR ret=%d\\n", ret);\n\t\treturn CMD_RET_FAILURE;\n\t}\n'''
+new = '''\t{\n\t\tstruct eth_pdata *pdata = dev_get_plat(dev);\n\t\tstatic const u8 fixed_mac[ARP_HLEN] = {\n\t\t\t0x02, 0x55, 0x52, 0x53, 0x55, 0x53\n\t\t};\n\n\t\tif (!pdata) {\n\t\t\tprintf("URSUS_NETRESET_FAIL stage=FIXED_MAC reason=NO_ETH_PDATA\\n");\n\t\t\treturn CMD_RET_FAILURE;\n\t\t}\n\t\tmemcpy(pdata->enetaddr, fixed_mac, sizeof(fixed_mac));\n\t\tret = eth_env_set_enetaddr("ethaddr", fixed_mac);\n\t\tprintf("URSUS_TRANSITION_FIXED_MAC mac=%pM env_ret=%d\\n",\n\t\t       fixed_mac, ret);\n\t\tif (ret)\n\t\t\treturn CMD_RET_FAILURE;\n\t}\n\n\tret = arht_eth_write_hwaddr(dev);\n\tif (ret) {\n\t\tprintf("URSUS_NETRESET_FAIL stage=HWADDR ret=%d\\n", ret);\n\t\treturn CMD_RET_FAILURE;\n\t}\n'''
+count = s.count(old)
+if count != 1:
+    raise SystemExit(f"TRANSITION2-FIXEDMAC1 source match count={count}, expected=1")
+p.write_text(s.replace(old, new))
+print("TRANSITION2-FIXEDMAC1 source transform=PASS mac=02:55:52:53:55:53")
+PYMAC
 python3 - "$WORK/u-boot/cmd/ursusdispatch.c" <<'PYWEB'
 from pathlib import Path
 import sys
@@ -111,6 +124,7 @@ grep -Fq 'status = "okay";' arch/arm/dts/an7581-nokia-xg-040g-md-u-boot.dtsi || 
 grep -Fq 'URSUS_NETDBG_RX_RING' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETDBG1: RX ring readback marker missing' >&2; exit 1; }
 grep -Fq 'URSUS_NETDBG_FIRST_RX' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETDBG1: first RX marker missing' >&2; exit 1; }
 grep -Fq 'ursusnetreset, 1, 0, do_ursusnetreset' drivers/net/airoha_eth.c || { echo 'TRANSITION2-NETFIX2: reset command missing' >&2; exit 1; }
+grep -Fq 'URSUS_TRANSITION_FIXED_MAC mac=%pM env_ret=%d' drivers/net/airoha_eth.c || { echo 'TRANSITION2-FIXEDMAC1: fixed MAC marker missing' >&2; exit 1; }
 
 make -j"${JOBS:-$(nproc)}"
 
@@ -184,7 +198,7 @@ grep -Fq "#define URSUS_VERSION \"${VERSION}\"" include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_HANDOFF_ONLY 0' include/ursus_version.h
 grep -Fq '#define URSUS_TRANSITION_WEB_ONLY 1' include/ursus_version.h
 strings u-boot.bin > "$WORK/u-boot.strings"
-for marker in "$VERSION" 'TRANSITION' 'URSUS_TRANSITION_WEB_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_DONE' 'URSUS_TRANSITION_CANONICAL_RECOVERY=1' 'URSUS_WEB_COMMAND_BEGIN' 'URSUS_WEB_COMMAND_RETURN' 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED after=WEB_COMMAND_RETURN' 'URSUS_NETDBG_RX_RING' 'URSUS_NETDBG_FIRST_RX' 'URSUS_NETRESET_BEGIN build=TRANSITION2-NETFIX2' 'ursusnetreset' 'ursusstockslot' 'URSUS_STOCKSLOT_DONE'; do
+for marker in "$VERSION" 'TRANSITION' 'URSUS_TRANSITION_WEB_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_BEGIN' 'URSUS_TRANSITION_NET_SANITIZE_DONE' 'URSUS_TRANSITION_CANONICAL_RECOVERY=1' 'URSUS_WEB_COMMAND_BEGIN' 'URSUS_WEB_COMMAND_RETURN' 'URSUS_UART_FALLBACK=READY scope=TRANSITION shell=UNRESTRICTED after=WEB_COMMAND_RETURN' 'URSUS_NETDBG_RX_RING' 'URSUS_NETDBG_FIRST_RX' 'URSUS_NETRESET_BEGIN build=TRANSITION2-NETFIX2' 'URSUS_TRANSITION_FIXED_MAC' 'ursusnetreset' 'ursusstockslot' 'URSUS_STOCKSLOT_DONE'; do
     grep -Fq "$marker" "$WORK/u-boot.strings" || { echo "missing transition marker: $marker" >&2; exit 1; }
 done
 
@@ -217,6 +231,8 @@ printf '%s\n' \
     "NETFIX_BUILD=TRANSITION2-NETFIX2" \
     "NETRESET_COMMAND=ursusnetreset" \
     "NETRESET_TIMING=AUTOMATIC_BEFORE_WEBFAILSAFE" \
+    "TRANSITION_FIXED_MAC=02:55:52:53:55:53" \
+    "TRANSITION_FIXED_MAC_SCOPE=RAM_ENV_AND_ETH_PDATA" \
     "STOCKSLOT_BUILD=TRANSITION2-STOCKSLOT1" \
     "STOCKSLOT_COMMAND=ursusstockslot status|master|slave" \
     "STOCKSLOT_FLAG_OFFSET=0x05240000" \
@@ -229,5 +245,5 @@ printf '%s\n' \
     "TEXT_BASE=${TEXT_BASE}" \
     "SOURCE_DATE_EPOCH=${RELEASE_EPOCH}" > "$OUT/TRANSITION2-BUILD_INFO.txt"
 
-echo "MD_TRANSITION2_NETFIX2_STOCKSLOT1_TEST61WEB1_BUILD=PASS"
+echo "MD_TRANSITION2_NETFIX2_FIXEDMAC1_STOCKSLOT1_TEST61WEB1_BUILD=PASS"
 echo "Artifacts: $OUT"
