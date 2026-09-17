@@ -264,11 +264,11 @@
 +		return CMD_RET_FAILURE;
 +	}
 +
-+	ret = airoha_eth_init(dev);
-+	if (ret) {
-+		printf("URSUS_NETRESET_FAIL stage=ETH_START ret=%d\n", ret);
-+		return CMD_RET_FAILURE;
-+	}
++	/* Keep DMA stopped; canonical lwIP startup owns descriptor arming. */
++	/* This preserves the clean RX indices established by airoha_hw_init(). */
++	/* net_lwip_eth_start() will perform eth_halt() then exactly one eth_init(). */
++	/* Avoid consuming the tiny RX ring before WebFailsafe starts polling it. */
++	printf("URSUS_NETRESET_STAGE=DMA_DEFERRED owner=LWIP\n");
 +
 +	ursus_swdbg_dump("POST_NETRESET", port);
 +	printf("URSUS_NETRESET_DONE result=PASS next=START_URSUSWEB\n");
