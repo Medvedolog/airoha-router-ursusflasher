@@ -28,18 +28,25 @@ def _latest_local_backup(work: Path) -> Path | None:
 def _choose_existing_backup(mod) -> Path:
     env = os.environ.get("URSUS_TRANSITION_BACKUP", "").strip().strip('"')
     default = Path(env).expanduser() if env else _latest_local_backup(mod.WORK)
-    shown = str(default) if default else ""
-    raw = ui.prompt(pb.tr(
-        f"Путь к уже проверенному full-stock-backup [{shown}]: " if shown else "Путь к уже проверенному full-stock-backup: ",
-        f"Path to an already verified full-stock-backup [{shown}]: " if shown else "Path to an already verified full-stock-backup: ",
-    )).strip().strip('"')
+    if default:
+        raw = ui.prompt(pb.tr(
+            "Найден ранее проверенный stock backup. Enter — использовать его; либо укажите другой каталог: ",
+            "A previously verified stock backup was found. Press Enter to use it, or enter another directory: ",
+        )).strip().strip('"')
+    else:
+        raw = ui.prompt(pb.tr(
+            "Укажите каталог ранее проверенного full-stock-backup: ",
+            "Enter the directory of a previously verified full-stock-backup: ",
+        )).strip().strip('"')
     path = Path(raw).expanduser() if raw else default
     if path is None or not path.is_dir():
         raise RuntimeError(pb.tr(
-            "Для пропуска нового backup нужен существующий каталог full-stock-backup.",
-            "Skipping a new backup requires an existing full-stock-backup directory.",
+            "Для пропуска нового backup нужна существующая проверенная полная копия stock NAND.",
+            "Skipping a new backup requires an existing verified full stock NAND backup.",
         ))
-    return path.resolve()
+    resolved = path.resolve()
+    pb._write_session_only(f"[TRANSITION-BACKUP-REUSE] path={resolved}")
+    return resolved
 
 
 def _adopt_telnet(dst, src) -> None:
@@ -122,8 +129,8 @@ def install(mod) -> None:
         if reuse is None:
             return original_backup_tftp(access, host, destination, *args, **kwargs)
         ui.status("EXPERT", pb.tr(
-            "Новый полный backup пропущен оператором; использую ранее проверенную копию только как источник flag/nsb_slave.",
-            "A new full backup was skipped by the operator; reusing the previously verified copy only as the flag/nsb_slave source.",
+            "Новый полный backup пропущен оператором; использую ранее проверенную копию как источник исходных stock flag/nsb_slave и точку восстановления.",
+            "A new full backup was skipped by the operator; reusing the previously verified copy as the source of the original stock flag/nsb_slave and as a recovery point.",
         ))
         return None
 
@@ -255,9 +262,13 @@ def install(mod) -> None:
         state["transport"] = None
         state["payloads"] = {}
 
+        ui.note(pb.tr(
+            "Полный stock backup нужен как проверенная точка восстановления и как источник исходных flag/nsb_slave для безопасного построения TRANSITION. Для повторного теста можно использовать уже проверенную копию этого устройства.",
+            "A full stock backup is required as a verified recovery point and as the source of the original flag/nsb_slave used to build TRANSITION safely. Repeated tests may reuse an already verified backup from this device.",
+        ))
         do_backup = _yes_default(
-            "EXPERT: сделать полную резервную копию перед миграцией? [Д/н]: ",
-            "EXPERT: create a complete backup before migration? [Y/n]: ",
+            "Сделать новую полную резервную копию перед миграцией? [Д/н]: ",
+            "Create a new complete backup before migration? [Y/n]: ",
         )
         if not do_backup:
             reuse = _choose_existing_backup(mod)
@@ -267,8 +278,8 @@ def install(mod) -> None:
                 raise RuntimeError(f"backup family mismatch: {family} != {policy.family}")
             state["reuse_backup"] = reuse
             ui.status("READY", pb.tr(
-                f"Повторный backup не нужен: restore-validator принял {reuse}.",
-                f"No repeat backup needed: restore-validator accepted {reuse}.",
+                "Ранее сохранённый backup принят restore-validator; повторное копирование не требуется.",
+                "The saved backup was accepted by the restore validator; no repeat copy is required.",
             ))
 
         mod.pb.backup_tftp = backup_tftp_optional
