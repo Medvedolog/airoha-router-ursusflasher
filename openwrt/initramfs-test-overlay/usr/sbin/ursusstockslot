@@ -1,0 +1,95 @@
+#!/bin/sh
+set -eu
+
+say() { printf '%s\n' "$*"; }
+fail() { say "URSUS_STOCKSLOT_REFUSED target=${TARGET:-status} reason=$1" >&2; exit 1; }
+
+find_mtd() {
+    name="$1"
+    awk -v n="\"$name\"" '$4 == n { gsub(/^mtd/, "", $1); gsub(/:/, "", $1); print $1 ":" $2 ":" $3; exit }' /proc/mtd
+}
+
+require_geom() {
+    item="$1" want_size="$2" want_erase="$3"
+    row="$(find_mtd "$item")"
+    [ -n "$row" ] || fail "MISSING_${item}"
+    oldifs="$IFS"; IFS=:; set -- $row; IFS="$oldifs"
+    [ "$2" = "$want_size" ] || fail "SIZE_${item}_${2}"
+    [ "$3" = "$want_erase" ] || fail "ERASE_${item}_${3}"
+    printf '%s' "$1"
+}
+
+probe_pristine() {
+    [ -f /etc/ursus/BOOT_ONLY_TEST ] || fail NOT_BOOT_ONLY_TEST
+    FLAG_IDX="$(require_geom flag 00040000 00020000)"
+    require_geom flagback 00040000 00020000 >/dev/null
+    MASTER_IDX="$(require_geom nsb_master 02880000 00020000)"
+    require_geom nsb_slave 02880000 00020000 >/dev/null
+
+    magic="$(dd if="/dev/mtd${MASTER_IDX}" bs=1 count=8 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+    [ "$magic" = "010064aa78563412" ] || fail STOCK_MASTER_FIP_MAGIC
+
+    set -- $(dd if="/dev/mtd${FLAG_IDX}" bs=4 count=4 2>/dev/null | od -An -tu4)
+    [ "$#" -ge 4 ] || fail FLAG_DECODE
+    case "$1:$2:$3" in
+        0:0:0|0:0:1|0:1:0|0:1:1|1:0:0|1:0:1|1:1:0|1:1:1) ;;
+        *) fail FLAG_FIELDS ;;
+    esac
+    return 0
+}
+
+status() {
+    FLAG_IDX="$(require_geom flag 00040000 00020000)"
+    set -- $(dd if="/dev/mtd${FLAG_IDX}" bs=4 count=4 2>/dev/null | od -An -tu4)
+    [ "$#" -ge 4 ] || fail FLAG_DECODE
+    say "URSUS_STOCKSLOT_STATUS active=$1 curimg=$2 startok=$3 count=$4"
+    if probe_pristine >/dev/null 2>&1; then
+        say "URSUS_STOCKSLOT_ROLLBACK_PROBE verdict=PRISTINE_TEST_IMAGE"
+    else
+        say "URSUS_STOCKSLOT_ROLLBACK_PROBE verdict=REFUSED"
+    fi
+}
+
+write_target() {
+    TARGET="$1"
+    case "$TARGET" in master) value=0;; slave) value=1;; *) exit 2;; esac
+    probe_pristine
+    FLAG_IDX="$(require_geom flag 00040000 00020000)"
+    dev="/dev/mtd${FLAG_IDX}"
+    tmp="/tmp/ursus-flag.$$"
+    cand="/tmp/ursus-flag-candidate.$$"
+    rb="/tmp/ursus-flag-readback.$$"
+    trap 'rm -f "$tmp" "$cand" "$rb"' EXIT INT TERM
+
+    dd if="$dev" of="$tmp" bs=131072 count=2 2>/dev/null
+    [ "$(wc -c < "$tmp")" -eq 262144 ] || fail FLAG_READ_SIZE
+    cp "$tmp" "$cand"
+    if [ "$value" -eq 0 ]; then
+        printf '\000\000\000\000' | dd of="$cand" bs=1 seek=0 conv=notrunc 2>/dev/null
+    else
+        printf '\001\000\000\000' | dd of="$cand" bs=1 seek=0 conv=notrunc 2>/dev/null
+    fi
+    before_tail="$(dd if="$tmp" bs=1 skip=4 2>/dev/null | sha256sum | awk '{print $1}')"
+    after_tail="$(dd if="$cand" bs=1 skip=4 2>/dev/null | sha256sum | awk '{print $1}')"
+    [ "$before_tail" = "$after_tail" ] || fail NON_ACTIVE_BYTES_CHANGED
+
+    expected="$(sha256sum "$cand" | awk '{print $1}')"
+    sync
+    mtd write "$cand" flag >/tmp/ursus-stockslot-mtd.log 2>&1 || { cat /tmp/ursus-stockslot-mtd.log >&2; fail MTD_WRITE; }
+    sync
+    dd if="$dev" of="$rb" bs=131072 count=2 2>/dev/null
+    got="$(sha256sum "$rb" | awk '{print $1}')"
+    [ "$got" = "$expected" ] || fail READBACK_SHA
+    rb_tail="$(dd if="$rb" bs=1 skip=4 2>/dev/null | sha256sum | awk '{print $1}')"
+    [ "$rb_tail" = "$before_tail" ] || fail READBACK_NON_ACTIVE_BYTES
+    active="$(dd if="$rb" bs=4 count=1 2>/dev/null | od -An -tu4 | tr -d ' ')"
+    [ "$active" = "$value" ] || fail READBACK_ACTIVE
+    say "URSUS_STOCKSLOT_DONE target=$TARGET active=$value readback=PASS next=RESET"
+}
+
+case "${1:-status}" in
+    status) TARGET=status; status ;;
+    probe) TARGET=probe; probe_pristine; say "URSUS_STOCKSLOT_ROLLBACK_PROBE verdict=PRISTINE_TEST_IMAGE" ;;
+    master|slave) write_target "$1" ;;
+    *) echo "usage: ursusstockslot status|master|slave" >&2; exit 2 ;;
+esac

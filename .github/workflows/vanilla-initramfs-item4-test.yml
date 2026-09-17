@@ -1,0 +1,233 @@
+name: EXPERT item4 Vanilla pregnant initramfs TEST
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - '.github/workflows/vanilla-initramfs-item4-test.yml'
+      - 'START_EXPERT_ITEM4_INITRAMFS_TEST.cmd'
+      - 'START_EXPERT_ITEM4_INITRAMFS_TEST.sh'
+      - 'openwrt/initramfs-test-overlay/**'
+      - 'ursusflasher/src/stock_fit_initramfs.py'
+      - 'ursusflasher/src/stock_ab_initramfs_test.py'
+      - 'ursusflasher/src/expert_item4_initramfs_test.py'
+      - 'docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.45_VANILLA_INITRAMFS.md'
+      - 'docs/MD_VANILLA_HANDOFF.md'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  item4-initramfs-test-kit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Host QA
+        run: |
+          set -eux
+          python3 -m py_compile \
+            ursusflasher/src/stock_fit_initramfs.py \
+            ursusflasher/src/stock_ab_initramfs_test.py \
+            ursusflasher/src/expert_item4_initramfs_test.py
+          sh -n openwrt/initramfs-test-overlay/usr/sbin/ursusstockslot
+          sh -n openwrt/initramfs-test-overlay/usr/sbin/ursus-vanilla-stage2
+          sh -n openwrt/initramfs-test-overlay/etc/init.d/ursus-initramfs-test
+          sh -n openwrt/initramfs-test-overlay/etc/uci-defaults/99-ursus-initramfs-test
+          grep -Fq 'URSUS_STAGE2_DISABLED_TEST_BUILD' openwrt/initramfs-test-overlay/usr/sbin/ursus-vanilla-stage2
+          ! grep -R -E '\b(ubiformat|ubimkvol|ubiupdatevol|flash_erase|nandwrite)\b' openwrt/initramfs-test-overlay
+          grep -Fq 'out[4:] != flag[4:]' ursusflasher/src/stock_ab_transition.py
+          grep -Fq 'no second confirmation' ursusflasher/src/stock_ab_initramfs_test.py
+
+      - name: Install image build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential file gawk gettext git libncurses-dev libssl-dev python3 rsync unzip zstd xz-utils u-boot-tools zip
+
+      - name: Fetch fresh snapshot metadata and artifacts
+        run: |
+          set -eux
+          mkdir -p work/snapshot/md work/snapshot/mf
+          fetch_family() {
+            family="$1"; target="$2"; device="$3"
+            base="https://downloads.openwrt.org/snapshots/targets/airoha/${target}"
+            dir="work/snapshot/${family}"
+            curl -fL --retry 5 "$base/sha256sums" -o "$dir/sha256sums"
+            curl -fL --retry 5 "$base/version.buildinfo" -o "$dir/version.buildinfo"
+            curl -fL --retry 5 "$base/profiles.json" -o "$dir/profiles.json"
+            ib="openwrt-imagebuilder-airoha-${target}.Linux-x86_64.tar.zst"
+            stock="openwrt-airoha-${target}-${device}-initramfs-uImage.itb"
+            sys="openwrt-airoha-${target}-${device}-ubi-squashfs-sysupgrade.itb"
+            rec="openwrt-airoha-${target}-${device}-ubi-initramfs-recovery.itb"
+            pre="openwrt-airoha-${target}-${device}-ubi-preloader.bin"
+            fip="openwrt-airoha-${target}-${device}-ubi-bl31-uboot.fip"
+            for f in "$ib" "$stock" "$sys" "$rec" "$pre" "$fip"; do
+              grep -E "[[:space:]]\*?${f}$" "$dir/sha256sums" | head -n1 > "$dir/$f.sha256.line"
+              test -s "$dir/$f.sha256.line"
+              curl -fL --retry 5 "$base/$f" -o "$dir/$f"
+              (cd "$dir" && sha256sum -c "$(basename "$f").sha256.line")
+            done
+          }
+          fetch_family md an7581 nokia_xg-040g-md
+          fetch_family mf an7583 nokia_xg-040g-mf
+
+      - name: Build fresh pregnant initramfs images
+        run: |
+          set -eux
+          build_family() {
+            family="$1"; target="$2"; profile="$3"; device="$4"
+            dir="$GITHUB_WORKSPACE/work/snapshot/${family}"
+            ib="$dir/openwrt-imagebuilder-airoha-${target}.Linux-x86_64.tar.zst"
+            root="$GITHUB_WORKSPACE/work/imagebuilder-${family}"
+            mkdir -p "$root"
+            tar --zstd -xf "$ib" -C "$root" --strip-components=1
+            overlay="$GITHUB_WORKSPACE/work/overlay-${family}"
+            cp -a "$GITHUB_WORKSPACE/openwrt/initramfs-test-overlay" "$overlay"
+            mkdir -p "$overlay/installer" "$overlay/etc/ursus"
+            cp "$dir/openwrt-airoha-${target}-${device}-ubi-squashfs-sysupgrade.itb" "$overlay/installer/openwrt-production-sysupgrade.itb"
+            sys_sha="$(sha256sum "$overlay/installer/openwrt-production-sysupgrade.itb" | awk '{print $1}')"
+            snap="$(cat "$dir/version.buildinfo")"
+            cat > "$overlay/etc/ursus/BUILD_INFO" <<EOF
+MODE=VANILLA_INITRAMFS_BOOT_ONLY_TEST
+FAMILY=${family}
+TARGET=${target}
+STOCK_PROFILE=${profile}
+SNAPSHOT=${snap}
+EMBEDDED_SYSUPGRADE_SHA256=${sys_sha}
+DESTRUCTIVE_STAGE2=DISABLED
+EOF
+            make -C "$root" image PROFILE="$profile" FILES="$overlay" DISABLED_SERVICES='' V=s
+            out="$(find "$root/bin/targets/airoha/$target" -maxdepth 1 -type f -name "openwrt-airoha-${target}-${device}-initramfs-uImage.itb" -print | head -n1)"
+            test -s "$out"
+            mkdir -p "$GITHUB_WORKSPACE/payloads/vanilla-initramfs-test/$family"
+            cp "$out" "$GITHUB_WORKSPACE/payloads/vanilla-initramfs-test/$family/openwrt-airoha-${target}-${device}-ursus-initramfs-test.itb"
+          }
+          build_family md an7581 nokia_xg-040g-md nokia_xg-040g-md
+          build_family mf an7583 nokia_xg-040g-mf nokia_xg-040g-mf
+
+      - name: Verify custom FITs and embedded test runtime
+        run: |
+          set -eux
+          verify_fit() {
+            family="$1"; target="$2"; device="$3"
+            fit="payloads/vanilla-initramfs-test/$family/openwrt-airoha-${target}-${device}-ursus-initramfs-test.itb"
+            dumpimage -l "$fit" | tee "work/${family}-dumpimage.txt"
+            dumpimage -T flat_dt -p 0 -o "work/${family}-kernel.lzma" "$fit"
+            xz --format=lzma -dc "work/${family}-kernel.lzma" > "work/${family}-Image"
+            grep -aFq 'URSUS_STOCKSLOT_DONE' "work/${family}-Image"
+            grep -aFq 'URSUS_STAGE2_DISABLED_TEST_BUILD' "work/${family}-Image"
+            grep -aFq 'URSUS_INITRAMFS_TEST_READY' "work/${family}-Image"
+            grep -aFq 'openwrt-production-sysupgrade.itb' "work/${family}-Image"
+            PYTHONPATH=ursusflasher/src python3 - "$fit" <<'PY'
+import pathlib, sys
+import stock_fit_initramfs as s
+p=pathlib.Path(sys.argv[1]); info=s.source_fit_contract(p.read_bytes())
+print('SOURCE_FIT_QA=PASS', info)
+assert info['kernel_data_size'] > 1024*1024
+PY
+          }
+          verify_fit md an7581 nokia_xg-040g-md
+          verify_fit mf an7583 nokia_xg-040g-mf
+
+      - name: Write payload provenance
+        run: |
+          set -eux
+          python3 - <<'PY'
+import hashlib, json, pathlib, subprocess
+root=pathlib.Path('.')
+commit=subprocess.check_output(['git','rev-parse','HEAD'], text=True).strip()
+specs={
+  'md': ('xg040-md','an7581','nokia_xg-040g-md', True),
+  'mf': ('xg040-mf','an7583','nokia_xg-040g-mf', False),
+}
+for fam,(profile,target,device,fudan) in specs.items():
+    d=root/'payloads'/'vanilla-initramfs-test'/fam
+    img=d/f'openwrt-airoha-{target}-{device}-ursus-initramfs-test.itb'
+    snap=root/'work'/'snapshot'/fam
+    official=snap/f'openwrt-airoha-{target}-{device}-initramfs-uImage.itb'
+    sysup=snap/f'openwrt-airoha-{target}-{device}-ubi-squashfs-sysupgrade.itb'
+    info={
+      'schema':1,'mode':'VANILLA_INITRAMFS_BOOT_ONLY_TEST','family':fam,'profile':profile,
+      'target':target,'device':device,'source_commit':commit,
+      'snapshot':(snap/'version.buildinfo').read_text().strip(),
+      'sha256':hashlib.sha256(img.read_bytes()).hexdigest(),'size':img.stat().st_size,
+      'official_stock_initramfs_sha256':hashlib.sha256(official.read_bytes()).hexdigest(),
+      'embedded_ubi_sysupgrade_sha256':hashlib.sha256(sysup.read_bytes()).hexdigest(),
+      'destructive_stage2_enabled':False,'slot1_fallback_required':True,
+      'linux_fudan_expected':fudan,
+      'fudan_note':'Official snapshot Linux includes current FMSH FM25G01B/FM25G02B support; HW acceptance pending.' if fudan else None,
+      'final_bootloader_status':'NOT_USED_IN_THIS_BOOT_ONLY_TEST',
+    }
+    (d/'PAYLOAD.json').write_text(json.dumps(info,indent=2,sort_keys=True)+'\n')
+    for name in (
+      f'openwrt-airoha-{target}-{device}-initramfs-uImage.itb',
+      f'openwrt-airoha-{target}-{device}-ubi-initramfs-recovery.itb',
+      f'openwrt-airoha-{target}-{device}-ubi-squashfs-sysupgrade.itb',
+    ):
+      (d/name).write_bytes((snap/name).read_bytes())
+    (d/'OPENWRT_SHA256SUMS').write_bytes((snap/'sha256sums').read_bytes())
+    (d/'OPENWRT_VERSION').write_bytes((snap/'version.buildinfo').read_bytes())
+PY
+
+      - name: Assemble operator kit
+        run: |
+          set -eux
+          ART=/tmp/ursus-item4-initramfs-test
+          rm -rf "$ART"
+          mkdir -p "$ART"
+          cp -a START_EXPERT_ITEM4_INITRAMFS_TEST.cmd START_EXPERT_ITEM4_INITRAMFS_TEST.sh VERSION README.md "$ART/"
+          cp -a config fw payloads ursusflasher docs "$ART/"
+          cat > "$ART/READ-ME-FIRST.txt" <<EOF
+UrsusFlasher EXPERT ITEM 4 - VANILLA PREGNANT INITRAMFS BOOT-ONLY TEST
+Source commit: ${GITHUB_SHA}
+
+Launch:
+  Windows: START_EXPERT_ITEM4_INITRAMFS_TEST.cmd
+  Linux:   ./START_EXPERT_ITEM4_INITRAMFS_TEST.sh
+
+This test writes ONLY stock nsb_slave (SLOT2) and the primary stock selector flag.
+It NEVER formats UBI and NEVER writes production FIP or BL2.
+One y/N authorizes SLOT2 write/readback + selector/readback + immediate reboot.
+
+Included fresh snapshot test images:
+  MD / AN7581 / Nokia XG-040G-MD - stock-layout initramfs, Fudan-capable Linux expected
+  MF / AN7583 / Nokia XG-040G-MF - stock-layout initramfs
+Each custom initramfs contains the fresh UBI sysupgrade payload, but destructive stage2 is physically disabled.
+
+Expected after boot:
+  192.168.1.1
+  SSH root, blank password (test initramfs only)
+  cat /tmp/ursus-install/status.json
+  cat /tmp/ursus-install/install.log
+  ursusstockslot status
+
+No-UART rollback test:
+  ursusstockslot master
+  sync
+  reboot -f
+
+Acceptance for this build is only SLOT2 Linux boot + network/SSH + stock selector rollback.
+CI PASS is not HW PASS. Do not use embedded production payload for manual destructive writes.
+EOF
+          find "$ART" -type d -name __pycache__ -prune -exec rm -rf {} + || true
+          find "$ART" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+          git rev-parse HEAD > "$ART/URSUSFLASHER_COMMIT.txt"
+          (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          cd /tmp
+          zip -qr "UrsusFlasher-EXPERT-ITEM4-INITRAMFS-TEST-${GITHUB_SHA}.zip" ursus-item4-initramfs-test
+          sha256sum "UrsusFlasher-EXPERT-ITEM4-INITRAMFS-TEST-${GITHUB_SHA}.zip" > "UrsusFlasher-EXPERT-ITEM4-INITRAMFS-TEST-${GITHUB_SHA}.zip.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UrsusFlasher-EXPERT-ITEM4-INITRAMFS-TEST-${{ github.sha }}
+          path: |
+            /tmp/UrsusFlasher-EXPERT-ITEM4-INITRAMFS-TEST-${{ github.sha }}.zip
+            /tmp/UrsusFlasher-EXPERT-ITEM4-INITRAMFS-TEST-${{ github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14

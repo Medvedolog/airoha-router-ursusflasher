@@ -1,0 +1,12 @@
+#!/bin/sh
+# Test-only recovery environment. No production flash writer is present.
+uci -q set network.lan.ipaddr='192.168.1.1'
+uci -q set network.lan.netmask='255.255.255.0'
+uci -q commit network
+ln -sf ../init.d/ursus-initramfs-test /etc/rc.d/S98ursus-initramfs-test
+# Allow an intentionally blank root password only in this ephemeral test initramfs.
+# Insert Dropbear -B before the service is started; do not persist this policy.
+if grep -q 'procd_set_param command "$PROG" -F -P "$pid_file"' /etc/init.d/dropbear 2>/dev/null; then
+    sed -i 's/procd_set_param command "$PROG" -F -P "$pid_file"/procd_set_param command "$PROG" -F -B -P "$pid_file"/' /etc/init.d/dropbear
+fi
+exit 0
