@@ -2,7 +2,7 @@
 
 **Дата:** 2026-09-17  
 **Ветка:** `feature/ursusboot-modular-airoha`  
-**HEAD перед этой редакцией handoff:** `cee74310eb4699a8184482f3c6896d3a0bbc6a1d`  
+**HEAD перед этой редакцией handoff:** `a9e3036451ec778fb6567232dd0e26622645580b`  
 **Нормативное ТЗ:** `docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.45_VANILLA_INITRAMFS.md`
 
 ## 1. Главный архитектурный pivot
@@ -29,13 +29,13 @@ Nokia stock
   -> Vanilla OpenWrt
 ```
 
-`TRANSITION2` сохраняется как diagnostic/R&D ветка и доказательство отдельных механизмов, но не является обязательной install environment для Vanilla.
+`TRANSITION2` сохраняется как diagnostic/R&D линия, но не является обязательной install environment для Vanilla.
 
-## 2. Что именно берём из MedveFlasher, а что нет
+## 2. Что берём из MedveFlasher, а что нет
 
-Берём правильную форму: transition Linux в SLOT2, который сам выполняет migration. Именно эта архитектура прошла множество успешных установок MedveFlasher.
+Берём правильную форму: transition Linux в SLOT2, который сам выполняет migration. Эта архитектура прошла серию успешных установок MedveFlasher.
 
-Не переносим его fatal topology defect: fallback не должен одновременно быть write target. Старый MedveFlasher мог удалить recovery `fit` перед записью replacement и получить окно без bootable image.
+Не переносим fatal topology defect MedveFlasher: fallback не должен одновременно быть write target. Старый MedveFlasher мог удалить recovery `fit` перед записью replacement и получить окно без bootable image.
 
 В новом item 4 topology разделена:
 
@@ -46,9 +46,9 @@ UBI/FIP/BL2 = destructive production targets
 BL2 = LAST
 ```
 
-До финального destructive boundary stock chain остаётся доступной. SLOT1 и SLOT2 не являются теми же регионами, куда stage2 пишет production UBI/FIP/BL2.
+До destructive migration SLOT1 остаётся fallback, а SLOT2 — installer. Они не являются тем же target, куда stage2 пишет production layout.
 
-## 3. Что доказал последний TRANSITION2 HW цикл
+## 3. Что доказал TRANSITION2 HW цикл
 
 Для XG-040G-MD аппаратно доказано:
 
@@ -64,15 +64,15 @@ PASS lwIP/U-Boot формирует TX frame
 PASS QDMA потребляет TX descriptor, DONE=1
 ```
 
-Host-visible ping/Web при этом не появился. Остаточная неисправность находится после QDMA TX consumption — GDM/switch egress либо иной inherited tcboot state. Для Vanilla это исследование замораживается: Linux initramfs использует штатный Linux networking/MTD/UBI stack и не требует нормализации U-Boot/lwIP после tcboot.
+Host-visible ping/Web при этом не появился. Остаточная неисправность находится после QDMA TX consumption — GDM/switch egress либо иной inherited tcboot state. Для Vanilla это исследование замораживается: Linux initramfs использует штатный Linux networking/MTD/UBI stack.
 
-Не возвращаться к switch dump/normalization как prerequisite Vanilla item 4 без нового прямого требования оператора.
+Не возвращаться к switch dump/normalization как prerequisite Vanilla item 4 без прямого требования оператора.
 
 ## 4. Что переезжает из MedveFlasher
 
 Источник proven mechanics: `Medvedolog/nokia-router-medveflasher`.
 
-В UrsusFlasher item 4 адаптировать:
+Адаптировать:
 
 ```text
 stock -> Linux bootm handoff
@@ -86,7 +86,7 @@ transition recovery shell when stage2 fails
 status/log model
 ```
 
-Не переносить MedveFlasher UX ceremony как обязательный contract:
+Не переносить MedveFlasher UX ceremony:
 
 ```text
 никаких codewords
@@ -112,13 +112,13 @@ amber / amber2 / sand / ok / bad palette
 [ОШИБКА] / [ERROR]
 ```
 
-Новые stage2/SSH-monitoring сообщения должны проходить через тот же UI layer, а не приносить второй style system из MedveFlasher.
+Новые stage2/SSH-monitoring сообщения проходят через этот UI layer.
 
 ## 6. Минимум gates
 
 Normal Vanilla transaction имеет **одно meaningful `y/N`** после полного automatic preflight-summary.
 
-Это `y` сразу разрешает весь заранее показанный plan:
+Это `y` разрешает весь заранее показанный plan:
 
 ```text
 SLOT2 write/readback
@@ -132,15 +132,15 @@ verification
 production reboot
 ```
 
-После reboot дополнительных подтверждений нет.
+После reboot дополнительных confirmations нет.
 
-Никаких:
+Запрещены:
 
 ```text
 CONFIRM FORMAT AND FLASH
 YES I UNDERSTAND
-повторных y/N перед erase/write
-отдельного confirm для rollback внутри уже подтверждённой transaction
+повторные y/N перед erase/write
+отдельный confirm для rollback внутри уже подтверждённой transaction
 ```
 
 Safety обеспечивается automatic validation/readback, а не ceremony.
@@ -242,42 +242,38 @@ error
 
 Host не должен быть trigger каждой write-stage.
 
-## 10. Persistent migration state
+## 10. Migration state: до UBI и после UBI
 
-До первого destructive write stage2 обязан записать NAND-backed marker и доказать readback.
+На virgin stock OpenWrt `ubootenv`/`ubootenv2` как canonical UBI volumes ещё не существуют. Поэтому **pre-destructive stage не обязан иметь persistent OpenWrt marker** и не должен делать вид, что может записать `MIGRATION_OK` через `fw_setenv` до появления соответствующего environment.
 
-Нормативные состояния:
+До первой destructive NAND operation rollback safety определяется положительным доказательством pristine stock layout, описанным в разделе 13.
+
+Нормативные persistent состояния после появления подходящего NAND-backed carrier:
 
 ```text
-MIGRATION_OK
 PROD_WRITING
 PROD_VERIFIED
 BOOT_CONFIRMED
 ```
 
-Базовый interface:
+`MIGRATION_OK` остаётся допустимым live/diagnostic состоянием preflight, но не является обязательным persistent marker на virgin stock.
+
+После создания canonical UBI `ubootenv`/`ubootenv2` становятся штатным carrier для migration state. Запись каждого state должна иметь readback (`fw_setenv` + `fw_printenv`/эквивалент).
+
+Критическое правило:
 
 ```text
-fw_setenv <migration-state-key> PROD_WRITING
-fw_printenv <migration-state-key>
-sync
+marker says PROD_WRITING / PROD_VERIFIED / BOOT_CONFIRMED
+    -> master rollback REFUSED безусловно
+
+marker absent
+    -> отсутствие само по себе ничего не доказывает
+    -> решение принимает stock-evidence probe
 ```
 
-Только после verified `PROD_WRITING` разрешается первая destructive NAND operation.
+Если marker отсутствует после того, как stock layout уже не pristine, rollback запрещён. Это покрывает power loss/reset во время первой destructive стадии ещё до появления нового UBI environment.
 
-Важная оговорка по текущему MD layout: `ubootenv` и `ubootenv2` находятся внутри UBI. Поэтому они полезны как persistent state carrier, но **не могут быть единственным доказательством rollback safety во время ubiformat/repartition**.
-
-Fail-safe правило:
-
-```text
-marker missing
-marker corrupt
-redundant copies disagree
-state unknown
-    => rollback_allowed=false
-```
-
-После recreation canonical UBI `ubootenv`/`ubootenv2` должны быть созданы/восстановлены и marker должен быть восстановлен туда до дальнейших destructive стадий.
+Нельзя выбирать pre-UBI marker location «по догадке» в stock NAND. Если позже будет введён отдельный carrier вне destructive span, он требует отдельного geometry/readback/HW acceptance.
 
 ## 11. SSH — monitor/recovery plane
 
@@ -287,7 +283,7 @@ state unknown
 finds transition initramfs
 connects SSH
 polls live status
-reads persistent migration state
+reads persistent migration state when available
 streams/tails install.log
 renders progress through console_ui
 reconnects after transient loss
@@ -324,7 +320,7 @@ master -> active=0 only
 slave  -> active=1 only
 ```
 
-Инвариант из proven host-side implementation сохраняется буквально:
+Инвариант сохраняется буквально:
 
 ```python
 struct.pack_into("<I", out, 0, target)
@@ -342,7 +338,7 @@ nsb_slave   expected mtd15, size 0x02880000
 erase size  0x00020000
 ```
 
-Но Linux helper не должен использовать `mtd8` как универсальный API. Он должен resolve partition по имени/profile через `/proc/mtd`, затем сверить geometry.
+Но Linux helper не должен использовать `mtd8` как универсальный API. Он resolve partition по имени/profile через `/proc/mtd` и сверяет geometry.
 
 Write contract:
 
@@ -358,7 +354,7 @@ verify every non-active byte unchanged
 
 `flagback` вручную не менять; reconciliation принадлежит stock tcboot.
 
-Совместимый success marker:
+Success marker:
 
 ```text
 URSUS_STOCKSLOT_DONE target=master active=0 readback=PASS next=RESET
@@ -373,54 +369,113 @@ reboot -f   # если обычный reboot недостаточен
 
 ### Guard находится в utility, не в UI
 
-`ursusstockslot master` обязан сам отказать, если rollback не доказан. Недостаточно скрыть/не вызвать команду в UrsusFlasher.
+`ursusstockslot master` обязан сам вычислить rollback safety и отказать, если она не доказана. Недостаточно скрыть команду в UrsusFlasher.
 
 Public normal path не имеет `--force` обхода guard.
 
-## 13. No-UART rollback — два независимых доказательства
+## 13. No-UART rollback — трёхсостоянийное правило
 
-`rollback_allowed` вычисляется, а не читается как доверенный boolean из RAM.
+`rollback_allowed` — derived result, а не trusted boolean из RAM.
 
-Для возврата на master одновременно нужны:
+### Rule 1: явный destructive marker
+
+Если persistent state доступен и равен одному из:
 
 ```text
-A. persistent state показывает pre-destructive состояние
-   и НЕ равен PROD_WRITING / PROD_VERIFIED / BOOT_CONFIRMED
-
-B. NAND evidence доказывает, что stock fallback реально цел:
-   stock partition/layout geometry matches
-   nsb_master matches verified stock evidence
-   critical regions потенциально затрагиваемые migration совпадают с verified backup/evidence
-   нет partially converted UBI/layout
+PROD_WRITING
+PROD_VERIFIED
+BOOT_CONFIRMED
 ```
 
-Только `A && B` разрешает `ursusstockslot master`.
-
-При любом unknown/mismatch:
+то:
 
 ```text
+rollback_allowed=false
+ursusstockslot master -> REFUSED
+```
+
+Это unconditional veto независимо от остальных признаков.
+
+### Rule 2: marker отсутствует, но stock положительно доказан pristine
+
+Отсутствие marker допустимо на первом boot virgin stock, потому что canonical OpenWrt env ещё не существует.
+
+В этом единственном классе случаев rollback разрешён только если NAND evidence **положительно** доказывает всё одновременно:
+
+```text
+expected stock partition/layout geometry matches
+nsb_master matches verified stock backup/evidence
+all critical stock regions that migration may touch match verified backup/evidence
+stock UBI/rootfs/layout signatures match expected stock state
+no canonical OpenWrt UBI/layout is present
+no partially converted UBI/layout is present
+no destructive-write evidence is present
+```
+
+Тогда:
+
+```text
+marker = absent
+stock_evidence = PRISTINE
+rollback_allowed=true
+ursusstockslot master -> ALLOWED
+```
+
+Это не доверие отсутствию marker; authority здесь — положительный NAND proof.
+
+### Rule 3: все остальные случаи
+
+Если marker отсутствует/corrupt/unknown, но stock evidence не может доказать pristine state, либо evidence incomplete/mismatched:
+
+```text
+rollback_allowed=false
 URSUS_STOCKSLOT_REFUSED target=master reason=ROLLBACK_UNSAFE
 ```
 
-После reset/power loss исчезновение `/tmp/status.json` не может сделать rollback «безопасным».
+В частности, reset/power loss после начала `ubiformat` не сможет попасть в Rule 2: изменённые eraseblocks/UBI signatures/hashes ломают pristine proof даже если persistent marker ещё не успел появиться.
 
-Если pregnant initramfs загрузился, но preflight/autoflash не смог безопасно начать migration, и `A && B` PASS:
+### Preflight failure escape hatch
+
+Если pregnant initramfs загрузился на untouched stock и preflight упал до первой destructive operation, marker может никогда не существовать. При `stock_evidence=PRISTINE` automatic rollback должен работать:
 
 ```text
 ursusstockslot status
 ursusstockslot master
-verify readback PASS
+verify full selector readback PASS
 sync
 reboot
 ```
 
-Предпочтительно это делает сам initramfs автоматически.
+Повторного user confirmation не требуется: rollback является fail-safe частью уже подтверждённой transaction.
 
-Если auto rollback не сработал, UrsusFlasher по SSH выполняет тот же guarded contract. Повторного user confirmation не требуется: rollback является fail-safe частью уже подтверждённой transaction.
+После начала destructive migration автоматический master rollback запрещён.
 
-После `PROD_WRITING` **никогда автоматически не переключать selector на master**. Оставаться в initramfs и использовать только доказанную repair/retry strategy; UART/BootROM — last resort.
+## 14. Acceptance для rollback contract
 
-## 14. Final Vanilla payload policy
+Обязательные отдельные HW tests:
+
+```text
+virgin stock -> SLOT2 initramfs -> forced preflight FAIL
+persistent marker never existed
+stock evidence = PRISTINE
+ursusstockslot master -> ALLOWED
+selector readback PASS
+reboot -> untouched stock SLOT1 PASS
+
+explicit PROD_WRITING present -> master REFUSED PASS
+
+reset/power-loss injected during first destructive operation before marker exists
+marker absent
+stock evidence != PRISTINE
+master REFUSED PASS
+
+marker missing/corrupt after converted/partial layout -> master REFUSED PASS
+stock evidence incomplete/mismatch -> master REFUSED PASS
+```
+
+Без первого теста no-UART escape hatch не считается доказанным.
+
+## 15. Final Vanilla payload policy
 
 Конечный MD Vanilla boot chain:
 
@@ -444,38 +499,33 @@ ursusnetreset
 custom Ursus writer/recovery policy
 ```
 
-После production boot пользователь обновляет OpenWrt обычным штатным `sysupgrade` на подходящий snapshot/release.
+После production boot пользователь обновляет OpenWrt штатным `sysupgrade`.
 
-## 15. Persistent UrsusBoot — отдельный продукт
+## 16. Persistent UrsusBoot — отдельный продукт
 
-Не смешивать этот pivot с persistent line.
+Persistent TEST61 lineage остаётся отдельным recovery-first продуктом. Известный lifecycle defect стандартных U-Boot network commands против живого WebFailsafe (`netif_remove`/`eth_halt`) исправляется отдельно и больше не блокирует Vanilla item 4.
 
-Persistent TEST61 lineage остаётся отдельным recovery-first продуктом. Известный lifecycle defect стандартных U-Boot network commands против живого WebFailsafe (`netif_remove`/`eth_halt`) должен быть исправлен отдельно перед public persistent build.
-
-Он больше не блокирует Vanilla item 4.
-
-## 16. Следующая реализация
-
-Приоритетный порядок работ:
+## 17. Следующая реализация
 
 ```text
 1. Не тратить новые HW boots на TRANSITION2 switch egress ради Vanilla.
-2. Вытащить из MedveFlasher минимально необходимый autonomous stage2/autoflash contract.
-3. Сделать новый stock-compatible installer FIT builder, который не ограничен старым in-place kernel@1 размером ~3.7 MiB.
+2. Вытащить из MedveFlasher минимальный autonomous stage2/autoflash contract.
+3. Сделать stock-compatible installer FIT builder без старого ~3.7 MiB in-place ограничения.
 4. Собрать pregnant OpenWrt initramfs с embedded final artifacts.
-5. Реализовать Linux ursusstockslot + byte-preservation/readback invariants + internal rollback guard.
-6. Реализовать persistent migration state MIGRATION_OK/PROD_WRITING/PROD_VERIFIED/BOOT_CONFIRMED.
-7. Реализовать NAND evidence probe и derive rollback_allowed как A && B.
-8. Подключить status.json/install.log + SSH monitoring/reconnect к EXPERT item 4 с нашим console_ui.
-9. Удалить лишние codeword/repeated confirmation gates: оставить одно y/N.
-10. HW-test deliberate pre-destructive failure -> guarded master rollback -> stock boot.
-11. HW-test reset/power-loss after PROD_WRITING -> master command must refuse.
-12. Только после rollback/refusal HW PASS разрешить destructive UBI migration.
-13. HW-test autonomous migration -> BL2 LAST -> PROD_VERIFIED -> Vanilla production boot -> BOOT_CONFIRMED.
-14. После MD acceptance параметризовать тот же подход для MF без копирования MD offsets.
+5. Реализовать Linux ursusstockslot + byte-preservation/readback invariants + internal guard.
+6. Реализовать stock-evidence probe, способный доказать PRISTINE или вернуть UNKNOWN/CHANGED.
+7. Не требовать pre-UBI persistent marker на virgin stock.
+8. После появления canonical UBI реализовать PROD_WRITING/PROD_VERIFIED/BOOT_CONFIRMED с readback.
+9. Подключить status.json/install.log + SSH monitoring/reconnect к item 4 через console_ui.
+10. Оставить одно y/N.
+11. HW-test virgin-stock preflight FAIL -> marker absent -> pristine proof -> master rollback -> stock boot.
+12. HW-test reset/power-loss во время первой destructive стадии до marker -> pristine proof fails -> master REFUSED.
+13. Только после этих HW PASS разрешить full destructive migration.
+14. HW-test autonomous migration -> BL2 LAST -> Vanilla production boot.
+15. После MD acceptance параметризовать для MF без копирования MD offsets.
 ```
 
-## 17. Repo/operator invariants
+## 18. Repo/operator invariants
 
 ```text
 branch = feature/ursusboot-modular-airoha
@@ -485,7 +535,9 @@ no device backups/credentials/serial/GPON identity in git
 one meaningful y/N for normal destructive transaction
 automatic readback > extra operator ceremony
 /tmp telemetry never authorizes rollback
-missing/unknown persistent state = rollback denied
+explicit destructive marker = rollback denied
+marker absent + positive pristine-stock proof = rollback may be allowed
+marker absent + anything else = rollback denied
 ursusstockslot master enforces guard internally
 CI PASS != HW PASS
 ```
