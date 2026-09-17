@@ -127,7 +127,7 @@
  
  	/*
  	 * There is no need to pad short TX packets to 60 bytes since the
-@@ -1115,6 +1117,16 @@ static int airoha_eth_send(struct udevice *dev, void *packet, int length)
+@@ -1115,6 +1117,17 @@ static int airoha_eth_send(struct udevice *dev, void *packet, int length)
  
  	fport = airoha_get_fe_port(port);
  
@@ -145,7 +145,7 @@
  	msg0 = 0;
  	msg1 = FIELD_PREP(QDMA_ETH_TXMSG_FPORT_MASK, fport) |
  	       FIELD_PREP(QDMA_ETH_TXMSG_METER_MASK, 0x7f);
-@@ -1145,6 +1157,13 @@ static int airoha_eth_send(struct udevice *dev, void *packet, int length)
+@@ -1145,6 +1157,12 @@ static int airoha_eth_send(struct udevice *dev, void *packet, int length)
  		udelay(1);
  	}
  
