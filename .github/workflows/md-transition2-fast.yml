@@ -85,7 +85,7 @@ jobs:
         run: |
           bash ursusboot/scripts/build_md_transition1.sh
           test -s work/md-transition2/out/ursusboot-md-0.1.0-alpha5-UBIUX1-TRANSITION2.linuximg
-          grep -Fq 'TRANSITION_ENTRY=ursusdispatch->ursusweb' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
+          grep -Fq 'TRANSITION_ENTRY=ursusdispatch->net-sanitize->ursusweb' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
           grep -Fq 'HANDOFF_ONLY=0' work/md-transition2/out/TRANSITION2-BUILD_INFO.txt
 
       - name: Stage payload and metadata
