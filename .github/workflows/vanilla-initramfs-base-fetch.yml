@@ -1,0 +1,51 @@
+name: Vanilla initramfs base fetch
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - '.github/workflows/vanilla-initramfs-base-fetch.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Fetch current OpenWrt snapshot bases
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/md out/mf
+          fetch_family() {
+            fam="$1"
+            target="$2"
+            device="$3"
+            base="https://downloads.openwrt.org/snapshots/targets/airoha/${target}"
+            dir="out/${fam}"
+            curl -fL --retry 5 "$base/sha256sums" -o "$dir/sha256sums"
+            curl -fL --retry 5 "$base/version.buildinfo" -o "$dir/version.buildinfo"
+            for name in \
+              "openwrt-airoha-${target}-${device}-initramfs-uImage.itb" \
+              "openwrt-airoha-${target}-${device}-ubi-initramfs-recovery.itb" \
+              "openwrt-airoha-${target}-${device}-ubi-preloader.bin" \
+              "openwrt-airoha-${target}-${device}-ubi-bl31-uboot.fip"; do
+              grep -E "[[:space:]]\\*?${name}$" "$dir/sha256sums" | head -n1 > "$dir/${name}.sha256.line"
+              test -s "$dir/${name}.sha256.line"
+              curl -fL --retry 5 "$base/$name" -o "$dir/$name"
+              (cd "$dir" && sha256sum -c "${name}.sha256.line")
+            done
+          }
+          fetch_family md an7581 nokia_xg-040g-md
+          fetch_family mf an7583 nokia_xg-040g-mf
+          sha256sum out/md/*.itb out/md/*.bin out/md/*.fip out/mf/*.itb out/mf/*.bin out/mf/*.fip | tee out/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vanilla-initramfs-bases-${{ github.sha }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
