@@ -50,5 +50,18 @@ def test_pinned_unameone_manifest():
     assert data["profiles"]["xg040-md"]["ubi_sysupgrade"]["sha256"]=="9b1f0899ca4ef610f6d87e8572d369adb420f104bda667556e8a0b5979f066dd"
     assert data["profiles"]["xg040-mf"]["ubi_sysupgrade"]["sha256"]=="21dcf4c6ca64ea0c5bc3d601e4a8f99a3f002371b873f399f622cbd9223fd1d1"
 
-test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_pinned_unameone_manifest()
+def test_pinned_boot_chain_manifest():
+    data=json.loads((ROOT/"config"/"VANILLA_BOOT_CHAIN_PROFILES.json").read_text())
+    assert data["source"]["repository"]=="Medvedolog/nokia-router-medveflasher"
+    assert data["source"]["commit"]=="342cac4cb99a924f3d83eb8e4b5259490377704e"
+    md=data["profiles"]["xg040-md"]; mf=data["profiles"]["xg040-mf"]
+    assert md["fip"]["sha256"]=="8625d786cdded8ce2e5de27abc1ead7b1546e058ee055089e5c9780518f540f1"
+    assert md["fip"]["status"]=="HW_VERIFIED_BY_OPERATOR_FUDAN_MD"
+    assert md["preloader"]["sha256"]=="ed42a1d2f2cfca1af08c0ba935a8311260954c7424301d1ff99166f9e10c2f30"
+    assert mf["fip"]["sha256"]=="99b6c20a7cb46a56692eaeb9f086f70fc7e987a641396653e6a8fb5c03e07aa7"
+    assert mf["preloader"]["sha256"]=="778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e"
+    assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
+    assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
+
+test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")

@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "purpose": "Pinned proven Vanilla boot chain for EXPERT item 4 pregnant migration",
+  "source": {
+    "repository": "Medvedolog/nokia-router-medveflasher",
+    "commit": "342cac4cb99a924f3d83eb8e4b5259490377704e",
+    "release_version": "1.0.0-rc35",
+    "raw_base": "https://raw.githubusercontent.com/Medvedolog/nokia-router-medveflasher",
+    "policy": "Boot-chain bytes are pinned independently from the fresh transient runtime and the UnameOne production child."
+  },
+  "profiles": {
+    "xg040-md": {
+      "family": "md",
+      "fip": {
+        "path": "data/payloads/nokia-xg-040g-md-an7581-production-bl31-uboot.fip",
+        "size": 314158,
+        "sha256": "8625d786cdded8ce2e5de27abc1ead7b1546e058ee055089e5c9780518f540f1",
+        "status": "HW_VERIFIED_BY_OPERATOR_FUDAN_MD"
+      },
+      "preloader": {
+        "path": "data/payloads/nokia-xg-040g-md-an7581-preloader.bin",
+        "size": 112195,
+        "sha256": "ed42a1d2f2cfca1af08c0ba935a8311260954c7424301d1ff99166f9e10c2f30",
+        "status": "PINNED"
+      }
+    },
+    "xg040-mf": {
+      "family": "mf",
+      "fip": {
+        "path": "data/payloads/nokia-xg-040g-mf-an7583-production-bl31-uboot.fip",
+        "size": 319568,
+        "sha256": "99b6c20a7cb46a56692eaeb9f086f70fc7e987a641396653e6a8fb5c03e07aa7",
+        "status": "HW_CONFIRMED_LINEAGE"
+      },
+      "preloader": {
+        "path": "data/payloads/nokia-xg-040g-mf-an7583-production-preloader.bin",
+        "size": 118333,
+        "sha256": "778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e",
+        "status": "EXTRACTED_FROM_PINNED_TRANSITION_SHA256_VERIFIED"
+      }
+    }
+  },
+  "contracts": {
+    "transient_runtime_source": "fresh/current official OpenWrt UBI-recovery",
+    "production_child_source": "config/UNAMEONE_2026-09-16_PAYLOADS.json",
+    "boot_chain_source": "this manifest; exact pinned MedveFlasher proven bytes",
+    "md_fudan_support_required": true,
+    "bl2_preloader_written_last": true
+  }
+}

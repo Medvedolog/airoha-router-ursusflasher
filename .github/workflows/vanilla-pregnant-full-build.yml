@@ -25,15 +25,16 @@ on:
       - 'ursusflasher/tools/assemble_pregnant_payload.py'
       - 'ursusflasher/tools/selftest_pregnant_item4.py'
       - 'config/UNAMEONE_2026-09-16_PAYLOADS.json'
+      - 'config/VANILLA_BOOT_CHAIN_PROFILES.json'
       - 'ursusboot/patches/openwrt-pr24025/**'
 permissions: { contents: read }
 concurrency:
   group: vanilla-pregnant-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 300
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with: { path: kit, fetch-depth: 1 }
@@ -62,7 +63,7 @@ jobs:
             family="$1"; target="$2"; device="$3"; base="https://downloads.openwrt.org/snapshots/targets/airoha/$target"; dir="work/snapshot/$family"
             curl -fL --retry 5 "$base/sha256sums" -o "$dir/sha256sums"
             curl -fL --retry 5 "$base/version.buildinfo" -o "$dir/version.buildinfo"
-            for name in "openwrt-airoha-$target-$device-ubi-initramfs-recovery.itb" "openwrt-airoha-$target-$device-ubi-preloader.bin" "openwrt-airoha-$target-$device-ubi-bl31-uboot.fip"; do
+            for name in "openwrt-airoha-$target-$device-ubi-initramfs-recovery.itb"; do
               grep -E "[[:space:]]\\*?$name$" "$dir/sha256sums" | head -n1 > "$dir/$name.sha256.line"
               test -s "$dir/$name.sha256.line"; curl -fL --retry 5 "$base/$name" -o "$dir/$name"; (cd "$dir" && sha256sum -c "$name.sha256.line")
             done
@@ -82,57 +83,48 @@ jobs:
           for fam in ("md","mf"):
               p=Path("work/runtime")/f"{fam}-runtime.itb"; info=s.source_fit_contract(p.read_bytes()); assert info["fit_total_size"]==p.stat().st_size; print(f"{fam.upper()}_RUNTIME_FIT_QA=PASS",info)
           PY
-      - name: Resolve matching OpenWrt source for MD snapshot
+      - name: Fetch pinned proven Vanilla boot chain
         run: |
           set -euo pipefail
-          short="${MD_SNAPSHOT##*-}"; full="$(curl -fsSL "https://api.github.com/repos/openwrt/openwrt/commits/$short" | jq -r .sha)"; test -n "$full" && test "$full" != null
-          echo "OPENWRT_MD_REF=$full" >> "$GITHUB_ENV"
-          git init work/openwrt; git -C work/openwrt remote add origin https://github.com/openwrt/openwrt.git; git -C work/openwrt fetch --depth=1 origin "$full"; git -C work/openwrt checkout --detach FETCH_HEAD
-      - name: Build current Vanilla MD U-Boot with Fudan patches
-        run: |
-          set -euo pipefail
-          dst=work/openwrt/package/boot/uboot-airoha/patches; mkdir -p "$dst"
-          cp kit/ursusboot/patches/openwrt-pr24025/120-mtd-spinand-fmsh-add-support-for-FM25G01B-FM25G02B.patch "$dst/950-mtd-spinand-fmsh-add-support-for-FM25G01B-FM25G02B.patch"
-          cp kit/ursusboot/patches/openwrt-pr24025/121-mtd-spinand-fmsh-fix-FM25G01B-FM25G02B-Quad-IO-read-dummy-cycles.patch "$dst/951-mtd-spinand-fmsh-fix-FM25G01B-FM25G02B-Quad-IO-read-dummy-cycles.patch"
-          printf '%s\n' CONFIG_TARGET_airoha=y CONFIG_TARGET_airoha_an7581=y CONFIG_TARGET_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi=y > work/openwrt/.config
-          make -C work/openwrt defconfig; make -C work/openwrt download -j8; find work/openwrt/dl -type f -size -1024c -delete
-          make -C work/openwrt -j"$(nproc)" tools/install V=s || make -C work/openwrt -j1 tools/install V=s
-          make -C work/openwrt -j"$(nproc)" toolchain/install V=s || make -C work/openwrt -j1 toolchain/install V=s
-          make -C work/openwrt -j"$(nproc)" package/boot/uboot-airoha/compile V=s || make -C work/openwrt -j1 package/boot/uboot-airoha/compile V=s
-      - name: Repack current MD Vanilla FIP
-        run: |
-          set -euo pipefail
-          mapfile -t lz_candidates < <(find work/openwrt/build_dir -type f -path '*u-boot-an7581_nokia_xg-040g-md*/u-boot.lzma' -print)
-          if [ "${#lz_candidates[@]}" -ne 1 ]; then
-            echo "Expected exactly one MD u-boot.lzma, found ${#lz_candidates[@]}" >&2
-            find work/openwrt/build_dir -type f -name u-boot.lzma -print >&2 || true
-            exit 1
-          fi
-          lz="${lz_candidates[0]}"; test -s "$lz"
-          echo "MD_UBOOT_LZMA=$lz"
-          xz --format=lzma -dc "$lz" > work/md-vanilla-fudan-u-boot.bin; grep -aFq FM25G01B work/md-vanilla-fudan-u-boot.bin; grep -aFq FM25G02B work/md-vanilla-fudan-u-boot.bin
-          python3 kit/ursusflasher/tools/repack_vanilla_fip.py --donor work/snapshot/md/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot.fip --nt-fw "$lz" --output work/md-vanilla-fudan.fip --require-marker FM25G01B --require-marker FM25G02B
-      - name: Verify official MD BL2 Fudan table provenance
-        run: |
-          set -euo pipefail
-          atf_ref="$(sed -n 's/.*SOURCE_VERSION:=\([0-9a-f]\{40\}\).*/\1/p' work/openwrt/package/boot/arm-trusted-firmware-airoha/Makefile | head -n1)"; test -n "$atf_ref"
-          curl -fsSL "https://raw.githubusercontent.com/Ansuel/atf-airoha/$atf_ref/plat/ecnt/common/drivers/flash/spi_nand_flash_table.c" -o work/atf-spi_nand_flash_table.c
-          grep -Fq _SPI_NAND_DEVICE_ID_FM25G01B work/atf-spi_nand_flash_table.c; grep -Fq _SPI_NAND_DEVICE_ID_FM25G02B work/atf-spi_nand_flash_table.c
-          echo "ATF_FUDAN_FLASH_TABLE_QA=PASS ref=$atf_ref"
+          cfg=kit/config/VANILLA_BOOT_CHAIN_PROFILES.json
+          source_repo="$(jq -r '.source.repository' "$cfg")"
+          source_commit="$(jq -r '.source.commit' "$cfg")"
+          raw_base="$(jq -r '.source.raw_base' "$cfg")"
+          test "$source_repo" = Medvedolog/nokia-router-medveflasher
+          test "$source_commit" = 342cac4cb99a924f3d83eb8e4b5259490377704e
+          mkdir -p work/bootchain/md work/bootchain/mf
+          fetch_role() {
+            profile="$1"; family="$2"; role="$3"; output="$4"
+            path="$(jq -r ".profiles[\"$profile\"].$role.path" "$cfg")"
+            size="$(jq -r ".profiles[\"$profile\"].$role.size" "$cfg")"
+            sha="$(jq -r ".profiles[\"$profile\"].$role.sha256" "$cfg")"
+            status="$(jq -r ".profiles[\"$profile\"].$role.status" "$cfg")"
+            curl -fL --retry 5 "$raw_base/$source_commit/$path" -o "$output"
+            test "$(stat -c %s "$output")" = "$size"
+            echo "$sha  $output" | sha256sum -c -
+            echo "BOOTCHAIN_QA=PASS profile=$profile role=$role status=$status sha256=$sha"
+          }
+          fetch_role xg040-md md fip work/bootchain/md/vanilla-bl31-uboot.fip
+          fetch_role xg040-md md preloader work/bootchain/md/vanilla-preloader.bin
+          fetch_role xg040-mf mf fip work/bootchain/mf/vanilla-bl31-uboot.fip
+          fetch_role xg040-mf mf preloader work/bootchain/mf/vanilla-preloader.bin
+          grep -aFq FM25G01B work/bootchain/md/vanilla-bl31-uboot.fip
+          grep -aFq FM25G02B work/bootchain/md/vanilla-bl31-uboot.fip
+          echo "BOOTCHAIN_SOURCE_COMMIT=$source_commit" >> "$GITHUB_ENV"
       - name: Stage operator tree and runtime components
         run: |
           set -euo pipefail
           ART=work/staging/operator; mkdir -p "$ART"; cp -a kit/START_EXPERT* kit/VERSION kit/README.md "$ART/" 2>/dev/null || true; cp -a kit/config kit/fw kit/payloads kit/ursusflasher kit/docs "$ART/"
           rm -rf "$ART/payloads/vanilla-pregnant"; mkdir -p "$ART/payloads/vanilla-pregnant/md" "$ART/payloads/vanilla-pregnant/mf"
-          cp work/runtime/md-runtime.itb "$ART/payloads/vanilla-pregnant/md/runtime.itb"; cp work/md-vanilla-fudan.fip "$ART/payloads/vanilla-pregnant/md/vanilla-bl31-uboot.fip"; cp work/snapshot/md/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin "$ART/payloads/vanilla-pregnant/md/vanilla-preloader.bin"
-          cp work/runtime/mf-runtime.itb "$ART/payloads/vanilla-pregnant/mf/runtime.itb"; cp work/snapshot/mf/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-bl31-uboot.fip "$ART/payloads/vanilla-pregnant/mf/vanilla-bl31-uboot.fip"; cp work/snapshot/mf/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-preloader.bin "$ART/payloads/vanilla-pregnant/mf/vanilla-preloader.bin"
+          cp work/runtime/md-runtime.itb "$ART/payloads/vanilla-pregnant/md/runtime.itb"; cp work/bootchain/md/vanilla-bl31-uboot.fip "$ART/payloads/vanilla-pregnant/md/vanilla-bl31-uboot.fip"; cp work/bootchain/md/vanilla-preloader.bin "$ART/payloads/vanilla-pregnant/md/vanilla-preloader.bin"
+          cp work/runtime/mf-runtime.itb "$ART/payloads/vanilla-pregnant/mf/runtime.itb"; cp work/bootchain/mf/vanilla-bl31-uboot.fip "$ART/payloads/vanilla-pregnant/mf/vanilla-bl31-uboot.fip"; cp work/bootchain/mf/vanilla-preloader.bin "$ART/payloads/vanilla-pregnant/mf/vanilla-preloader.bin"
           cat > "$ART/payloads/vanilla-pregnant/NEEDS_PINNED_UNAMEONE.txt" <<EOF
           Exact UnameOne 2026-09-16 production children are intentionally not substituted by snapshots.
           MD SHA256 9b1f0899ca4ef610f6d87e8572d369adb420f104bda667556e8a0b5979f066dd
           MF SHA256 21dcf4c6ca64ea0c5bc3d601e4a8f99a3f002371b873f399f622cbd9223fd1d1
           Use ursusflasher/tools/assemble_pregnant_payload.py.
           EOF
-          echo "$GITHUB_SHA" > "$ART/URSUSFLASHER_COMMIT.txt"; printf 'MD_SNAPSHOT=%s\nMF_SNAPSHOT=%s\nOPENWRT_MD_REF=%s\n' "$MD_SNAPSHOT" "$MF_SNAPSHOT" "$OPENWRT_MD_REF" > "$ART/PREGNANT_BUILD_INFO.txt"
+          echo "$GITHUB_SHA" > "$ART/URSUSFLASHER_COMMIT.txt"; printf 'MD_SNAPSHOT=%s\nMF_SNAPSHOT=%s\nBOOTCHAIN_SOURCE_COMMIT=%s\n' "$MD_SNAPSHOT" "$MF_SNAPSHOT" "$BOOTCHAIN_SOURCE_COMMIT" > "$ART/PREGNANT_BUILD_INFO.txt"
           find "$ART" -type d -name __pycache__ -prune -exec rm -rf {} + || true; (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
       - name: Probe exact UnameOne production inputs
         id: prod
