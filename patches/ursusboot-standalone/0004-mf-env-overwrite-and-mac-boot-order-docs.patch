@@ -1,0 +1,59 @@
+diff --git a/README.md b/README.md
+index d1971986..f3217a6c 100644
+--- a/README.md
++++ b/README.md
+@@ -313,6 +313,26 @@ Use WebFailsafe on a **trusted, isolated direct Ethernet link** between the reco
+ 
+ This is an intentional recovery tradeoff: physical access already exposes UART/BootROM recovery, so UrsusBoot prioritizes deterministic de-bricking and a fully capable console over an account/authentication layer inside the ~512 KiB bootloader budget.
+ 
++## Recovery MAC identity
++
++The recovery MAC is derived from the board's `ri` volume by `ethaddr_factory`, which `preboot` runs on **every** boot, not once per lifetime. `reset_factory` re-derives and saves it after wiping the environment, so a FIP write no longer leaves the device without a stable identity.
++
++Two ordering facts matter when reading a boot log, because U-Boot brings the Ethernet device up **before** `preboot` runs:
++
++```text
++board_r.c  INITCALL(initr_net)      -> eth probe -> eth_post_probe()
++board_r.c  INITCALL(run_main_loop)  -> main_loop() -> preboot -> ethaddr_factory
++```
++
++- If the environment already holds an `ethaddr` — the normal case once the MAC has been saved — the probe simply adopts it and nothing random happens.
++- If the environment holds none (a fresh unit, or the first boot after `reset_factory` wiped it), `eth_post_probe()` generates a random MAC, **writes it into the environment and programs it into the controller**, printing `Warning: <dev> (ethN) using random MAC address - <mac>`. Only afterwards does `ethaddr_factory` run and correct the environment from `ri`.
++
++So on a boot log, `Warning: ... using random MAC address` means the environment had no MAC at that moment; it does not by itself mean the fix failed. What must follow it is `URSUS_MAC_SOURCE=RI ethaddr=…`. A generated address is always locally administered (the `0x02` bit of the first octet is set — `x2:`, `x6:`, `xa:` or `xe:`), so it is trivially distinguishable from a factory Nokia address.
++
++The random fallback is deliberately kept rather than removed: a unit whose `ri` volume is damaged still has to reach WebFailsafe over the network, and that is exactly the de-bricking case. A missing MAC would make `eth_post_probe()` fail with `Error: No valid MAC address found` and take recovery-over-network away when it is needed most. `WARN:` lines from `ethaddr_factory` name which fallback was taken.
++
++Both board configurations set `CONFIG_ENV_OVERWRITE=y`. Without it the `ethaddr` environment flag is `mo` (write-once, see `include/env_flags.h`), every rewrite after the first `saveenv` is refused, and `ethaddr_factory` would report a spurious `URSUS_MAC_RI_READ_FAIL` on every boot while being unable to correct a wrong address. QA asserts this for both boards.
++
+ ## Web UI
+ 
+ WebFailsafe serves one self-contained page from flash — no external assets, no CDN, RU/EN switchable. Layout:
+diff --git a/config/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig b/config/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig
+index 912a19c8..57470e9a 100644
+--- a/config/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig
++++ b/config/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig
+@@ -74,6 +74,7 @@ CONFIG_IPADDR="192.168.1.1"
+ CONFIG_USE_SERVERIP=y
+ CONFIG_SERVERIP="192.168.1.254"
+ CONFIG_USE_PREBOOT=y
++CONFIG_ENV_OVERWRITE=y
+ CONFIG_NET_RANDOM_ETHADDR=y
+ CONFIG_BUTTON=y
+ CONFIG_BUTTON_GPIO=y
+diff --git a/scripts/qa.sh b/scripts/qa.sh
+index 85fecbc2..f2e25db5 100644
+--- a/scripts/qa.sh
++++ b/scripts/qa.sh
+@@ -61,6 +61,11 @@ grep -q 'URSUS_WEB_STOP_REQUEST source=UART' "$ROOT/src/u-boot/cmd/ursusweb.c"
+ # MAC identity must be refreshed before autoboot on both current Nokia profiles.
+ grep -q '^CONFIG_USE_PREBOOT=y$' "$ROOT/config/u-boot.TEST61.full.config"
+ grep -q '^CONFIG_USE_PREBOOT=y$' "$ROOT/config/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig"
++# Without ENV_OVERWRITE the ethaddr env flag is "mo" (write-once), so every
++# ethaddr_factory rewrite after the first saveenv is refused and the recovery
++# MAC can never be corrected. See include/env_flags.h ETHADDR_FLAGS.
++grep -q '^CONFIG_ENV_OVERWRITE=y$' "$ROOT/config/u-boot.TEST61.full.config"
++grep -q '^CONFIG_ENV_OVERWRITE=y$' "$ROOT/config/an7583_nokia_xg-040g-mf_MF2_RAM_defconfig"
+ for envf in "$ROOT/src/u-boot/defenvs/an7581_nokia_xg-040g-md_env" "$ROOT/src/u-boot/defenvs/an7583_nokia_xg-040g-mf_env"; do
+     grep -q '^preboot=run ethaddr_factory ;' "$envf"
+     grep -q 'URSUS_MAC_SOURCE=RI' "$envf"
