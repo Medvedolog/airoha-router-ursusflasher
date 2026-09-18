@@ -1,63 +1,49 @@
 # Патчи для репозитория airoha-ursusboot
 
-Эти патчи предназначены **не для этого репозитория**, а для
+Патчи предназначены **не для этого репозитория**, а для
 [Medvedolog/airoha-ursusboot](https://github.com/Medvedolog/airoha-ursusboot).
-Они лежат здесь только потому, что в тот репозиторий нет доступа на запись.
+Лежат здесь только потому, что в тот репозиторий нет доступа на запись.
 
-Базовый коммит: `59053d41` («Update README.md»).
+Предыдущий набор (data-driven `build.sh`, упаковка FIP, QA-стражи, README)
+**уже вмерджен** в `43fca746` и удалён отсюда за ненадобностью.
 
-## Файлы
+## Открытый патч
 
 ```text
-0000-all.patch                                       всё сразу (код + README)
-0001-data-driven-build-fip-packing-and-qa-guards.patch  только сборка и QA
-0002-readme.patch                                     только README
-ursusboot-README.md                                   готовый README.md целиком
+0003-ping-do-not-remove-borrowed-netif.patch   база: 43fca746
+```
+
+## Что он чинит
+
+В `43fca746` netif-баг закрыт правильно: `new_netif()` больше не сносит чужой
+netif, а `ping`/`tftp` переиспользуют живой через флаг `borrowed` и не удаляют
+его на выходе. Но в `cmd/lwip/ping.c` один путь выхода остался без проверки:
+
+```c
+ret = ping_raw_init(&ctx);
+if (ret < 0) {
+        net_lwip_remove_netif(netif);   /* удаляет netif даже если borrowed */
+        return ret;
+}
+```
+
+Если `raw_new(IP_PROTO_ICMP)` вернёт NULL (пул raw-PCB в lwIP небольшой и
+фиксированный, при исчерпании — `-ENOMEM`), `ping`, запущенный при поднятом
+WebFailsafe, удалит его netif — то есть ровно исходный баг, доживший в одной
+ветке обработки ошибки. В `net/lwip/tftp.c` оба места удаления уже под
+`if (!borrowed)`; в `ping.c` защищено только одно из двух.
+
+Патч добавляет ту же проверку:
+
+```c
+if (!borrowed)
+        net_lwip_remove_netif(netif);
 ```
 
 ## Применение
 
 ```bash
 cd /path/to/airoha-ursusboot
-git apply /path/to/0000-all.patch
+git apply /path/to/0003-ping-do-not-remove-borrowed-netif.patch
 bash scripts/qa.sh
 ```
-
-Проверено: патч применяется чисто на `59053d41`, `qa.sh` после него проходит.
-
-## Что меняется
-
-**`build.sh`** — убран хардкод имён бордов и починен мёртвый второй аргумент:
-`ROLE` принимался, документировался и никогда не применялся. Борд, конфиг,
-шаблон boot-области и reference-FIP теперь берутся из
-`config/board-profiles.json`, роль реально применяется через
-`scripts/apply_runtime_role.py`.
-
-**Собранный U-Boot теперь реально попадает в образ.** Раньше `build.sh`
-компилировал `u-boot.bin`, а в `ursusboot-install-mtd0.bin` клал **reference-FIP**
-— то есть чужой, заранее собранный загрузчик. Звенья цепочки
-(`lzma1ext_noeopm` → `repack_persistent_fip.py`) лежали в дереве, но не
-вызывались ниоткуда. Теперь сборка пакует свежий BL33 в FIP через donor-контейнер
-и падает с внятной ошибкой, если `liblzma` недоступна, вместо тихой подмены.
-
-**`config/board-profiles.json`** — добавлены поля `config`,
-`boot_area_template`, `reference_fip`. У `xg140-md` они `null`: борд описан,
-но не собирается, и это теперь явное состояние с внятной ошибкой.
-
-**`scripts/resolve_board_profile.py`** — новые поля доступны через `--field`.
-
-**`scripts/qa.sh`** — регрессионные проверки: объявленные профилями пути
-обязаны существовать, `default_role` обязан быть валидным, `build.sh` не имеет
-права хардкодить имена бордов и обязан вызывать три своих скрипта.
-
-**`README.md`** — добавлен раздел **«Flashing the built image to mtd0»**: как
-прошить собранный 512 КиБ образ через сток-телнет root (проверки `/proc/mtd`,
-bad_blocks, обязательный бэкап с проверкой на ПК, четыре варианта writer'а,
-обязательный readback по SHA256) и через XMODEM/UART — как с живой консоли
-U-Boot (`loadx` + `mtd erase`/`mtd write`), так и с кирпича через двухстадийный
-Airoha BootROM. Плюс разделы про структуру репозитория, host-скрипты,
-семь встроенных команд, env-скрипты, структуру веб-интерфейса, таблицу всех
-кнопок (endpoint → подтверждение → предусловия → эффект), конвейер
-подготовки/прошивки и HTTP API. Плюс раздел «What UrsusBoot actually is»:
-это обычный U-Boot 2026.07 с патчами OpenWrt/Airoha, где сохранены 65 стоковых
-команд (+7 своих), а отключены 95 групп, не нужных NAND-роутеру.
