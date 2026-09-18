@@ -74,8 +74,8 @@ jobs:
       - name: Build linked-newc pregnant runtimes
         run: |
           set -euo pipefail; mkdir -p work/runtime
-          python3 kit/ursusflasher/tools/build_pregnant_runtime.py --family md --input work/snapshot/md/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-initramfs-recovery.itb --output work/runtime/md-runtime.itb
-          python3 kit/ursusflasher/tools/build_pregnant_runtime.py --family mf --input work/snapshot/mf/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-initramfs-recovery.itb --output work/runtime/mf-runtime.itb
+          python3 kit/ursusflasher/tools/build_pregnant_runtime.py --family md --input work/snapshot/md/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-initramfs-recovery.itb --overlay kit/openwrt/pregnant-overlay --output work/runtime/md-runtime.itb
+          python3 kit/ursusflasher/tools/build_pregnant_runtime.py --family mf --input work/snapshot/mf/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-initramfs-recovery.itb --overlay kit/openwrt/pregnant-overlay --output work/runtime/mf-runtime.itb
           PYTHONPATH=kit/ursusflasher/src python3 - <<'PY'
           from pathlib import Path
           import stock_fit_initramfs as s
