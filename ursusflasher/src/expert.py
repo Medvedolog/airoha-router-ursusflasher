@@ -22,7 +22,7 @@ import stock_web
 import ui_terms as terms
 import network_guidance
 import stock_restore
-import stock_ab_transition
+import stock_ab_pregnant
 import ursus_web_client as uw
 import ursusboot_install
 import ursusboot_update
@@ -392,7 +392,7 @@ def capability_report(state: ds.DeviceState) -> None:
         a = app[number]
         title = terms.action_title(a.key)
         if number == 4:
-            title = tr("Stock Nokia → Vanilla OpenWrt (TRANSITION)", "Stock Nokia → Vanilla OpenWrt (TRANSITION)")
+            title = tr("Stock Nokia → Vanilla OpenWrt (pregnant migration)", "Stock Nokia → Vanilla OpenWrt (pregnant migration)")
         yes = tr("ДА", "YES") if a.enabled else tr("НЕТ", "NO")
         marker = "!" if a.write_capable else " "
         print(f" {marker} {number:2d}  {title:<42} {yes}")
@@ -492,8 +492,8 @@ def _show_transition_action(state: ds.DeviceState) -> None:
     reason = "" if enabled else tr("доступно только для подтверждённой Nokia stock MD/MF", "available only for confirmed Nokia stock MD/MF")
     ui.menu_item(
         4,
-        tr("Stock Nokia → Vanilla OpenWrt (TRANSITION)", "Stock Nokia → Vanilla OpenWrt (TRANSITION)"),
-        tr("полный all-MTD backup → stock-compatible SLOT2 → TRANSITION в RAM; один y/N после preflight", "full all-MTD backup → stock-compatible SLOT2 → TRANSITION in RAM; one y/N after preflight"),
+        tr("Stock Nokia → Vanilla OpenWrt (pregnant migration)", "Stock Nokia → Vanilla OpenWrt (pregnant migration)"),
+        tr("полный backup → pregnant SLOT2 → автономная UBI/UnameOne/FIP/BL2 migration; один y/N", "full backup → pregnant SLOT2 → autonomous UBI/UnameOne/FIP/BL2 migration; one y/N"),
         write_capable=True,
         enabled=enabled,
         reason=reason,
@@ -503,8 +503,8 @@ def _show_transition_action(state: ds.DeviceState) -> None:
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     if number == 4:
         return (
-            "Полный all-MTD backup → structural FIT → proven transport preflight → один y/N → SLAVE/readback/selector",
-            "Full all-MTD backup → structural FIT → proven transport preflight → one y/N → SLAVE/readback/selector",
+            "Полный backup → UBI-recovery pregnant SLOT2 → один y/N → readback/selector → автономная UBI → pinned UnameOne → identity → Vanilla FIP → BL2 last",
+            "Full backup → UBI-recovery pregnant SLOT2 → one y/N → readback/selector → autonomous UBI → pinned UnameOne → identity → Vanilla FIP → BL2 last",
         )
     if number in app and not app[number].enabled:
         return "", ""
@@ -578,13 +578,13 @@ def main() -> int:
         if number == 4:
             profile = _transition_profile(state)
             if profile not in ("xg040-md", "xg040-mf"):
-                ui.status(tr("СТОП", "STOP"), tr("Vanilla TRANSITION доступен только из подтверждённой Nokia stock MD/MF.", "Vanilla TRANSITION is available only from confirmed Nokia stock MD/MF."))
+                ui.status(tr("СТОП", "STOP"), tr("Vanilla pregnant migration доступна только из подтверждённой Nokia stock MD/MF.", "Vanilla pregnant migration is available only from confirmed Nokia stock MD/MF."))
                 ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
             network_guidance.show()
             ui.section(tr("Перед первым запуском на stock Nokia", "Before first run on Nokia stock"), style="amber2")
             ui.note(tr("На включённом роутере удерживайте Reset не менее 30 секунд, отпустите и дождитесь полной загрузки stock Web UI.", "With the router powered on, hold Reset for at least 30 seconds, release it, and wait for the stock Web UI to boot fully."))
-            run_action(lambda: stock_ab_transition.run_expert(host=host, profile=profile), write_may_happen=True)
+            run_action(lambda: stock_ab_pregnant.run_expert(host=host, profile=profile), write_may_happen=True)
             continue
 
         selected = app[number]
