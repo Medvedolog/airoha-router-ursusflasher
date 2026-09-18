@@ -1,0 +1,37 @@
+name: Export old UnameOne bases for delta
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - '.github/workflows/export-old-fw-delta-base.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify repository bases
+        shell: bash
+        run: |
+          set -euo pipefail
+          md=fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb
+          mf=fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb
+          test "$(stat -c %s "$md")" = 10408217
+          test "$(sha256sum "$md" | awk '{print $1}')" = 47ea7c6f1e22a4aae9482e653a4fc6e87524f7e27847aaaed7fb75349cae7f3d
+          test "$(stat -c %s "$mf")" = 10240281
+          test "$(sha256sum "$mf" | awk '{print $1}')" = 0043b450c1d8e311b6f6c12458c66e976a72cb93ed657e12029fa79fffe5dc3a
+          mkdir out
+          cp "$md" "$mf" out/
+          sha256sum out/* > out/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unameone-delta-bases-${{ github.sha }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 2
