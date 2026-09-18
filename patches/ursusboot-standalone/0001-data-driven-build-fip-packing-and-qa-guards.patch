@@ -1,8 +1,8 @@
 diff --git a/build.sh b/build.sh
-index 0c6576bb..c0effb70 100755
+index 0c6576bb..e46e95ae 100755
 --- a/build.sh
 +++ b/build.sh
-@@ -1,15 +1,66 @@
+@@ -1,15 +1,87 @@
  #!/usr/bin/env bash
 +# Build UrsusBoot for one board profile and, when a FIP is available, emit a
 +# ready-to-flash 512 KiB mtd0 install image.
@@ -68,16 +68,37 @@ index 0c6576bb..c0effb70 100755
 +mkdir -p "$ROOT/dist/$BOARD"
 +cp "$ROOT/src/u-boot/u-boot.bin" "$ROOT/dist/$BOARD/u-boot.bin"
 +
++# A FIP given with URSUS_FIP is used as-is. Otherwise the U-Boot just built is
++# packed into one, using the profile's reference FIP as the donor container:
++# only the NT_FW (BL33) payload is replaced, everything else is preserved.
 +FIP="${URSUS_FIP:-}"
 +if [ -z "$FIP" ]; then
-+    REF="$(profile_field reference_fip 2>/dev/null || true)"
-+    [ -n "$REF" ] && FIP="$ROOT/$REF"
++    DONOR="${URSUS_FIP_DONOR:-}"
++    if [ -z "$DONOR" ]; then
++        REF="$(profile_field reference_fip 2>/dev/null || true)"
++        [ -n "$REF" ] && DONOR="$ROOT/$REF"
++    fi
++    if [ -z "$DONOR" ] || [ ! -f "$DONOR" ]; then
++        echo "board $BOARD has no donor FIP; pass URSUS_FIP=<ready.fip> or URSUS_FIP_DONOR=<donor.fip>" >&2
++        exit 5
++    fi
++
++    LZTOOL="$ROOT/dist/$BOARD/lzma1ext_noeopm"
++    "${HOSTCC:-cc}" -O2 -w "$ROOT/src/u-boot/lzma1ext_noeopm.c" -llzma -o "$LZTOOL" || {
++        echo 'cannot build the host LZMA packer (liblzma headers missing?).' >&2
++        echo 'Install liblzma-dev, or pass a ready FIP with URSUS_FIP=<file>.' >&2
++        exit 5
++    }
++    "$LZTOOL" "$ROOT/src/u-boot/u-boot.bin" "$ROOT/dist/$BOARD/u-boot.lzma" "${URSUS_LZMA_DICT:-1048576}"
++
++    FIP="$ROOT/dist/$BOARD/ursusboot-update.fip"
++    python3 "$ROOT/src/u-boot/repack_persistent_fip.py" \
++        "$DONOR" "$ROOT/dist/$BOARD/u-boot.lzma" "$FIP"
 +fi
-+if [ -n "$FIP" ] && [ -f "$FIP" ]; then
-+    python3 "$ROOT/scripts/make-install-mtd0.py" \
-+        --template "$TEMPLATE" --fip "$FIP" \
-+        --output "$ROOT/dist/$BOARD/ursusboot-install-mtd0.bin"
-+fi
++
++python3 "$ROOT/scripts/make-install-mtd0.py" \
++    --template "$TEMPLATE" --fip "$FIP" \
++    --output "$ROOT/dist/$BOARD/ursusboot-install-mtd0.bin"
 +
 +echo "URSUSBOOT_BUILD=OK board=$BOARD role=$ROLE out=dist/$BOARD"
 diff --git a/config/board-profiles.json b/config/board-profiles.json
@@ -130,10 +151,10 @@ index cd8c1425..d6e64b2d 100644
    }
  }
 diff --git a/scripts/qa.sh b/scripts/qa.sh
-index 70fe040b..3c16ddd2 100755
+index 70fe040b..0f59c9bc 100755
 --- a/scripts/qa.sh
 +++ b/scripts/qa.sh
-@@ -19,11 +19,42 @@ for rel, want in checks.items():
+@@ -19,11 +19,61 @@ for rel, want in checks.items():
  f = (r / 'reference/md/ursusboot-test61-update.fip').read_bytes()
  assert len(f) == 503808 and f[:4] == b'\x01\x00\x64\xaa'
  print('board templates + TEST61 FIP: PASS')
@@ -167,9 +188,28 @@ index 70fe040b..3c16ddd2 100755
 +    echo 'build.sh hardcodes board names; use config/board-profiles.json' >&2
 +    exit 1
 +fi
-+for helper in resolve_board_profile.py apply_runtime_role.py make-install-mtd0.py; do
++# The FIP packer must reproduce the reference container byte for byte when it is
++# handed back its own NT_FW payload. This is what makes a locally built U-Boot
++# land in a valid FIP instead of the image silently keeping the reference one.
++ROOT="$ROOT" python3 - <<'PY'
++import importlib.util, os, tempfile
++from pathlib import Path
++r = Path(os.environ['ROOT'])
++spec = importlib.util.spec_from_file_location('repack', r / 'src/u-boot/repack_persistent_fip.py')
++repack = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(repack)
++ref = (r / 'reference/md/ursusboot-test61-update.fip').read_bytes()
++_s, _f, entries, _t, _e = repack.parse(ref)
++nt = next(e['payload'] for e in entries if e['uuid'] == repack.NT_UUID)
++out, _report = repack.rebuild(ref, nt, force_old_layout=True)
++if out != ref:
++    raise SystemExit('FIP repack selftest failed: rebuilt container differs from reference')
++print('FIP repack selftest: PASS')
++PY
++
++for helper in resolve_board_profile.py apply_runtime_role.py make-install-mtd0.py repack_persistent_fip.py; do
 +    grep -q "$helper" "$ROOT/build.sh" || {
-+        echo "build.sh no longer uses scripts/$helper" >&2
++        echo "build.sh no longer uses $helper" >&2
 +        exit 1
 +    }
 +done

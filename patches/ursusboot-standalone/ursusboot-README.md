@@ -128,12 +128,112 @@ The runtime role is applied **at source level** before the build: `ram-recovery`
 git checkout -- src/u-boot/defenvs src/u-boot/include
 ```
 
+### What the build produces
+
+```text
+dist/<board>/u-boot.bin                  raw BL33
+dist/<board>/u-boot.lzma                 BL33 in Airoha LZMA1EXT/no-EOPM form
+dist/<board>/ursusboot-update.fip        FIP carrying the U-Boot just built
+dist/<board>/ursusboot-install-mtd0.bin  512 KiB ready-to-flash boot area
+```
+
+The FIP is produced by taking the profile's reference FIP as a **donor container** and replacing only its NT_FW (BL33) payload with the freshly built U-Boot — every other entry, the certificate block and the checksum entry are rebuilt and verified structurally. Pass `URSUS_FIP=<file>` to flash a ready FIP as-is and skip packing, or `URSUS_FIP_DONOR=<file>` to pack against a different donor. Packing needs a host compiler with `liblzma` headers; if that is unavailable the build stops rather than quietly shipping the donor's own U-Boot.
+
+The install image is the board's 512 KiB stock boot-area template with the FIP placed at `0x800`. The stock environment area at `0x7c000` is preserved from the template, and `make-install-mtd0.py` refuses any FIP large enough to overlap it.
+
 ### Runtime roles
 
 | Role | `bootcmd` | Purpose |
 |---|---|---|
 | `persistent` | `ursusdispatch` | Normal persistent supervisor boot from flash. |
 | `ram-recovery` | `ursusweb;true` | RAM-only WebFailsafe recovery: go straight to the web UI and never touch the boot path. |
+
+## Flashing the built image to mtd0
+
+`dist/<board>/ursusboot-install-mtd0.bin` is the whole 512 KiB boot area. Writing it replaces BL2, the FIP and the environment region in one shot — there is no partial-failure state that boots. Read this section fully before writing.
+
+> [!IMPORTANT]
+> **Back up the current boot block first, and verify the backup on the PC.** A boot block cannot be reconstructed from anything else, and factory MAC/identity lives elsewhere (RI/BOSA) but the boot area is still unique to the unit. **Never power-cycle between erase and a verified readback.**
+>
+> [UrsusFlasher](https://github.com/Medvedolog/airoha-router-ursusflasher) automates everything below — state detection, backup, verified transfer, writer selection and readback. The manual routes here are for people working without it, or on a board it does not yet know.
+
+### Route A — stock Linux over telnet root
+
+Preconditions, all of which must hold before anything is written:
+
+```sh
+cat /proc/mtd
+# mtd0 must be the bootloader partition: size 00080000, erase 00020000
+cat /sys/class/mtd/mtd0/bad_blocks
+# must report 0 — a bad block inside the boot area makes this route unsafe
+command -v dd sha256sum
+```
+
+**1. Back up and verify off-device.**
+
+```sh
+dd if=/dev/mtd0 bs=131072 count=4 of=/tmp/mtd0-backup.bin
+sha256sum /tmp/mtd0-backup.bin
+```
+
+Pull `/tmp/mtd0-backup.bin` to the PC (TFTP) and confirm the SHA256 matches there. A backup that only exists in the router's `/tmp` is not a backup.
+
+**2. Transfer the image and verify it arrived intact.**
+
+```sh
+# after transferring ursusboot-install-mtd0.bin to /tmp/ursusboot-mtd0.bin
+sha256sum /tmp/ursusboot-mtd0.bin     # must equal the PC-side SHA256
+```
+
+**3. Write with whichever writer the firmware actually has.** Pick one and commit to it — **never try a second writer after a write has started**, because the first one may already have erased the block:
+
+```sh
+mtd write /tmp/ursusboot-mtd0.bin bootloader
+# or
+flash_erase /dev/mtd0 0 0 && nandwrite -p /dev/mtd0 /tmp/ursusboot-mtd0.bin
+# or
+flash_eraseall /dev/mtd0 && nandwrite -p /dev/mtd0 /tmp/ursusboot-mtd0.bin
+# or
+mtd_debug erase /dev/mtd0 0 0x80000 && \
+mtd_debug write /dev/mtd0 0 0x80000 /tmp/ursusboot-mtd0.bin
+sync
+```
+
+**4. Verify by readback before rebooting.**
+
+```sh
+dd if=/dev/mtd0 bs=131072 count=4 2>/dev/null | sha256sum
+```
+
+This must equal the SHA256 of `ursusboot-install-mtd0.bin`. If it does not match, **do not power-cycle** — investigate and rewrite while the running system is still available.
+
+On OpenWrt (rather than stock) the kernel may mark the boot MTD read-only; a `mtd-rw` module built for the exact running kernel is then required to unlock it for the session. UrsusFlasher ships one pinned to kernel 6.18.44, plus `ursus-mtd-raw`, a narrow writer that erases and writes offset 0 with an explicit bad-block refusal.
+
+### Route B — XMODEM over USB-UART
+
+Hardware: a **3.3 V** USB-UART adapter on TX / RX / GND, **115200 8N1, no flow control**.
+
+**B1. If any U-Boot prompt is reachable** (an installed UrsusBoot, or a stock loader with `loadx`):
+
+```text
+mtd list                       # confirm the boot partition name first
+loadx 0x8e000000               # then send the .bin over XMODEM from the terminal
+mtd erase bl2 0x0 0x80000
+mtd write bl2 0x8e000000 0x0 0x80000
+```
+
+The partition name is `bl2` on the stock/factory layout and `ursus-ubi-bl2` on the canonical UBI layout — `mtd list` is authoritative, do not guess. Command form is `mtd write <name> <addr> [<off> [<size>]]`.
+
+**B2. If the unit is bricked and there is no prompt**, the Airoha BootROM takes over. It accepts two XMODEM stages into RAM and touches no flash at all:
+
+1. Power **off**. Hold **Reset before** applying power.
+2. Power on while holding Reset until the BootROM prints its XMODEM invitation (`Press x …` / a stream of `C`).
+3. XMODEM-send a **preloader (BL2)** — stage 1.
+4. XMODEM-send a **RAM installer FIP** (BL31 + U-Boot) — stage 2.
+
+You now have a U-Boot prompt running entirely from RAM with NAND untouched, so continue with B1. Build the stage-2 image with the `ram-recovery` role, which boots straight into WebFailsafe instead of touching the boot path.
+
+Once UrsusBoot is running, the bootloader can also update itself: the **Update UrsusBoot** tab in the web UI takes a `.fip` and writes it with readback verification, and the `ursusupdate check|write <addr> <len>` console command does the same from a staged RAM buffer.
 
 ## Built-in commands
 
