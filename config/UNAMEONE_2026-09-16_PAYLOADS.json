@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "edition": "UnameOne Edition",
+  "build_date": "2026-09-16",
+  "source": "operator-supplied binaries",
+  "status": "validated candidate; not yet switched into config/FIRMWARE_BUNDLE.json",
+  "kernel": "6.18.52",
+  "profiles": {
+    "xg040-md": {
+      "family": "md",
+      "soc": "AN7581",
+      "board": "nokia_xg-040g-md",
+      "plain_sysupgrade": {
+        "filename": "openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin",
+        "format": "OpenWrt sysupgrade tar",
+        "size": 8694033,
+        "sha256": "1a0abfed83c52c55d60a3ef70c5df92c960fe3cc961bd2ca734e6d1749797a8d",
+        "control_board": "nokia_xg-040g-md",
+        "rootfs_created_utc": "2026-09-16T12:43:25Z"
+      },
+      "ubi_sysupgrade": {
+        "filename": "openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb",
+        "format": "FIT UBI sysupgrade",
+        "size": 10383641,
+        "sha256": "9b1f0899ca4ef610f6d87e8572d369adb420f104bda667556e8a0b5979f066dd",
+        "fit_config": "OpenWrt nokia_xg-040g-md-ubi",
+        "kernel_description": "ARM64 OpenWrt Linux-6.18.52",
+        "kernel_load": "0x80200000",
+        "kernel_entry": "0x80200000",
+        "rootfs_created_utc": "2026-09-16T12:43:25Z"
+      }
+    },
+    "xg040-mf": {
+      "family": "mf",
+      "soc": "AN7583",
+      "board": "nokia_xg-040g-mf",
+      "plain_sysupgrade": {
+        "filename": "openwrt-airoha-an7583-nokia_xg-040g-mf-squashfs-sysupgrade.bin",
+        "format": "OpenWrt sysupgrade tar",
+        "size": 8519953,
+        "sha256": "d988d6f47d69e7264bb7a0d81392c3fdc3bca163075066ee0e0b3f971abf8cbf",
+        "control_board": "nokia_xg-040g-mf",
+        "rootfs_created_utc": "2026-09-16T12:43:25Z"
+      },
+      "ubi_sysupgrade": {
+        "filename": "openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb",
+        "format": "FIT UBI sysupgrade",
+        "size": 10223897,
+        "sha256": "21dcf4c6ca64ea0c5bc3d601e4a8f99a3f002371b873f399f622cbd9223fd1d1",
+        "fit_config": "OpenWrt nokia_xg-040g-mf-ubi",
+        "kernel_description": "ARM64 OpenWrt Linux-6.18.52",
+        "kernel_load": "0x80200000",
+        "kernel_entry": "0x80200000",
+        "rootfs_created_utc": "2026-09-16T12:43:25Z"
+      }
+    }
+  },
+  "intended_consumers": [
+    "EXPERT item 1",
+    "ONE-CLICK",
+    "EXPERT item 4 pregnant initramfs"
+  ],
+  "policy": {
+    "single_production_payload_source": true,
+    "pregnant_payload_uses_ubi_sysupgrade_byte_for_byte": true,
+    "plain_bin_is_not_factory_image": true,
+    "boot_chain_artifacts_are_separate": true
+  }
+}
