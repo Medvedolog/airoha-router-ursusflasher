@@ -200,7 +200,7 @@ jobs:
               for p in sorted(root.rglob('*')):
                   if p.is_file(): z.write(p, pathlib.Path(root.name)/p.relative_to(root))
           PY
-          sha256sum "$OUT" > "$OUT.sha256"
+          (cd "$(dirname "$OUT")" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
           ls -lh "$OUT" "$OUT.sha256"
 
       - uses: actions/upload-artifact@v4
