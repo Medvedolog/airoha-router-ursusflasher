@@ -1,0 +1,282 @@
+#!/bin/sh
+set -u
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+umask 077
+
+WORK=/tmp/ursus-install
+META=$WORK/pregnant.env
+LOG=$WORK/install.log
+STATUS=$WORK/status.json
+LOCK=$WORK/stage2.lock
+META_SLOT_OFF=$((0x00f00000)); META_SIZE=$((0x00020000))
+PROD_SLOT_OFF=$((0x01000000)); PROD_WINDOW=$((0x00c00000))
+FIP_SLOT_OFF=$((0x01c00000)); FIP_WINDOW=$((0x00200000))
+PRE_SLOT_OFF=$((0x01e00000)); PRE_WINDOW=$((0x00100000))
+UBI_DEV=
+FAMILY=unknown
+
+mkdir -p "$WORK"
+mkdir "$LOCK" 2>/dev/null || exit 0
+: > "$LOG"
+
+kmsg() { printf '%s\n' "$*" | dd of=/dev/kmsg bs=4096 count=1 2>/dev/null || true; }
+log() { printf '%s\n' "$*" | tee -a "$LOG"; kmsg "URSUS-STAGE2: $*"; }
+json_state() {
+    current=$1; error=${2:-}
+    case "$error" in *'"'*) error=stage2_error;; esac
+    printf '{"state":"%s","mode":"PREGNANT_MIGRATION","error":"%s"}\n' "$current" "$error" > "$STATUS.tmp"
+    mv "$STATUS.tmp" "$STATUS"
+}
+state() { json_state "$1"; log "STATE=$1"; }
+
+find_mtd() { awk -v n="\"$1\"" '$4==n {gsub(/^mtd/,"",$1);gsub(/:/,"",$1);print $1":"$2":"$3;exit}' /proc/mtd; }
+require_geom() {
+    name=$1; size=$2; erase=$3
+    row="$(find_mtd "$name")"
+    [ -n "$row" ] || fail "MISSING_$name"
+    old=$IFS; IFS=:; set -- $row; IFS=$old
+    [ "$2" = "$size" ] || fail "SIZE_${name}_$2"
+    [ "$3" = "$erase" ] || fail "ERASE_${name}_$3"
+    printf '%s' "$1"
+}
+meta_get() { sed -n "s/^$1=//p" "$META" | head -n1; }
+hex64() { case "$1" in ''|*[!0-9a-f]*) return 1;; esac; [ "${#1}" -eq 64 ]; }
+sha_dev() {
+    dev=$1; length=$2; blocks=$(((length + 4095) / 4096))
+    dd if="$dev" bs=4096 count="$blocks" 2>/dev/null | head -c "$length" | sha256sum | awk '{print $1}'
+}
+ubi_mknod() {
+    base=${1##*/}
+    [ -e "/dev/$base" ] && return 0
+    [ -r "/sys/class/ubi/$base/dev" ] || return 1
+    devinfo="$(cat "/sys/class/ubi/$base/dev")"
+    mknod "/dev/$base" c "${devinfo%%:*}" "${devinfo##*:}"
+}
+find_ubi() {
+    wanted=$1
+    for path in /sys/class/ubi/ubi[0-9]*; do
+        [ -r "$path/mtd_num" ] || continue
+        [ "$(cat "$path/mtd_num")" = "$wanted" ] || continue
+        basename "$path"
+        return 0
+    done
+    return 1
+}
+
+persist_state_raw() {
+    persistent=$1
+    [ -n "$UBI_DEV" ] || return 1
+    [ -e "/dev/${UBI_DEV}_6" ] || return 1
+    file=$WORK/pstate
+    printf 'URSUS_STATE_V1\nSTATE=%s\nFAMILY=%s\n' "$persistent" "$FAMILY" > "$file"
+    ubiupdatevol "/dev/${UBI_DEV}_6" "$file" >/dev/null 2>&1 || return 1
+    length="$(wc -c < "$file")"
+    [ "$(sha_dev "/dev/${UBI_DEV}_6" "$length")" = "$(sha256sum "$file" | awk '{print $1}')" ] || return 1
+    return 0
+}
+persist_state() { persist_state_raw "$1" || fail STATE_PERSIST; }
+fail() {
+    reason=$1
+    # Once the persistent journal exists, make FAILED durable. Failure to update
+    # it does not reopen rollback: the canonical UBI/stock-evidence gates still refuse.
+    if [ -n "$UBI_DEV" ] && [ -e "/dev/${UBI_DEV}_6" ]; then
+        persist_state_raw FAILED || log '[WARNING] persistent FAILED marker could not be readback-verified'
+    fi
+    json_state FAILED "$reason"
+    log "[ERROR] $reason"
+    log 'Autonomous stage2 stopped. Keep power on and inspect status/log over SSH/UART.'
+    exit 1
+}
+
+read_meta() {
+    sidx="$(require_geom nsb_slave 02880000 00020000)"
+    dd if="/dev/mtd${sidx}" bs=131072 skip=$((META_SLOT_OFF / 131072)) count=1 2>/dev/null | tr '\000' '\n' > "$META"
+    [ "$(head -n1 "$META")" = URSUS_PREGNANT_V1 ] || fail META_MAGIC
+    [ "$(meta_get META_SLOT_OFF)" = 0x00f00000 ] || fail META_OFFSET
+    declared="$(meta_get META_SHA256)"
+    hex64 "$declared" || fail META_SHA_FIELD
+    body=$WORK/pregnant.body
+    sed -n '1,/^META_SHA256=/p' "$META" | sed '$d' > "$body"
+    [ "$(sha256sum "$body" | awk '{print $1}')" = "$declared" ] || fail META_SHA
+}
+read_child() {
+    offset=$1; size=$2; output=$3; expected=$4
+    sidx="$(require_geom nsb_slave 02880000 00020000)"
+    blocks=$(((size + 131071) / 131072))
+    dd if="/dev/mtd${sidx}" bs=131072 skip=$((offset / 131072)) count="$blocks" 2>/dev/null | head -c "$size" > "$output" || fail READ_CHILD
+    [ "$(wc -c < "$output")" -eq "$size" ] || fail CHILD_SIZE
+    [ "$(sha256sum "$output" | awk '{print $1}')" = "$expected" ] || fail CHILD_SHA
+}
+validate_blob() {
+    file=$1; name=$2; length=$3
+    [ "$(wc -c < "$file")" -eq "$length" ] || fail "${name}_SIZE"
+    digest="$(sha256sum "$file" | awk '{print $1}')"
+    [ "$digest" != 8a39d2abd3999ab73c34db2476849cddf303ce389b35826850f9a700589b4a90 ] || fail "${name}_ZERO"
+    [ "$digest" != 3b874d3ba46c638fc3094f8e92fb744ca974893873f8885f54e23760f9b6311b ] || fail "${name}_FF"
+}
+canonical_ubi_header_present() {
+    index="$(require_geom ubi 0ffe0000 00020000)"
+    n=0
+    while [ "$n" -lt 64 ]; do
+        magic="$(dd if="/dev/mtd${index}" bs=131072 skip="$n" count=1 2>/dev/null | head -c4 | hexdump -v -e '4/1 "%02x"')"
+        [ "$magic" = 55424923 ] && return 0
+        n=$((n + 1))
+    done
+    return 1
+}
+check_writeable() {
+    index=$1; name=$2
+    flags="$(cat "/sys/class/mtd/mtd${index}/flags" 2>/dev/null || true)"
+    case "$flags" in 0x*|[0-9]*) ;; *) fail "FLAGS_$name";; esac
+    [ $((flags & 0x400)) -ne 0 ] || fail "READONLY_$name"
+}
+prepare_bl2() {
+    dd if=/dev/zero bs=131072 count=1 2>/dev/null | tr '\000' '\377' > "$WORK/bl2.bin" || fail BL2_CREATE
+    dd if="$PRE" of="$WORK/bl2.bin" bs=2048 seek=1 conv=notrunc 2>/dev/null || fail BL2_INSERT
+    [ "$(wc -c < "$WORK/bl2.bin")" -eq 131072 ] || fail BL2_SIZE
+    prefix="$(dd if="$WORK/bl2.bin" bs=2048 count=1 2>/dev/null | sha256sum | awk '{print $1}')"
+    [ "$prefix" = d0ff1b294b5288d1ae1421eadf5b2d38a8752b76d472ff30bed9028e25b1c5b8 ] || fail BL2_PREFIX
+    embedded="$(dd if="$WORK/bl2.bin" bs=2048 skip=1 2>/dev/null | head -c "$PRE_SIZE" | sha256sum | awk '{print $1}')"
+    [ "$embedded" = "$PRE_SHA" ] || fail BL2_PRELOADER
+    BL2_SHA="$(sha256sum "$WORK/bl2.bin" | awk '{print $1}')"
+}
+
+state BOOTED
+sleep 5
+state PREFLIGHT
+read_meta
+FAMILY="$(meta_get FAMILY)"
+PROFILE="$(meta_get PROFILE)"
+case "$FAMILY:$PROFILE" in
+    md:xg040-md) WANT_BOARD=nokia,xg-040g-md-ubi ;;
+    mf:xg040-mf) WANT_BOARD=nokia,xg-040g-mf-ubi ;;
+    *) fail FAMILY_PROFILE ;;
+esac
+BOARD="$(cat /tmp/sysinfo/board_name 2>/dev/null || true)"
+[ "$BOARD" = "$WANT_BOARD" ] || fail "BOARD_$BOARD"
+
+require_geom all_flash 10000000 00020000 >/dev/null
+require_geom stock_bootloader 00080000 00020000 >/dev/null
+BL2_IDX="$(require_geom bl2 00020000 00020000)"
+UBI_IDX="$(require_geom ubi 0ffe0000 00020000)"
+require_geom nsb_master 02880000 00020000 >/dev/null
+require_geom nsb_slave 02880000 00020000 >/dev/null
+require_geom flag 00040000 00020000 >/dev/null
+require_geom flagback 00040000 00020000 >/dev/null
+require_geom bosa_stock 00040000 00020000 >/dev/null
+require_geom ri_stock 00040000 00020000 >/dev/null
+check_writeable "$BL2_IDX" bl2
+check_writeable "$UBI_IDX" ubi
+
+for command in awk cat cp dd grep head hexdump mknod mtd sed sha256sum sync tr ubidetach ubiformat ubiattach ubimkvol ubiupdatevol wc sysupgrade; do
+    command -v "$command" >/dev/null 2>&1 || fail "TOOL_$command"
+done
+
+[ "$(meta_get PRODUCTION_SLOT_OFF)" = 0x01000000 ] || fail PROD_OFFSET
+[ "$(meta_get FIP_SLOT_OFF)" = 0x01c00000 ] || fail FIP_OFFSET
+[ "$(meta_get PRELOADER_SLOT_OFF)" = 0x01e00000 ] || fail PRE_OFFSET
+PROD_SIZE="$(meta_get PRODUCTION_SIZE)"; PROD_SHA="$(meta_get PRODUCTION_SHA256)"
+FIP_SIZE="$(meta_get FIP_SIZE)"; FIP_SHA="$(meta_get FIP_SHA256)"
+PRE_SIZE="$(meta_get PRELOADER_SIZE)"; PRE_SHA="$(meta_get PRELOADER_SHA256)"
+case "$PROD_SIZE:$FIP_SIZE:$PRE_SIZE" in *[!0-9:]*|'') fail META_SIZE_FIELDS;; esac
+hex64 "$PROD_SHA" && hex64 "$FIP_SHA" && hex64 "$PRE_SHA" || fail META_SHA_FIELDS
+[ "$PROD_SIZE" -gt 0 ] && [ "$PROD_SIZE" -le "$PROD_WINDOW" ] || fail PROD_TOO_LARGE
+[ "$FIP_SIZE" -gt 0 ] && [ "$FIP_SIZE" -le 1048576 ] || fail FIP_TOO_LARGE
+[ "$PRE_SIZE" -gt 0 ] && [ "$PRE_SIZE" -le 129024 ] || fail PRE_TOO_LARGE
+
+PROD=$WORK/production.itb; FIP=$WORK/vanilla.fip; PRE=$WORK/preloader.bin
+read_child "$PROD_SLOT_OFF" "$PROD_SIZE" "$PROD" "$PROD_SHA"
+read_child "$FIP_SLOT_OFF" "$FIP_SIZE" "$FIP" "$FIP_SHA"
+read_child "$PRE_SLOT_OFF" "$PRE_SIZE" "$PRE" "$PRE_SHA"
+[ "$(dd if="$PROD" bs=1 count=4 2>/dev/null | hexdump -v -e '4/1 "%02x"')" = d00dfeed ] || fail PROD_MAGIC
+[ "$(dd if="$FIP" bs=1 count=8 2>/dev/null | hexdump -v -e '8/1 "%02x"')" = 010064aa78563412 ] || fail FIP_MAGIC
+sysupgrade -T "$PROD" >>"$LOG" 2>&1 || fail SYSUPGRADE_TEST
+
+# Positive NAND evidence is the only rollback authority on virgin stock.
+ursusstockslot probe >>"$LOG" 2>&1 || fail STOCK_EVIDENCE
+BOSA_IDX="$(require_geom bosa_stock 00040000 00020000)"
+RI_IDX="$(require_geom ri_stock 00040000 00020000)"
+dd if="/dev/mtd${BOSA_IDX}" of="$WORK/bosa.bin" bs=131072 count=2 2>/dev/null || fail BOSA_READ
+dd if="/dev/mtd${RI_IDX}" of="$WORK/ri.bin" bs=131072 count=2 2>/dev/null || fail RI_READ
+validate_blob "$WORK/bosa.bin" BOSA 262144
+validate_blob "$WORK/ri.bin" RI 262144
+prepare_bl2
+state MIGRATION_OK
+
+# ---------------- destructive boundary ----------------
+# There is no alternate writer/backend and no retry through a different path.
+state PROD_WRITING
+canonical_ubi_header_present && fail PREEXISTING_CANONICAL_UBI
+for path in /sys/class/ubi/ubi[0-9]*; do
+    [ -r "$path/mtd_num" ] || continue
+    [ "$(cat "$path/mtd_num")" = "$UBI_IDX" ] || continue
+    ubidetach -m "$UBI_IDX" >>"$LOG" 2>&1 || fail UBI_DETACH
+done
+state PREPARING_UBI
+ubiformat -y "/dev/mtd${UBI_IDX}" >>"$LOG" 2>&1 || fail UBIFORMAT
+ubiattach -m "$UBI_IDX" >>"$LOG" 2>&1 || fail UBIATTACH
+UBI_DEV="$(find_ubi "$UBI_IDX" 2>/dev/null || true)"
+[ -n "$UBI_DEV" ] || fail UBI_NOT_FOUND
+ubi_mknod "$UBI_DEV" || fail UBI_NODE
+
+# Canonical Nokia IDs from the proven MedveFlasher migration, plus the durable
+# Ursus state journal and rootfs_data after the canonical six volumes.
+ubimkvol "/dev/$UBI_DEV" -n 0 -s 126976 -N ubootenv >>"$LOG" 2>&1 || fail VOL_ENV0
+ubimkvol "/dev/$UBI_DEV" -n 1 -s 126976 -N ubootenv2 >>"$LOG" 2>&1 || fail VOL_ENV1
+ubimkvol "/dev/$UBI_DEV" -n 2 -s 262144 -N bosa >>"$LOG" 2>&1 || fail VOL_BOSA
+ubimkvol "/dev/$UBI_DEV" -n 3 -s 262144 -N ri >>"$LOG" 2>&1 || fail VOL_RI
+ubimkvol "/dev/$UBI_DEV" -n 4 -t static -s 1048576 -N fip >>"$LOG" 2>&1 || fail VOL_FIP
+ubimkvol "/dev/$UBI_DEV" -n 5 -s "$PROD_SIZE" -N fit >>"$LOG" 2>&1 || fail VOL_FIT
+ubimkvol "/dev/$UBI_DEV" -n 6 -s 126976 -N ursusstate >>"$LOG" 2>&1 || fail VOL_STATE
+ubimkvol "/dev/$UBI_DEV" -n 7 -m -N rootfs_data >>"$LOG" 2>&1 || fail VOL_ROOTFS_DATA
+id=0
+while [ "$id" -le 7 ]; do
+    ubi_mknod "${UBI_DEV}_${id}" || fail "NODE_$id"
+    id=$((id + 1))
+done
+persist_state PROD_WRITING
+
+state WRITING_SYSUPGRADE
+persist_state WRITING_SYSUPGRADE
+# The pinned UnameOne UBI sysupgrade is a FIT image. OpenWrt's native
+# nand_upgrade_fit path ultimately writes this exact byte stream into volume
+# 'fit'; sysupgrade -T above is the mandatory format/board gate.
+ubiupdatevol "/dev/${UBI_DEV}_5" "$PROD" >>"$LOG" 2>&1 || fail WRITE_PROD
+[ "$(sha_dev "/dev/${UBI_DEV}_5" "$PROD_SIZE")" = "$PROD_SHA" ] || fail PROD_READBACK
+
+state RESTORING_IDENTITY
+persist_state RESTORING_IDENTITY
+ubiupdatevol "/dev/${UBI_DEV}_2" "$WORK/bosa.bin" >>"$LOG" 2>&1 || fail WRITE_BOSA
+ubiupdatevol "/dev/${UBI_DEV}_3" "$WORK/ri.bin" >>"$LOG" 2>&1 || fail WRITE_RI
+BOSA_SHA="$(sha256sum "$WORK/bosa.bin" | awk '{print $1}')"
+RI_SHA="$(sha256sum "$WORK/ri.bin" | awk '{print $1}')"
+[ "$(sha_dev "/dev/${UBI_DEV}_2" 262144)" = "$BOSA_SHA" ] || fail BOSA_READBACK
+[ "$(sha_dev "/dev/${UBI_DEV}_3" 262144)" = "$RI_SHA" ] || fail RI_READBACK
+
+state WRITING_FIP
+persist_state WRITING_FIP
+ubiupdatevol "/dev/${UBI_DEV}_4" "$FIP" >>"$LOG" 2>&1 || fail WRITE_FIP
+[ "$(sha_dev "/dev/${UBI_DEV}_4" "$FIP_SIZE")" = "$FIP_SHA" ] || fail FIP_READBACK
+
+# BL2 is the last boot/system payload written. Only the tiny durable state
+# journal is updated after its readback so PROD_VERIFIED cannot be recorded early.
+state WRITING_BL2_LAST
+persist_state WRITING_BL2_LAST
+mtd write "$WORK/bl2.bin" bl2 >>"$LOG" 2>&1 || fail WRITE_BL2
+sync
+[ "$(sha_dev "/dev/mtd${BL2_IDX}" 131072)" = "$BL2_SHA" ] || fail BL2_READBACK
+
+state VERIFYING_FINAL
+persist_state VERIFYING_FINAL
+[ "$(sha_dev "/dev/${UBI_DEV}_5" "$PROD_SIZE")" = "$PROD_SHA" ] || fail FINAL_PROD
+[ "$(sha_dev "/dev/${UBI_DEV}_4" "$FIP_SIZE")" = "$FIP_SHA" ] || fail FINAL_FIP
+[ "$(sha_dev "/dev/${UBI_DEV}_2" 262144)" = "$BOSA_SHA" ] || fail FINAL_BOSA
+[ "$(sha_dev "/dev/${UBI_DEV}_3" 262144)" = "$RI_SHA" ] || fail FINAL_RI
+[ "$(sha_dev "/dev/mtd${BL2_IDX}" 131072)" = "$BL2_SHA" ] || fail FINAL_BL2
+persist_state PROD_VERIFIED
+state PROD_VERIFIED
+log '[PASS] Pinned UnameOne FIT, identity, Vanilla FIP and BL2 passed final readback. Rebooting.'
+sync
+sleep 2
+reboot -f

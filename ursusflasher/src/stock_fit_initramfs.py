@@ -197,3 +197,159 @@ def build_installer_slot(stock_slot: bytes, installer_fit: bytes, *, slot_size: 
         'outer_fip_entry_preserved': True,
         'destructive_stage2_embedded': False,
     }
+
+
+PREGNANT_META_OFF = 0x00F00000
+PREGNANT_META_SIZE = 0x00020000
+PREGNANT_PRODUCTION_OFF = 0x01000000
+PREGNANT_PRODUCTION_WINDOW = 0x00C00000
+PREGNANT_FIP_OFF = 0x01C00000
+PREGNANT_FIP_WINDOW = 0x00200000
+PREGNANT_PRELOADER_OFF = 0x01E00000
+PREGNANT_PRELOADER_WINDOW = 0x00100000
+
+
+def _pregnant_overlap(a_off: int, a_size: int, b_off: int, b_size: int) -> bool:
+    return max(a_off, b_off) < min(a_off + a_size, b_off + b_size)
+
+
+def build_pregnant_slot(
+    stock_slot: bytes,
+    runtime_fit: bytes,
+    production_itb: bytes,
+    vanilla_fip: bytes,
+    vanilla_preloader: bytes,
+    *,
+    slot_size: int,
+    evidence: dict,
+) -> tuple[bytes, dict]:
+    """Build one stock-bootable SLOT2 carrying the complete autonomous migration.
+
+    The transient UBI-recovery FIT is the only object consumed by tcboot.  Pinned
+    production/FIP/preloader children are stored at erase-aligned fixed offsets
+    in the same stock SLOT2 and are read back by Linux through the nsb_slave
+    alias before any destructive operation.
+    """
+    runtime = source_fit_contract(runtime_fit)
+    if len(runtime_fit) != int(runtime["fit_total_size"]):
+        raise RuntimeError("pregnant runtime must contain exactly one FIT with no untracked tail")
+    if len(production_itb) < 40 or struct.unpack_from(">I", production_itb, 0)[0] != FDT_MAGIC:
+        raise RuntimeError("pinned production child is not a FIT image")
+    if len(vanilla_fip) < 16 or vanilla_fip[:8] != FIP_MAGIC:
+        raise RuntimeError("Vanilla FIP magic mismatch")
+    if not vanilla_preloader or len(vanilla_preloader) > 129024:
+        raise RuntimeError("Vanilla preloader does not fit the 128 KiB BL2 image after the 0x800 prefix")
+    if len(production_itb) > PREGNANT_PRODUCTION_WINDOW:
+        raise RuntimeError("pinned production child exceeds reserved SLOT2 window")
+    if len(vanilla_fip) > 0x00100000:
+        raise RuntimeError("Vanilla FIP exceeds canonical 1 MiB UBI volume")
+    if len(vanilla_fip) > PREGNANT_FIP_WINDOW:
+        raise RuntimeError("Vanilla FIP exceeds reserved SLOT2 window")
+    if len(vanilla_preloader) > PREGNANT_PRELOADER_WINDOW:
+        raise RuntimeError("Vanilla preloader exceeds reserved SLOT2 window")
+
+    required_evidence = (
+        "family",
+        "profile",
+        "bootloader_sha256",
+        "master_sha256",
+        "flagback_sha256",
+        "flag_tail_sha256",
+        "bosa_sha256",
+        "ri_sha256",
+    )
+    for key in required_evidence:
+        if key not in evidence:
+            raise RuntimeError(f"missing stock evidence field: {key}")
+    for key in required_evidence[2:]:
+        value = str(evidence[key]).lower()
+        if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+            raise RuntimeError(f"invalid stock evidence SHA256: {key}")
+
+    base, wrapper = build_installer_slot(stock_slot, runtime_fit, slot_size=slot_size)
+    runtime_off = int(wrapper["inner_fit_offset"])
+    runtime_size = len(runtime_fit)
+    reserved = [
+        ("manifest", PREGNANT_META_OFF, PREGNANT_META_SIZE),
+        ("production", PREGNANT_PRODUCTION_OFF, PREGNANT_PRODUCTION_WINDOW),
+        ("fip", PREGNANT_FIP_OFF, PREGNANT_FIP_WINDOW),
+        ("preloader", PREGNANT_PRELOADER_OFF, PREGNANT_PRELOADER_WINDOW),
+    ]
+    for name, off, size in reserved:
+        if off % 0x20000 or size % 0x20000 or off < 0 or off + size > slot_size:
+            raise RuntimeError(f"unsafe pregnant SLOT2 region {name}: off={off:#x} size={size:#x}")
+        if _pregnant_overlap(runtime_off, runtime_size, off, size):
+            raise RuntimeError(f"runtime FIT overlaps reserved pregnant SLOT2 region: {name}")
+    for i, (name_a, off_a, size_a) in enumerate(reserved):
+        for name_b, off_b, size_b in reserved[i + 1:]:
+            if _pregnant_overlap(off_a, size_a, off_b, size_b):
+                raise RuntimeError(f"pregnant SLOT2 regions overlap: {name_a}/{name_b}")
+
+    fields = [
+        "URSUS_PREGNANT_V1",
+        f"FAMILY={evidence['family']}",
+        f"PROFILE={evidence['profile']}",
+        f"SLOT_SIZE=0x{slot_size:08x}",
+        f"META_SLOT_OFF=0x{PREGNANT_META_OFF:08x}",
+        f"RUNTIME_FIT_SIZE={runtime_size}",
+        f"RUNTIME_FIT_SHA256={sha256_bytes(runtime_fit)}",
+        f"PRODUCTION_SLOT_OFF=0x{PREGNANT_PRODUCTION_OFF:08x}",
+        f"PRODUCTION_SIZE={len(production_itb)}",
+        f"PRODUCTION_SHA256={sha256_bytes(production_itb)}",
+        f"FIP_SLOT_OFF=0x{PREGNANT_FIP_OFF:08x}",
+        f"FIP_SIZE={len(vanilla_fip)}",
+        f"FIP_SHA256={sha256_bytes(vanilla_fip)}",
+        f"PRELOADER_SLOT_OFF=0x{PREGNANT_PRELOADER_OFF:08x}",
+        f"PRELOADER_SIZE={len(vanilla_preloader)}",
+        f"PRELOADER_SHA256={sha256_bytes(vanilla_preloader)}",
+        f"STOCK_BOOTLOADER_SHA256={str(evidence['bootloader_sha256']).lower()}",
+        f"STOCK_MASTER_SHA256={str(evidence['master_sha256']).lower()}",
+        f"STOCK_FLAGBACK_SHA256={str(evidence['flagback_sha256']).lower()}",
+        f"STOCK_FLAG_TAIL_SHA256={str(evidence['flag_tail_sha256']).lower()}",
+        f"STOCK_BOSA_SHA256={str(evidence['bosa_sha256']).lower()}",
+        f"STOCK_RI_SHA256={str(evidence['ri_sha256']).lower()}",
+    ]
+    body = ("\n".join(fields) + "\n").encode("ascii")
+    manifest_sha = sha256_bytes(body)
+    manifest = body + f"META_SHA256={manifest_sha}\n".encode("ascii")
+    if len(manifest) > PREGNANT_META_SIZE:
+        raise RuntimeError("pregnant manifest exceeds reserved eraseblock")
+
+    out = bytearray(base)
+    out[PREGNANT_META_OFF:PREGNANT_META_OFF + PREGNANT_META_SIZE] = (
+        manifest + b"\0" * (PREGNANT_META_SIZE - len(manifest))
+    )
+    out[PREGNANT_PRODUCTION_OFF:PREGNANT_PRODUCTION_OFF + len(production_itb)] = production_itb
+    out[PREGNANT_FIP_OFF:PREGNANT_FIP_OFF + len(vanilla_fip)] = vanilla_fip
+    out[PREGNANT_PRELOADER_OFF:PREGNANT_PRELOADER_OFF + len(vanilla_preloader)] = vanilla_preloader
+
+    if bytes(out[PREGNANT_PRODUCTION_OFF:PREGNANT_PRODUCTION_OFF + len(production_itb)]) != production_itb:
+        raise RuntimeError("production child changed during SLOT2 assembly")
+    if bytes(out[PREGNANT_FIP_OFF:PREGNANT_FIP_OFF + len(vanilla_fip)]) != vanilla_fip:
+        raise RuntimeError("Vanilla FIP changed during SLOT2 assembly")
+    if bytes(out[PREGNANT_PRELOADER_OFF:PREGNANT_PRELOADER_OFF + len(vanilla_preloader)]) != vanilla_preloader:
+        raise RuntimeError("Vanilla preloader changed during SLOT2 assembly")
+
+    meta = dict(wrapper)
+    meta.update({
+        "wrapper_contract": "STOCK_FIP_HDR2_PREGNANT_UBI_RECOVERY_V1",
+        "candidate_sha256": sha256_bytes(bytes(out)),
+        "manifest_offset": PREGNANT_META_OFF,
+        "manifest_size": len(manifest),
+        "manifest_sha256": manifest_sha,
+        "runtime_fit_offset": runtime_off,
+        "runtime_fit_size": runtime_size,
+        "runtime_fit_sha256": sha256_bytes(runtime_fit),
+        "production_offset": PREGNANT_PRODUCTION_OFF,
+        "production_size": len(production_itb),
+        "production_sha256": sha256_bytes(production_itb),
+        "fip_offset": PREGNANT_FIP_OFF,
+        "fip_size": len(vanilla_fip),
+        "fip_sha256": sha256_bytes(vanilla_fip),
+        "preloader_offset": PREGNANT_PRELOADER_OFF,
+        "preloader_size": len(vanilla_preloader),
+        "preloader_sha256": sha256_bytes(vanilla_preloader),
+        "destructive_stage2_embedded": True,
+        "stock_evidence_embedded": True,
+    })
+    return bytes(out), meta

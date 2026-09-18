@@ -1,0 +1,143 @@
+#!/bin/sh
+set -eu
+
+WORK=/tmp/ursus-install
+META=$WORK/pregnant.env
+META_SLOT_OFF=$((0x00f00000))
+META_SIZE=$((0x00020000))
+
+say() { printf '%s\n' "$*"; }
+fail() { say "URSUS_STOCKSLOT_REFUSED target=${TARGET:-status} reason=$1" >&2; exit 1; }
+find_mtd() { awk -v n="\"$1\"" '$4==n {gsub(/^mtd/,"",$1);gsub(/:/,"",$1);print $1":"$2":"$3;exit}' /proc/mtd; }
+require_geom() {
+    name=$1; size=$2; erase=$3
+    row="$(find_mtd "$name")"
+    [ -n "$row" ] || fail "MISSING_$name"
+    old=$IFS; IFS=:; set -- $row; IFS=$old
+    [ "$2" = "$size" ] || fail "SIZE_${name}_$2"
+    [ "$3" = "$erase" ] || fail "ERASE_${name}_$3"
+    printf '%s' "$1"
+}
+meta_get() { sed -n "s/^$1=//p" "$META" | head -n1; }
+hex64() { case "$1" in ''|*[!0-9a-f]*) return 1;; esac; [ "${#1}" -eq 64 ]; }
+
+load_meta() {
+    mkdir -p "$WORK"
+    sidx="$(require_geom nsb_slave 02880000 00020000)"
+    dd if="/dev/mtd${sidx}" bs=131072 skip=$((META_SLOT_OFF / 131072)) count=1 2>/dev/null | tr '\000' '\n' > "$META"
+    [ "$(head -n1 "$META")" = URSUS_PREGNANT_V1 ] || fail META_MAGIC
+    [ "$(meta_get META_SLOT_OFF)" = 0x00f00000 ] || fail META_OFFSET
+    declared="$(meta_get META_SHA256)"
+    hex64 "$declared" || fail META_SHA_FIELD
+    body="$WORK/pregnant.body"
+    sed -n '1,/^META_SHA256=/p' "$META" | sed '$d' > "$body"
+    [ "$(sha256sum "$body" | awk '{print $1}')" = "$declared" ] || fail META_SHA
+}
+sha_part() { dd if="$1" bs=131072 2>/dev/null | sha256sum | awk '{print $1}'; }
+sha_tail() { dd if="$1" bs=1 skip=4 2>/dev/null | sha256sum | awk '{print $1}'; }
+
+canonical_ubi_header_present() {
+    u="$(require_geom ubi 0ffe0000 00020000)"
+    # Virgin stock already contains vendor UBI farther into flash. Canonical
+    # OpenWrt UBI starts at physical 0x20000, so only the early guard window is
+    # authoritative for this layout classifier.
+    n=0
+    while [ "$n" -lt 64 ]; do
+        magic="$(dd if="/dev/mtd${u}" bs=131072 skip="$n" count=1 2>/dev/null | head -c4 | hexdump -v -e '4/1 "%02x"')"
+        [ "$magic" = 55424923 ] && return 0
+        n=$((n + 1))
+    done
+    return 1
+}
+
+persistent_state() {
+    for path in /sys/class/ubi/ubi[0-9]*_[0-9]*/name; do
+        [ -r "$path" ] || continue
+        [ "$(cat "$path")" = ursusstate ] || continue
+        dev="/dev/$(basename "${path%/name}")"
+        [ -e "$dev" ] || continue
+        dd if="$dev" bs=4096 count=1 2>/dev/null | tr '\000' '\n' | sed -n 's/^STATE=//p' | head -n1
+        return 0
+    done
+    return 1
+}
+
+probe_pristine() {
+    [ -f /etc/ursus/PREGNANT_RUNTIME ] || fail NOT_PREGNANT_RUNTIME
+    load_meta
+    pstate="$(persistent_state 2>/dev/null || true)"
+    case "$pstate" in
+        PROD_WRITING|PROD_VERIFIED|BOOT_CONFIRMED) fail "PERSISTENT_STATE_$pstate" ;;
+    esac
+    canonical_ubi_header_present && fail UBI_OR_PARTIAL_CONVERSION
+
+    bootidx="$(require_geom stock_bootloader 00080000 00020000)"
+    midx="$(require_geom nsb_master 02880000 00020000)"
+    fidx="$(require_geom flag 00040000 00020000)"
+    fbidx="$(require_geom flagback 00040000 00020000)"
+    bidx="$(require_geom bosa_stock 00040000 00020000)"
+    ridx="$(require_geom ri_stock 00040000 00020000)"
+
+    for key in STOCK_BOOTLOADER_SHA256 STOCK_MASTER_SHA256 STOCK_FLAGBACK_SHA256 STOCK_FLAG_TAIL_SHA256 STOCK_BOSA_SHA256 STOCK_RI_SHA256; do
+        value="$(meta_get "$key")"
+        hex64 "$value" || fail "META_$key"
+    done
+    [ "$(sha_part /dev/mtd${bootidx})" = "$(meta_get STOCK_BOOTLOADER_SHA256)" ] || fail STOCK_BOOTLOADER_CHANGED
+    [ "$(sha_part /dev/mtd${midx})" = "$(meta_get STOCK_MASTER_SHA256)" ] || fail MASTER_CHANGED
+    [ "$(sha_part /dev/mtd${fbidx})" = "$(meta_get STOCK_FLAGBACK_SHA256)" ] || fail FLAGBACK_CHANGED
+    [ "$(sha_tail /dev/mtd${fidx})" = "$(meta_get STOCK_FLAG_TAIL_SHA256)" ] || fail FLAG_NON_ACTIVE_CHANGED
+    [ "$(sha_part /dev/mtd${bidx})" = "$(meta_get STOCK_BOSA_SHA256)" ] || fail BOSA_CHANGED
+    [ "$(sha_part /dev/mtd${ridx})" = "$(meta_get STOCK_RI_SHA256)" ] || fail RI_CHANGED
+    return 0
+}
+
+status() {
+    fidx="$(require_geom flag 00040000 00020000)"
+    set -- $(dd if="/dev/mtd${fidx}" bs=4 count=4 2>/dev/null | od -An -tu4)
+    [ "$#" -ge 4 ] || fail FLAG_DECODE
+    say "URSUS_STOCKSLOT_STATUS active=$1 curimg=$2 startok=$3 count=$4"
+    pstate="$(persistent_state 2>/dev/null || true)"
+    [ -n "$pstate" ] && say "URSUS_STOCKSLOT_PERSISTENT_STATE state=$pstate"
+    if (probe_pristine >/dev/null 2>&1); then
+        say 'URSUS_STOCKSLOT_ROLLBACK_PROBE verdict=PRISTINE'
+    else
+        say 'URSUS_STOCKSLOT_ROLLBACK_PROBE verdict=REFUSED'
+    fi
+}
+
+write_target() {
+    TARGET=$1
+    case "$TARGET" in master) value=0;; slave) value=1;; *) exit 2;; esac
+    # Guard lives here, not in a caller. There is deliberately no --force path.
+    probe_pristine
+    fidx="$(require_geom flag 00040000 00020000)"
+    dev="/dev/mtd${fidx}"
+    src="$WORK/flag.bin"; cand="$WORK/flag.candidate"; rb="$WORK/flag.readback"
+    dd if="$dev" of="$src" bs=131072 count=2 2>/dev/null
+    [ "$(wc -c < "$src")" -eq 262144 ] || fail FLAG_READ_SIZE
+    cp "$src" "$cand"
+    if [ "$value" -eq 0 ]; then
+        printf '\000\000\000\000'
+    else
+        printf '\001\000\000\000'
+    fi | dd of="$cand" bs=1 seek=0 conv=notrunc 2>/dev/null
+    before="$(dd if="$src" bs=1 skip=4 2>/dev/null | sha256sum | awk '{print $1}')"
+    after="$(dd if="$cand" bs=1 skip=4 2>/dev/null | sha256sum | awk '{print $1}')"
+    [ "$before" = "$after" ] || fail NON_ACTIVE_BYTES_CHANGED
+    expected="$(sha256sum "$cand" | awk '{print $1}')"
+    mtd write "$cand" flag >"$WORK/stockslot-mtd.log" 2>&1 || { cat "$WORK/stockslot-mtd.log" >&2; fail MTD_WRITE; }
+    sync
+    dd if="$dev" of="$rb" bs=131072 count=2 2>/dev/null
+    [ "$(sha256sum "$rb" | awk '{print $1}')" = "$expected" ] || fail READBACK_SHA
+    [ "$(dd if="$rb" bs=1 skip=4 2>/dev/null | sha256sum | awk '{print $1}')" = "$before" ] || fail READBACK_NON_ACTIVE_BYTES
+    active="$(dd if="$rb" bs=4 count=1 2>/dev/null | od -An -tu4 | tr -d ' ')"
+    [ "$active" = "$value" ] || fail READBACK_ACTIVE
+    say "URSUS_STOCKSLOT_DONE target=$TARGET active=$value readback=PASS"
+}
+
+case "${1:-status}" in
+    status) TARGET=status; status ;;
+    probe) TARGET=probe; probe_pristine; say 'URSUS_STOCKSLOT_ROLLBACK_PROBE verdict=PRISTINE' ;;
+    master|slave) write_target "$1" ;;
+    *) echo 'usage: ursusstockslot status|master|slave' >&2; exit 2 ;;
+esac

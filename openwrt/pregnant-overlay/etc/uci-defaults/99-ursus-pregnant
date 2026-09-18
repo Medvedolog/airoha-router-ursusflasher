@@ -1,0 +1,9 @@
+#!/bin/sh
+uci -q set network.lan.ipaddr='192.168.1.1'
+uci -q set network.lan.netmask='255.255.255.0'
+uci -q commit network
+ln -sf ../init.d/ursus-pregnant /etc/rc.d/S98ursus-pregnant
+if grep -q 'procd_set_param command "$PROG" -F -P "$pid_file"' /etc/init.d/dropbear 2>/dev/null; then
+    sed -i 's/procd_set_param command "$PROG" -F -P "$pid_file"/procd_set_param command "$PROG" -F -B -P "$pid_file"/' /etc/init.d/dropbear
+fi
+exit 0
