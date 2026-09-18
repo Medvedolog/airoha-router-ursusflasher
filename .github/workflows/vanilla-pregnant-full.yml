@@ -1,0 +1,213 @@
+name: Vanilla pregnant full MD MF kit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - '.github/workflows/vanilla-pregnant-full.yml'
+      - 'fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin'
+      - 'fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb'
+      - 'fw/openwrt-airoha-an7583-nokia_xg-040g-mf-squashfs-sysupgrade.bin'
+      - 'fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb'
+      - 'config/UNAMEONE_2026-09-16_PAYLOADS.json'
+      - 'config/VANILLA_BOOT_CHAIN_PROFILES.json'
+      - 'openwrt/pregnant-overlay/**'
+      - 'ursusflasher/src/expert.py'
+      - 'ursusflasher/src/stock_ab_pregnant.py'
+      - 'ursusflasher/src/stock_ab_transition.py'
+      - 'ursusflasher/src/stock_fit_initramfs.py'
+      - 'ursusflasher/tools/build_pregnant_runtime.py'
+      - 'ursusflasher/tools/build_vanilla_pregnant_payloads.py'
+
+permissions:
+  contents: read
+
+jobs:
+  build-full-kit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Host and contract QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            ursusflasher/src/stock_ab_pregnant.py \
+            ursusflasher/src/stock_ab_transition.py \
+            ursusflasher/src/stock_fit_initramfs.py \
+            ursusflasher/tools/build_pregnant_runtime.py \
+            ursusflasher/tools/build_vanilla_pregnant_payloads.py
+          sh -n openwrt/pregnant-overlay/usr/sbin/ursus-vanilla-stage2
+          sh -n openwrt/pregnant-overlay/usr/sbin/ursusstockslot
+          sh -n openwrt/pregnant-overlay/etc/init.d/ursus-pregnant
+          sh -n openwrt/pregnant-overlay/etc/uci-defaults/99-ursus-pregnant
+          grep -Fq 'struct.pack_into("<I", out, 0, target)' ursusflasher/src/stock_ab_transition.py
+          grep -Fq 'if out[4:] != flag[4:]:' ursusflasher/src/stock_ab_transition.py
+          grep -Fq 'raise RuntimeError("activation flag changed fields other than active")' ursusflasher/src/stock_ab_transition.py
+          grep -Fq 'state WRITING_BL2_LAST' openwrt/pregnant-overlay/usr/sbin/ursus-vanilla-stage2
+          grep -Fq 'persist_state PROD_VERIFIED' openwrt/pregnant-overlay/usr/sbin/ursus-vanilla-stage2
+          grep -Fq 'PERSISTENT_STATE_$pstate' openwrt/pregnant-overlay/usr/sbin/ursusstockslot
+          python3 - <<'PY'
+          import hashlib, json, pathlib
+          root = pathlib.Path('.')
+          m = json.loads((root/'config/UNAMEONE_2026-09-16_PAYLOADS.json').read_text())
+          for profile in ('xg040-md','xg040-mf'):
+              for role in ('plain_sysupgrade','ubi_sysupgrade'):
+                  spec=m['profiles'][profile][role]
+                  p=root/'fw'/spec['filename']
+                  h=hashlib.sha256(p.read_bytes()).hexdigest()
+                  assert p.stat().st_size == spec['size'], (p, p.stat().st_size, spec['size'])
+                  assert h == spec['sha256'], (p, h, spec['sha256'])
+                  print('UNAMEONE_EXACT=PASS', profile, role, p.name, h)
+          PY
+
+      - name: Fetch current official OpenWrt UBI recovery bases
+        shell: bash
+        run: |
+          set -euo pipefail
+          fetch_family() {
+            fam="$1"; target="$2"; device="$3"
+            dir="work/openwrt/$fam"
+            base="https://downloads.openwrt.org/snapshots/targets/airoha/$target"
+            mkdir -p "$dir"
+            curl -fL --retry 5 "$base/version.buildinfo" -o "$dir/version.buildinfo"
+            curl -fL --retry 5 "$base/sha256sums" -o "$dir/sha256sums"
+            name="openwrt-airoha-${target}-${device}-ubi-initramfs-recovery.itb"
+            grep -E "[[:space:]]\\*?${name}$" "$dir/sha256sums" | head -n1 > "$dir/$name.sha256.line"
+            test -s "$dir/$name.sha256.line"
+            curl -fL --retry 5 "$base/$name" -o "$dir/$name"
+            (cd "$dir" && sha256sum -c "$name.sha256.line")
+            echo "OPENWRT_${fam}_VERSION=$(cat "$dir/version.buildinfo")"
+          }
+          fetch_family md an7581 nokia_xg-040g-md
+          fetch_family mf an7583 nokia_xg-040g-mf
+
+      - name: Fetch exact pinned proven Vanilla boot chain
+        shell: bash
+        run: |
+          set -euo pipefail
+          manifest=config/VANILLA_BOOT_CHAIN_PROFILES.json
+          commit="$(jq -r '.source.commit' "$manifest")"
+          raw="$(jq -r '.source.raw_base' "$manifest")"
+          mkdir -p work/bootchain
+          for profile in xg040-md xg040-mf; do
+            fam="$(jq -r ".profiles[\"$profile\"].family" "$manifest")"
+            fip_path="$(jq -r ".profiles[\"$profile\"].fip.path" "$manifest")"
+            pre_path="$(jq -r ".profiles[\"$profile\"].preloader.path" "$manifest")"
+            curl -fL --retry 5 "$raw/$commit/$fip_path" -o "work/bootchain/$fam.fip"
+            curl -fL --retry 5 "$raw/$commit/$pre_path" -o "work/bootchain/$fam.preloader.bin"
+          done
+
+      - name: Build autonomous pregnant payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf payloads/vanilla-pregnant
+          python3 ursusflasher/tools/build_vanilla_pregnant_payloads.py \
+            --md-recovery work/openwrt/md/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-initramfs-recovery.itb \
+            --mf-recovery work/openwrt/mf/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-initramfs-recovery.itb \
+            --md-version work/openwrt/md/version.buildinfo \
+            --mf-version work/openwrt/mf/version.buildinfo \
+            --md-fip work/bootchain/md.fip \
+            --mf-fip work/bootchain/mf.fip \
+            --md-preloader work/bootchain/md.preloader.bin \
+            --mf-preloader work/bootchain/mf.preloader.bin
+
+      - name: Full payload closure QA
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=ursusflasher/src python3 - <<'PY'
+          import hashlib, json, pathlib
+          import stock_ab_pregnant as p
+          import stock_ab_transition as sat
+          import struct
+
+          for profile in ('xg040-md','xg040-mf'):
+              policy=p._policy(profile)
+              files, meta=p._load_payload(policy)
+              assert meta['mode']=='VANILLA_PREGNANT_MIGRATION'
+              assert meta['files']['production']['sha256']==meta['unameone_sha256']
+              assert meta['boot_chain']['bl2_written_last'] is True
+              print('LOAD_PAYLOAD=PASS', profile, meta['unameone_sha256'])
+
+              flag=bytearray(policy.flag_size)
+              struct.pack_into('<4I', flag, 0, 0, 0, 1, 7)
+              for i in range(16, len(flag)):
+                  flag[i]=(i * 131 + 17) & 0xff
+              candidate, info=sat.build_activation_flag(bytes(flag), 1, policy)
+              assert candidate[:4] == b'\x01\x00\x00\x00'
+              assert candidate[4:] == bytes(flag[4:])
+              assert info['after']['active'] == 1
+              print('SELECTOR_INVARIANT=PASS', profile)
+
+          stage=pathlib.Path('openwrt/pregnant-overlay/usr/sbin/ursus-vanilla-stage2').read_text()
+          order=['state WRITING_SYSUPGRADE','state RESTORING_IDENTITY','state WRITING_FIP','state WRITING_BL2_LAST','state VERIFYING_FINAL','persist_state PROD_VERIFIED']
+          positions=[stage.index(x) for x in order]
+          assert positions == sorted(positions), positions
+          print('DESTRUCTIVE_ORDER=PASS', order)
+          PY
+          find payloads/vanilla-pregnant -type f -print0 | sort -z | xargs -0 sha256sum | tee work/PREGNANT_PAYLOAD_SHA256SUMS
+
+      - name: Assemble full MD MF UART test kit
+        shell: bash
+        run: |
+          set -euo pipefail
+          KIT=/tmp/ursus-vanilla-pregnant-full
+          OUT=/tmp/UrsusFlasher-VANILLA-PREGNANT-FULL-MD-MF-${GITHUB_SHA}.zip
+          rm -rf "$KIT" "$OUT"
+          mkdir -p "$KIT"
+          cp START_EXPERT.cmd START_EXPERT.sh VERSION README.md "$KIT/"
+          cp -a config fw payloads ursusflasher docs "$KIT/"
+          cp work/PREGNANT_PAYLOAD_SHA256SUMS "$KIT/"
+          cat > "$KIT/READ-ME-FIRST.txt" <<EOF
+          UrsusFlasher EXPERT item 4 - FULL VANILLA PREGNANT MIGRATION - MD/MF UART TEST KIT
+          Source commit: ${GITHUB_SHA}
+
+          Launch EXPERT and choose item 4 on a positively identified stock Nokia XG-040G-MD or XG-040G-MF.
+
+          Transaction:
+            complete stock backup/preflight
+            -> one y/N
+            -> write/readback stock SLOT2 pregnant UBI-recovery runtime
+            -> selector active=1/readback, flagback untouched
+            -> immediate reboot
+            -> autonomous canonical OpenWrt UBI migration
+            -> exact pinned UnameOne 2026-09-16 UBI production child
+            -> bosa/ri restore + readback
+            -> pinned Vanilla FIP + readback
+            -> BL2/preloader LAST + readback
+            -> final verification + reboot to production
+
+          This is a destructive full migration test kit, not the old boot-only item4 test.
+          CI PASS proves build/static/integrity closure only. It is NOT HW PASS.
+          Keep the UART log for the hardware acceptance record.
+          EOF
+          find "$KIT" -type d -name __pycache__ -prune -exec rm -rf {} + || true
+          find "$KIT" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+          git rev-parse HEAD > "$KIT/URSUSFLASHER_COMMIT.txt"
+          (cd "$KIT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          python3 - "$KIT" "$OUT" <<'PY'
+          import pathlib, sys, zipfile
+          root=pathlib.Path(sys.argv[1]); out=pathlib.Path(sys.argv[2])
+          with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED,compresslevel=6) as z:
+              for p in sorted(root.rglob('*')):
+                  if p.is_file(): z.write(p, pathlib.Path(root.name)/p.relative_to(root))
+          PY
+          sha256sum "$OUT" > "$OUT.sha256"
+          ls -lh "$OUT" "$OUT.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UrsusFlasher-VANILLA-PREGNANT-FULL-MD-MF-${{ github.sha }}
+          path: |
+            /tmp/UrsusFlasher-VANILLA-PREGNANT-FULL-MD-MF-${{ github.sha }}.zip
+            /tmp/UrsusFlasher-VANILLA-PREGNANT-FULL-MD-MF-${{ github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
