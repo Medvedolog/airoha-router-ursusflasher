@@ -5,72 +5,39 @@
 Лежат здесь только потому, что в тот репозиторий нет доступа на запись.
 
 Вмерджено ранее и удалено отсюда: data-driven `build.sh`, упаковка FIP,
-QA-стражи, README (в `43fca746`); фикс `borrowed` netif в `ping.c` (в составе
-MAC-ветки, сторожится `qa.sh:53-54`).
+QA-стражи и README (`43fca746`); `borrowed`-фикс в `ping.c`; `CONFIG_ENV_OVERWRITE=y`
+для MF и раздел «Recovery MAC identity» (`e5ae5747`).
 
 ## Открытый патч
 
 ```text
-0004-mf-env-overwrite-and-mac-boot-order-docs.patch   база: ef171bc5
+0005-docs-hw-test-mac.patch   база: e5ae5747
 ```
 
-Проверено: применяется чисто на `ef171bc5`, `qa.sh` проходит, негативный тест
-нового стража срабатывает.
+Проверено: применяется чисто на `e5ae5747`, `qa.sh` после применения проходит.
 
-## Что он делает
+## Что в нём
 
-### 1. `CONFIG_ENV_OVERWRITE=y` для MF — реальный баг
+Новый файл `docs/HW_TEST_MAC.md` — стендовая процедура проверки стабильности
+recovery-MAC. Тест A/B/C из обсуждения, оформленный так, чтобы им можно было
+пользоваться у железа: таблицы для заполнения, явные критерии PASS и — главное —
+таблица чтения UART-лога.
 
-В `config/u-boot.TEST61.full.config:779` эта опция есть, в
-`an7583_nokia_xg-040g-mf_MF2_RAM_defconfig` её не было, а в `env/Kconfig`
-у неё нет `default` → она равна `n`.
+Последнее существеннее всего: строка `Warning: … using random MAC address` сама
+по себе **не** означает провал. Ethernet-проба отрабатывает раньше `preboot`,
+поэтому на загрузке с пустым env случайный MAC успевает попасть в env и в
+контроллер до того, как `ethaddr_factory` прочитает `ri`. Признак успеха —
+идущая следом строка `URSUS_MAC_SOURCE=RI ethaddr=…`. Без этого пояснения
+нормальная первая загрузка после `reset_factory` читается как FAIL.
 
-По `include/env_flags.h:50-58` это переключает флаг переменной с `ethaddr:ma`
-(перезаписываемая) на `ethaddr:mo` — **write-once**. Последствие на MF: как
-только `ethaddr` однажды сохранён, `env readmem -b ethaddr` отвергается,
-`ethaddr_factory` уходит в ветку `else` и печатает
-`WARN: URSUS_MAC_RI_READ_FAIL fallback=persisted` на **каждой** загрузке, хотя
-`ri` читается нормально. MAC при этом остаётся стабильным, поэтому HW-тест
-формально «пройдёт», но диагностика будет врать, а однажды залипший неверный
-адрес нельзя будет исправить иначе как через `reset_factory`.
-
-Патч добавляет опцию в MF-defconfig и страж в `qa.sh` на оба конфига.
-
-### 2. Документирование порядка загрузки
-
-`eth_post_probe()` отрабатывает **раньше** `preboot`:
-
-```text
-board_r.c  INITCALL(initr_net)      -> eth probe -> eth_post_probe()
-board_r.c  INITCALL(run_main_loop)  -> main_loop() -> preboot -> ethaddr_factory
-```
-
-Если в env нет `ethaddr` (свежее устройство либо первая загрузка после того,
-как `reset_factory` обнулил env), `net/eth-uclass.c:628-633` генерирует
-случайный MAC, **пишет его в env и программирует в контроллер**, печатая
-`Warning: … using random MAC address`. И только потом `ethaddr_factory`
-исправляет env из `ri`.
-
-Без этого в README строка `Warning: … using random MAC address` в логе
-HW-прогона читается как «фикс не сработал», хотя означает лишь, что в тот
-момент env был пуст. Ключевой признак успеха — идущая следом строка
-`URSUS_MAC_SOURCE=RI ethaddr=…`. Сгенерированный адрес всегда локально
-администрируемый (`net_random_ethaddr()` в `include/net-common.h:376-377`
-ставит бит `0x02`), то есть отличается от заводского с одного взгляда.
-
-## Чего патч намеренно НЕ делает
-
-Ранее предлагалось убрать `CONFIG_NET_RANDOM_ETHADDR`. После разбора
-`net/eth-uclass.c:626-638` это предложение **отозвано**: без него устройство с
-повреждённым томом `ri` получает `Error: No valid MAC address found`, остаётся
-вообще без сети и теряет WebFailsafe — ровно в том сценарии расшивки, ради
-которого он существует. Случайный MAC как последний рубеж оставлен осознанно,
-и `WARN:`-строки `ethaddr_factory` называют, какой именно fallback сработал.
+Тест C отдельно ловит расхождение env и MAC-фильтра контроллера — то самое
+следствие порядка инициализации, которое нельзя увидеть ни в CI, ни по
+`printenv`.
 
 ## Применение
 
 ```bash
 cd /path/to/airoha-ursusboot
-git apply /path/to/0004-mf-env-overwrite-and-mac-boot-order-docs.patch
+git apply /path/to/0005-docs-hw-test-mac.patch
 bash scripts/qa.sh
 ```

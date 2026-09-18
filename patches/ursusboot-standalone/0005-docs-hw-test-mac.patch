@@ -1,0 +1,97 @@
+diff --git a/docs/HW_TEST_MAC.md b/docs/HW_TEST_MAC.md
+new file mode 100644
+index 00000000..0570cb34
+--- /dev/null
++++ b/docs/HW_TEST_MAC.md
+@@ -0,0 +1,91 @@
++# Hardware test: recovery MAC stability
++
++Validates the MAC identity work on a real unit. CI PASS does not cover any of this: the `ri` read, the environment write path and the Ethernet controller only exist on hardware.
++
++Applies to `UrsusBoot 0.1.0-alpha5-UBIUX1-TEST61` and later. Read `README.md` → *Recovery MAC identity* first; it explains why some log lines are ambiguous on their own.
++
++## Setup
++
++- USB-UART **3.3 V** on TX / RX / GND, **115200 8N1**, no flow control, capture the whole session to a file.
++- PC on **LAN2 or LAN3**. Not LAN1 (separate EN8811H PHY), not LAN4 (becomes WAN under OpenWrt).
++- **Full power removal** between iterations. A warm `reset` does not re-run the probe path the same way and will not exercise what this test is for.
++- Record the unit's sticker MAC before starting.
++
++## What to capture on every boot
++
++```text
++# UART, at the UrsusBoot prompt
++printenv ethaddr
++
++# PC (Linux)
++ip neigh flush dev <iface> 192.168.1.1
++ping -c2 192.168.1.1
++ip neigh show 192.168.1.1
++```
++
++macOS/Windows equivalents: `arp -d 192.168.1.1` then `ping -c2` / `ping -n 2`, then `arp -n 192.168.1.1` / `arp -a 192.168.1.1`.
++
++## Reading the UART log
++
++| Line | Meaning |
++|---|---|
++| `URSUS_MAC_SOURCE=RI ethaddr=…` | **The success marker.** MAC came from the `ri` volume. |
++| `Warning: … using random MAC address - <mac>` | The environment held no MAC at probe time. Expected on a fresh unit and on the first boot after `reset_factory`. **Not** a failure by itself — but `URSUS_MAC_SOURCE=RI` must follow it. |
++| `WARN: URSUS_MAC_RI_READ_FAIL fallback=…` | The `ri` volume could not be read. Always a finding. |
++| `WARN: URSUS_MAC_INVALID_RI fallback=…` | `ri` was read but held `00:00:…` or `ff:ff:…`. Always a finding. |
++
++A generated address is always locally administered: the first octet ends in `2`, `6`, `a` or `e` (`02:`, `1e:`, `7a:` …). A factory Nokia address never does. This tells a random MAC from a real one at a glance.
++
++## A — cold boot stability
++
++Three full power cycles. On each, capture the block above.
++
++PASS requires all of:
++
++- `URSUS_MAC_SOURCE=RI ethaddr=…` present on every boot;
++- no `WARN:` lines from `ethaddr_factory`;
++- `printenv ethaddr` identical across all three boots, and equal to the sticker MAC;
++- the ARP MAC seen by the PC equals `ethaddr`;
++- no `Warning: … using random MAC address` after the first boot.
++
++| Boot | `ethaddr` | `URSUS_MAC_SOURCE` | random-MAC warning | ARP MAC on PC |
++|---|---|---|---|---|
++| 1 | | | | |
++| 2 | | | | |
++| 3 | | | | |
++
++## B — survives a FIP write and environment reset
++
++This is the case the fix exists for: `boot_tftp_write_fip` ends in `reset_factory`, which wipes both `ubootenv` volumes.
++
++1. Note `ethaddr` from test A.
++2. Update the bootloader — the **Update UrsusBoot** tab in WebFailsafe, or the `boot_tftp_write_fip` path.
++3. Two full power cycles, capturing the same block each time.
++
++PASS requires all of:
++
++- `ethaddr` after the update equals the value from test A;
++- `URSUS_MAC_SOURCE=RI` on both boots;
++- no `WARN:` lines;
++- a single `Warning: … using random MAC address` on the first post-reset boot is acceptable **only** if `URSUS_MAC_SOURCE=RI` follows it and `ethaddr` still matches test A.
++
++| Boot | `ethaddr` | matches A? | `URSUS_MAC_SOURCE` | `WARN:` lines |
++|---|---|---|---|---|
++| post-reset 1 | | | | |
++| post-reset 2 | | | | |
++
++## C — environment and controller agree
++
++Catches the ordering hazard: the Ethernet probe runs before `preboot`, so on a boot that started with an empty environment the controller may have been programmed with a different MAC than the one `ethaddr_factory` later wrote into the environment.
++
++1. Boot and open `http://192.168.1.1/`.
++2. Reboot from the web UI.
++3. When it comes back, open the page again **without** flushing ARP on the PC.
++
++PASS: the page loads without any manual ARP intervention, and `ip neigh show 192.168.1.1` reports the same MAC as `printenv ethaddr`.
++
++FAIL here means the environment and the controller's MAC filter disagree — capture the full UART log of that boot and the PC's ARP table before changing anything.
++
++## Result
++
++The test is HW PASS only if A, B and C all pass. Any `WARN:` line, any MAC change across boots, or any ARP mismatch is a FAIL — record the full UART log rather than retrying, since the interesting state is the one that produced it.
