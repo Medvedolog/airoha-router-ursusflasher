@@ -126,6 +126,7 @@ jobs:
           find "$ART" -type d -name __pycache__ -prune -exec rm -rf {} + || true
           (cd "$ART" && python3 ursusflasher/tools/selftest_pregnant_item4.py)
           (cd "$ART" && sh -n openwrt/pregnant-overlay/usr/sbin/ursus-vanilla-stage2 && sh -n openwrt/pregnant-overlay/usr/sbin/ursusstockslot)
+          find "$ART" -type d -name __pycache__ -prune -exec rm -rf {} + || true
           (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
       - name: Probe exact UnameOne production inputs
         id: prod
