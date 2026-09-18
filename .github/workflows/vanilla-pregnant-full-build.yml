@@ -102,8 +102,14 @@ jobs:
       - name: Repack current MD Vanilla FIP
         run: |
           set -euo pipefail
-          d="$(find work/openwrt/build_dir -type d -path '*uboot-airoha*' -name 'u-boot-2026.07' -print | head -n1)"; test -n "$d" || d="$(find work/openwrt/build_dir -type d -path '*uboot-airoha*' -print | head -n1)"
-          lz="$(find "$d" -type f -name u-boot.lzma -print | head -n1)"; test -s "$lz"
+          mapfile -t lz_candidates < <(find work/openwrt/build_dir -type f -path '*u-boot-an7581_nokia_xg-040g-md*/u-boot.lzma' -print)
+          if [ "${#lz_candidates[@]}" -ne 1 ]; then
+            echo "Expected exactly one MD u-boot.lzma, found ${#lz_candidates[@]}" >&2
+            find work/openwrt/build_dir -type f -name u-boot.lzma -print >&2 || true
+            exit 1
+          fi
+          lz="${lz_candidates[0]}"; test -s "$lz"
+          echo "MD_UBOOT_LZMA=$lz"
           xz --format=lzma -dc "$lz" > work/md-vanilla-fudan-u-boot.bin; grep -aFq FM25G01B work/md-vanilla-fudan-u-boot.bin; grep -aFq FM25G02B work/md-vanilla-fudan-u-boot.bin
           python3 kit/ursusflasher/tools/repack_vanilla_fip.py --donor work/snapshot/md/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot.fip --nt-fw "$lz" --output work/md-vanilla-fudan.fip --require-marker FM25G01B --require-marker FM25G02B
       - name: Verify official MD BL2 Fudan table provenance
