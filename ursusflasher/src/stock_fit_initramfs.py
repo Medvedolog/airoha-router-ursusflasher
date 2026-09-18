@@ -154,13 +154,14 @@ def build_installer_slot(stock_slot: bytes, installer_fit: bytes, *, slot_size: 
     fit_off = nt_off + 0x100
     capacity = nt_size - 0x100
     total = int(src['fit_total_size'])
-    if total > capacity:
-        raise RuntimeError(f'installer FIT does not fit stock NT-FW payload: {total:#x} > {capacity:#x}')
+    bundle_total = len(installer_fit)
+    if bundle_total > capacity:
+        raise RuntimeError(f'installer bundle does not fit stock NT-FW payload: {bundle_total:#x} > {capacity:#x}')
     if struct.unpack_from('<I', stock_slot, nt_off + 0x08)[0] != nt_size:
         raise RuntimeError('stock HDR2 NT-FW size does not match FIP entry')
     out = bytearray(stock_slot)
     out[fit_off:fit_off + capacity] = b'\0' * capacity
-    out[fit_off:fit_off + total] = installer_fit[:total]
+    out[fit_off:fit_off + bundle_total] = installer_fit
     struct.pack_into('<I', out, nt_off + 0x50, int(src['kernel_data_size']))
     struct.pack_into('<I', out, nt_off + 0x54, 0)
     for i, (a, b) in enumerate(zip(stock_slot[:fit_off], bytes(out[:fit_off]))):
@@ -180,8 +181,11 @@ def build_installer_slot(stock_slot: bytes, installer_fit: bytes, *, slot_size: 
         'inner_fit_offset': fit_off,
         'inner_fit_capacity': capacity,
         'installer_fit_size': total,
-        'installer_fit_padding': capacity - total,
+        'installer_fit_padding': capacity - bundle_total,
         'installer_fit_sha256': src['sha256'],
+        'installer_bundle_size': bundle_total,
+        'installer_trailing_payload_size': bundle_total - total,
+        'installer_bundle_sha256': sha256_bytes(installer_fit),
         'installer_kernel_node': src['kernel_node'],
         'installer_kernel_data_size': src['kernel_data_size'],
         'installer_kernel_compression': src['kernel_compression'],
