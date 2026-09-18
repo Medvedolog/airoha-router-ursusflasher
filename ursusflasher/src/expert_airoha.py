@@ -46,7 +46,7 @@ def action_applicability(state: ds.DeviceState):
 def _show_transition_action_unconditionally(_state: ds.DeviceState) -> None:
     base.base.ui.menu_item(
         4,
-        base.tr("Stock Nokia → Vanilla OpenWrt (TRANSITION)", "Stock Nokia → Vanilla OpenWrt (TRANSITION)"),
+        base.tr("Stock Nokia → Vanilla OpenWrt (pregnant migration)", "Stock Nokia → Vanilla OpenWrt (pregnant migration)"),
         base.tr(
             "Vanilla переход → OpenWrt без постоянного UrsusBoot. В mtd0 «подмигивающего медведя» после миграции нет.",
             "Vanilla transition → OpenWrt without persistent UrsusBoot. No persistent WebFailsafe bear remains in mtd0 after migration.",
@@ -62,8 +62,8 @@ def _transition_profile_after_selection(_menu_state: ds.DeviceState) -> str | No
 
     The passive probe is allowed to fail completely (for example vendor Web may
     not answer the lightweight fingerprint yet).  If it positively identifies
-    MD/MF, keep that result.  Otherwise enter the currently implemented MD
-    TRANSITION backend and let its own stock login + exact /proc/mtd geometry
+    MD/MF, keep that result.  Otherwise enter the current pregnant
+    migration backend and let its own stock login + exact /proc/mtd geometry
     checks prove the target before any NAND write.  A wrong/non-MD target stops
     there, before the destructive boundary.
     """
@@ -75,8 +75,8 @@ def _transition_profile_after_selection(_menu_state: ds.DeviceState) -> str | No
     base.base.ui.status(
         base.tr("INFO", "INFO"),
         base.tr(
-            "Пассивная диагностика не определила профиль; запускаю MD TRANSITION preflight. Stock Web/root и точная MTD-геометрия будут проверены самим backend до записи.",
-            "Passive diagnostics did not identify the profile; starting MD TRANSITION preflight. Stock Web/root and exact MTD geometry are verified by the backend before any write.",
+            "Пассивная диагностика не определила профиль; запускаю MD pregnant migration preflight. Stock Web/root и точная MTD-геометрия будут проверены самим backend до записи.",
+            "Passive diagnostics did not identify the profile; starting MD pregnant migration preflight. Stock Web/root and exact MTD geometry are verified by the backend before any write.",
         ),
     )
     return "xg040-md"

@@ -1,0 +1,166 @@
+name: Vanilla pregnant MD+MF build
+on:
+  workflow_dispatch:
+    inputs:
+      unameone_md_url:
+        description: Optional stable URL for exact pinned UnameOne 2026-09-16 MD UBI ITB
+        required: false
+        type: string
+      unameone_mf_url:
+        description: Optional stable URL for exact pinned UnameOne 2026-09-16 MF UBI ITB
+        required: false
+        type: string
+  push:
+    branches: [feature/ursusboot-modular-airoha]
+    paths:
+      - '.github/workflows/vanilla-pregnant-full-build.yml'
+      - 'openwrt/pregnant-overlay/**'
+      - 'ursusflasher/src/stock_ab_pregnant.py'
+      - 'ursusflasher/src/stock_fit_initramfs.py'
+      - 'ursusflasher/src/expert.py'
+      - 'ursusflasher/src/expert_multi.py'
+      - 'ursusflasher/src/expert_airoha.py'
+      - 'ursusflasher/tools/build_pregnant_runtime.py'
+      - 'ursusflasher/tools/repack_vanilla_fip.py'
+      - 'ursusflasher/tools/assemble_pregnant_payload.py'
+      - 'ursusflasher/tools/selftest_pregnant_item4.py'
+      - 'config/UNAMEONE_2026-09-16_PAYLOADS.json'
+      - 'ursusboot/patches/openwrt-pr24025/**'
+permissions: { contents: read }
+concurrency:
+  group: vanilla-pregnant-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: kit, fetch-depth: 1 }
+      - name: Host and safety QA
+        working-directory: kit
+        run: |
+          set -euo pipefail
+          python3 -m py_compile ursusflasher/src/stock_ab_pregnant.py ursusflasher/src/stock_fit_initramfs.py ursusflasher/tools/build_pregnant_runtime.py ursusflasher/tools/repack_vanilla_fip.py ursusflasher/tools/assemble_pregnant_payload.py ursusflasher/tools/selftest_pregnant_item4.py
+          python3 ursusflasher/tools/selftest_pregnant_item4.py
+          sh -n openwrt/pregnant-overlay/usr/sbin/ursus-vanilla-stage2
+          sh -n openwrt/pregnant-overlay/usr/sbin/ursusstockslot
+          sh -n openwrt/pregnant-overlay/etc/init.d/ursus-pregnant
+          sh -n openwrt/pregnant-overlay/etc/uci-defaults/99-ursus-pregnant
+          grep -Fq 'out[4:] != flag[4:]' ursusflasher/src/stock_ab_transition.py
+          ! grep -R -- '--force' openwrt/pregnant-overlay ursusflasher/src/stock_ab_pregnant.py
+          test "$(grep -c 'ui.prompt(' ursusflasher/src/stock_ab_pregnant.py)" -eq 1
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib gettext git jq libncurses-dev libssl-dev liblzma-dev python3 python3-setuptools rsync swig unzip zlib1g-dev file wget curl time xz-utils zstd device-tree-compiler perl zip
+      - name: Fetch current official UBI-recovery inputs
+        run: |
+          set -euo pipefail
+          mkdir -p work/snapshot/md work/snapshot/mf
+          fetch_family() {
+            family="$1"; target="$2"; device="$3"; base="https://downloads.openwrt.org/snapshots/targets/airoha/$target"; dir="work/snapshot/$family"
+            curl -fL --retry 5 "$base/sha256sums" -o "$dir/sha256sums"
+            curl -fL --retry 5 "$base/version.buildinfo" -o "$dir/version.buildinfo"
+            for name in "openwrt-airoha-$target-$device-ubi-initramfs-recovery.itb" "openwrt-airoha-$target-$device-ubi-preloader.bin" "openwrt-airoha-$target-$device-ubi-bl31-uboot.fip"; do
+              grep -E "[[:space:]]\\*?$name$" "$dir/sha256sums" | head -n1 > "$dir/$name.sha256.line"
+              test -s "$dir/$name.sha256.line"; curl -fL --retry 5 "$base/$name" -o "$dir/$name"; (cd "$dir" && sha256sum -c "$name.sha256.line")
+            done
+          }
+          fetch_family md an7581 nokia_xg-040g-md
+          fetch_family mf an7583 nokia_xg-040g-mf
+          echo "MD_SNAPSHOT=$(cat work/snapshot/md/version.buildinfo)" >> "$GITHUB_ENV"
+          echo "MF_SNAPSHOT=$(cat work/snapshot/mf/version.buildinfo)" >> "$GITHUB_ENV"
+      - name: Build linked-newc pregnant runtimes
+        run: |
+          set -euo pipefail; mkdir -p work/runtime
+          python3 kit/ursusflasher/tools/build_pregnant_runtime.py --family md --input work/snapshot/md/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-initramfs-recovery.itb --output work/runtime/md-runtime.itb
+          python3 kit/ursusflasher/tools/build_pregnant_runtime.py --family mf --input work/snapshot/mf/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-initramfs-recovery.itb --output work/runtime/mf-runtime.itb
+          PYTHONPATH=kit/ursusflasher/src python3 - <<'PY'
+          from pathlib import Path
+          import stock_fit_initramfs as s
+          for fam in ("md","mf"):
+              p=Path("work/runtime")/f"{fam}-runtime.itb"; info=s.source_fit_contract(p.read_bytes()); assert info["fit_total_size"]==p.stat().st_size; print(f"{fam.upper()}_RUNTIME_FIT_QA=PASS",info)
+          PY
+      - name: Resolve matching OpenWrt source for MD snapshot
+        run: |
+          set -euo pipefail
+          short="${MD_SNAPSHOT##*-}"; full="$(curl -fsSL "https://api.github.com/repos/openwrt/openwrt/commits/$short" | jq -r .sha)"; test -n "$full" && test "$full" != null
+          echo "OPENWRT_MD_REF=$full" >> "$GITHUB_ENV"
+          git init work/openwrt; git -C work/openwrt remote add origin https://github.com/openwrt/openwrt.git; git -C work/openwrt fetch --depth=1 origin "$full"; git -C work/openwrt checkout --detach FETCH_HEAD
+      - name: Build current Vanilla MD U-Boot with Fudan patches
+        run: |
+          set -euo pipefail
+          dst=work/openwrt/package/boot/uboot-airoha/patches; mkdir -p "$dst"
+          cp kit/ursusboot/patches/openwrt-pr24025/120-mtd-spinand-fmsh-add-support-for-FM25G01B-FM25G02B.patch "$dst/950-mtd-spinand-fmsh-add-support-for-FM25G01B-FM25G02B.patch"
+          cp kit/ursusboot/patches/openwrt-pr24025/121-mtd-spinand-fmsh-fix-FM25G01B-FM25G02B-Quad-IO-read-dummy-cycles.patch "$dst/951-mtd-spinand-fmsh-fix-FM25G01B-FM25G02B-Quad-IO-read-dummy-cycles.patch"
+          printf '%s\n' CONFIG_TARGET_airoha=y CONFIG_TARGET_airoha_an7581=y CONFIG_TARGET_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi=y > work/openwrt/.config
+          make -C work/openwrt defconfig; make -C work/openwrt download -j8; find work/openwrt/dl -type f -size -1024c -delete
+          make -C work/openwrt -j"$(nproc)" tools/install V=s || make -C work/openwrt -j1 tools/install V=s
+          make -C work/openwrt -j"$(nproc)" toolchain/install V=s || make -C work/openwrt -j1 toolchain/install V=s
+          make -C work/openwrt -j"$(nproc)" package/boot/uboot-airoha/compile V=s || make -C work/openwrt -j1 package/boot/uboot-airoha/compile V=s
+      - name: Repack current MD Vanilla FIP
+        run: |
+          set -euo pipefail
+          d="$(find work/openwrt/build_dir -type d -path '*uboot-airoha*' -name 'u-boot-2026.07' -print | head -n1)"; test -n "$d" || d="$(find work/openwrt/build_dir -type d -path '*uboot-airoha*' -print | head -n1)"
+          lz="$(find "$d" -type f -name u-boot.lzma -print | head -n1)"; test -s "$lz"
+          xz --format=lzma -dc "$lz" > work/md-vanilla-fudan-u-boot.bin; grep -aFq FM25G01B work/md-vanilla-fudan-u-boot.bin; grep -aFq FM25G02B work/md-vanilla-fudan-u-boot.bin
+          python3 kit/ursusflasher/tools/repack_vanilla_fip.py --donor work/snapshot/md/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot.fip --nt-fw "$lz" --output work/md-vanilla-fudan.fip --require-marker FM25G01B --require-marker FM25G02B
+      - name: Verify official MD BL2 Fudan table provenance
+        run: |
+          set -euo pipefail
+          atf_ref="$(sed -n 's/.*SOURCE_VERSION:=\([0-9a-f]\{40\}\).*/\1/p' work/openwrt/package/boot/arm-trusted-firmware-airoha/Makefile | head -n1)"; test -n "$atf_ref"
+          curl -fsSL "https://raw.githubusercontent.com/Ansuel/atf-airoha/$atf_ref/plat/ecnt/common/drivers/flash/spi_nand_flash_table.c" -o work/atf-spi_nand_flash_table.c
+          grep -Fq _SPI_NAND_DEVICE_ID_FM25G01B work/atf-spi_nand_flash_table.c; grep -Fq _SPI_NAND_DEVICE_ID_FM25G02B work/atf-spi_nand_flash_table.c
+          echo "ATF_FUDAN_FLASH_TABLE_QA=PASS ref=$atf_ref"
+      - name: Stage operator tree and runtime components
+        run: |
+          set -euo pipefail
+          ART=work/staging/operator; mkdir -p "$ART"; cp -a kit/START_EXPERT* kit/VERSION kit/README.md "$ART/" 2>/dev/null || true; cp -a kit/config kit/fw kit/payloads kit/ursusflasher kit/docs "$ART/"
+          rm -rf "$ART/payloads/vanilla-pregnant"; mkdir -p "$ART/payloads/vanilla-pregnant/md" "$ART/payloads/vanilla-pregnant/mf"
+          cp work/runtime/md-runtime.itb "$ART/payloads/vanilla-pregnant/md/runtime.itb"; cp work/md-vanilla-fudan.fip "$ART/payloads/vanilla-pregnant/md/vanilla-bl31-uboot.fip"; cp work/snapshot/md/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin "$ART/payloads/vanilla-pregnant/md/vanilla-preloader.bin"
+          cp work/runtime/mf-runtime.itb "$ART/payloads/vanilla-pregnant/mf/runtime.itb"; cp work/snapshot/mf/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-bl31-uboot.fip "$ART/payloads/vanilla-pregnant/mf/vanilla-bl31-uboot.fip"; cp work/snapshot/mf/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-preloader.bin "$ART/payloads/vanilla-pregnant/mf/vanilla-preloader.bin"
+          cat > "$ART/payloads/vanilla-pregnant/NEEDS_PINNED_UNAMEONE.txt" <<EOF
+          Exact UnameOne 2026-09-16 production children are intentionally not substituted by snapshots.
+          MD SHA256 9b1f0899ca4ef610f6d87e8572d369adb420f104bda667556e8a0b5979f066dd
+          MF SHA256 21dcf4c6ca64ea0c5bc3d601e4a8f99a3f002371b873f399f622cbd9223fd1d1
+          Use ursusflasher/tools/assemble_pregnant_payload.py.
+          EOF
+          echo "$GITHUB_SHA" > "$ART/URSUSFLASHER_COMMIT.txt"; printf 'MD_SNAPSHOT=%s\nMF_SNAPSHOT=%s\nOPENWRT_MD_REF=%s\n' "$MD_SNAPSHOT" "$MF_SNAPSHOT" "$OPENWRT_MD_REF" > "$ART/PREGNANT_BUILD_INFO.txt"
+          find "$ART" -type d -name __pycache__ -prune -exec rm -rf {} + || true; (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+      - name: Probe exact UnameOne production inputs
+        id: prod
+        env:
+          MD_URL: ${{ inputs.unameone_md_url }}
+          MF_URL: ${{ inputs.unameone_mf_url }}
+        run: |
+          set -euo pipefail
+          md_name=openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb; mf_name=openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb; mkdir -p work/production
+          if [ -n "${MD_URL:-}" ] && [ -n "${MF_URL:-}" ]; then curl -fL --retry 5 "$MD_URL" -o "work/production/$md_name"; curl -fL --retry 5 "$MF_URL" -o "work/production/$mf_name"; else cp "kit/fw/$md_name" "work/production/$md_name" 2>/dev/null || true; cp "kit/fw/$mf_name" "work/production/$mf_name" 2>/dev/null || true; fi
+          ready=1; echo '9b1f0899ca4ef610f6d87e8572d369adb420f104bda667556e8a0b5979f066dd  work/production/'"$md_name" | sha256sum -c - || ready=0; echo '21dcf4c6ca64ea0c5bc3d601e4a8f99a3f002371b873f399f622cbd9223fd1d1  work/production/'"$mf_name" | sha256sum -c - || ready=0
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"; [ "$ready" = 1 ] || echo 'Exact pinned UnameOne inputs unavailable to runner; full artifact intentionally not assembled.'
+      - name: Assemble exact full MD+MF payloads
+        if: steps.prod.outputs.ready == '1'
+        run: |
+          set -euo pipefail; ART=work/staging/operator
+          python3 kit/ursusflasher/tools/assemble_pregnant_payload.py --family md --runtime "$ART/payloads/vanilla-pregnant/md/runtime.itb" --production work/production/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb --fip "$ART/payloads/vanilla-pregnant/md/vanilla-bl31-uboot.fip" --preloader "$ART/payloads/vanilla-pregnant/md/vanilla-preloader.bin" --output-root "$ART/payloads/vanilla-pregnant" --source-commit "$GITHUB_SHA" --snapshot "$MD_SNAPSHOT"
+          python3 kit/ursusflasher/tools/assemble_pregnant_payload.py --family mf --runtime "$ART/payloads/vanilla-pregnant/mf/runtime.itb" --production work/production/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb --fip "$ART/payloads/vanilla-pregnant/mf/vanilla-bl31-uboot.fip" --preloader "$ART/payloads/vanilla-pregnant/mf/vanilla-preloader.bin" --output-root "$ART/payloads/vanilla-pregnant" --source-commit "$GITHUB_SHA" --snapshot "$MF_SNAPSHOT"
+          rm -f "$ART/payloads/vanilla-pregnant/NEEDS_PINNED_UNAMEONE.txt"; (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          cd work/staging; zip -qr "UrsusFlasher-VANILLA-PREGNANT-FULL-$GITHUB_SHA.zip" operator; sha256sum "UrsusFlasher-VANILLA-PREGNANT-FULL-$GITHUB_SHA.zip" > "UrsusFlasher-VANILLA-PREGNANT-FULL-$GITHUB_SHA.zip.sha256"
+      - name: Upload CI staging artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vanilla-pregnant-staging-${{ github.sha }}
+          path: work/staging/operator/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload exact full migration kit
+        if: steps.prod.outputs.ready == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: UrsusFlasher-VANILLA-PREGNANT-FULL-${{ github.sha }}
+          path: |
+            work/staging/UrsusFlasher-VANILLA-PREGNANT-FULL-${{ github.sha }}.zip
+            work/staging/UrsusFlasher-VANILLA-PREGNANT-FULL-${{ github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14

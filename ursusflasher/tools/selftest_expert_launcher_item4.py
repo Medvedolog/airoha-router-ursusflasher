@@ -30,8 +30,8 @@ def test_launcher_chain_source() -> None:
     assert "_show_transition_action_unconditionally" in airoha
     assert "_transition_profile_after_selection" in airoha
     assert "fresh_state = ds.probe_device_state(host)" in airoha
-    assert "import stock_ab_transition" in multi
-    assert "stock_ab_transition.run_expert(host=host, profile=profile)" in multi
+    assert "import stock_ab_pregnant" in multi
+    assert "stock_ab_pregnant.run_expert(host=host, profile=profile)" in multi
     assert "elif number == 9:" in multi
     assert "_run_factory_bootarea_restore(state)" in multi
 
@@ -94,9 +94,9 @@ def test_shipped_item4_dispatch_behavior() -> None:
         patch(em, "_show_action", lambda *args, **kwargs: None)
         patch(em.base, "ask_menu", lambda _max: next(choices))
         patch(
-            em.stock_ab_transition,
+            em.stock_ab_pregnant,
             "run_expert",
-            lambda *, host, profile: (events.append(("transition", host, profile)) or 0),
+            lambda *, host, profile: (events.append(("pregnant", host, profile)) or 0),
         )
         patch(em.base, "run_action", lambda fn, **kwargs: fn())
 
@@ -104,7 +104,7 @@ def test_shipped_item4_dispatch_behavior() -> None:
         assert rc == 0
         assert rendered_item4 and rendered_item4[0].get("enabled") is True, rendered_item4
         assert probe_calls >= 2, probe_calls
-        assert events == [("transition", host, "xg040-md")]
+        assert events == [("pregnant", host, "xg040-md")]
     finally:
         if old_host is None:
             os.environ.pop("NOKIA_ROUTER_IP", None)

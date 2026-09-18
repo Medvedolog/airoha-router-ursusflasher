@@ -19,6 +19,7 @@ import mf_runtime_install
 import one_key_multi
 import runtime_kit
 import stock_ab_transition
+import stock_ab_pregnant
 import stock_bootarea_restore
 import stock_slot_uart
 import uart_bootarea_restore
@@ -316,13 +317,13 @@ def main() -> int:
         if number == 4:
             profile = base._transition_profile(state)
             if profile not in ("xg040-md", "xg040-mf"):
-                base.ui.status(tr("СТОП", "STOP"), tr("Vanilla TRANSITION доступен только из подтверждённой Nokia stock MD/MF.", "Vanilla TRANSITION is available only from confirmed Nokia stock MD/MF."))
+                base.ui.status(tr("СТОП", "STOP"), tr("Vanilla pregnant migration доступна только из подтверждённой Nokia stock MD/MF.", "Vanilla pregnant migration is available only from confirmed Nokia stock MD/MF."))
                 base.ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
             base.network_guidance.show()
             base.ui.section(tr("Перед первым запуском на stock Nokia", "Before first run on Nokia stock"), style="amber2")
             base.ui.note(tr("На включённом роутере удерживайте Reset не менее 30 секунд, отпустите и дождитесь полной загрузки stock Web UI.", "With the router powered on, hold Reset for at least 30 seconds, release it, and wait for the stock Web UI to boot fully."))
-            base.run_action(lambda: stock_ab_transition.run_expert(host=host, profile=profile), write_may_happen=True)
+            base.run_action(lambda: stock_ab_pregnant.run_expert(host=host, profile=profile), write_may_happen=True)
             continue
 
         if number == 13:
