@@ -13,6 +13,7 @@ on:
       - 'fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb'
       - 'config/UNAMEONE_2026-09-16_PAYLOADS.json'
       - 'config/VANILLA_BOOT_CHAIN_PROFILES.json'
+      - 'docs/HW_TEST_ITEM4_RU.md'
       - 'openwrt/pregnant-overlay/**'
       - 'ursusflasher/src/expert.py'
       - 'ursusflasher/src/stock_ab_pregnant.py'
