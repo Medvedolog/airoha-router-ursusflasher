@@ -504,3 +504,32 @@ Known CLI network ownership problem (`ping`/`wget`/`tftpboot`/`dhcp` проти�
 - `ursusstockslot master` enforces guard internally.
 - Never claim CI PASS as HW PASS.
 - Preserve Fudan/FMSH hardware support in final MD Vanilla U-Boot provenance.
+
+
+## 18. Payload provenance update — UnameOne Edition 2026-09-16
+
+Для текущего полного Vanilla migration test нормативно разделяются:
+
+```text
+transition runtime
+    = актуальный OpenWrt initramfs + Ursus/Medve autonomous stage2
+
+production child
+    = pinned UnameOne Edition 2026-09-16 UBI sysupgrade
+```
+
+Production child является единым source-of-truth для соответствующего профиля и должен переиспользоваться в EXPERT item 1, ONE-CLICK и EXPERT item 4. Метаданные и SHA закреплены в `config/UNAMEONE_2026-09-16_PAYLOADS.json`.
+
+Для item 4 использовать UBI sysupgrade ITB **byte-for-byte**:
+- XG-040G-MD: SHA256 `9b1f0899ca4ef610f6d87e8572d369adb420f104bda667556e8a0b5979f066dd`;
+- XG-040G-MF: SHA256 `21dcf4c6ca64ea0c5bc3d601e4a8f99a3f002371b873f399f622cbd9223fd1d1`.
+
+Обычные `.bin` из той же пары являются OpenWrt sysupgrade tar, а не factory images.
+
+Автоматическое обновление transient initramfs base до более свежего snapshot не даёт права автоматически заменить production child. Смена pinned production payload требует явного обновления manifest/provenance.
+
+Оператор решил не делать отдельный boot-only intermediate kit: следующий hardware test должен использовать полный autonomous migration path. Это не отменяет automatic preflight, rollback evidence/guard, readback, identity preservation и BL2-LAST contract.
+
+Build implementation должна использовать proven MedveFlasher-style FIT/newc injection либо эквивалентно доказанный механизм. OpenWrt ImageBuilder `make image` не считается источником требуемого initramfs ITB, поскольку текущий CI эксперимент не получил такой artifact.
+
+Первый успешный CI полного builder не является HW PASS. CI PASS объявляется только после проверки exact run exact SHA; hardware status присваивается отдельно по UART/board evidence.
