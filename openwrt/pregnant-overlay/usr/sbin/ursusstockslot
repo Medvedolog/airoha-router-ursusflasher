@@ -108,7 +108,7 @@ status() {
 write_target() {
     TARGET=$1
     case "$TARGET" in master) value=0;; slave) value=1;; *) exit 2;; esac
-    # Guard lives here, not in a caller. There is deliberately no --force path.
+    # Guard lives here, not in a caller. There is deliberately no public guard-bypass path.
     probe_pristine
     fidx="$(require_geom flag 00040000 00020000)"
     dev="/dev/mtd${fidx}"
