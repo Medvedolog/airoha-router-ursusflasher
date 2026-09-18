@@ -50,7 +50,10 @@ def main()->int:
     names={"runtime":"runtime.itb","production":str(prod_spec["filename"]),"fip":"vanilla-bl31-uboot.fip","preloader":"vanilla-preloader.bin"}
     sources={"runtime":ns.runtime,"production":ns.production,"fip":ns.fip,"preloader":ns.preloader}
     metas={"runtime":runtime,"production":prod,"fip":fip,"preloader":preloader}
-    for role,source in sources.items(): shutil.copyfile(source,out/names[role])
+    for role,source in sources.items():
+        destination=out/names[role]
+        if source.resolve()!=destination.resolve():
+            shutil.copyfile(source,destination)
     commit=ns.source_commit
     if not commit:
         try: commit=subprocess.check_output(["git","-C",str(ROOT),"rev-parse","HEAD"],text=True).strip()
