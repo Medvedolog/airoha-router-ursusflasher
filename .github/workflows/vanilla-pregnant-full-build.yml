@@ -170,3 +170,14 @@ jobs:
             work/staging/UrsusFlasher-VANILLA-PREGNANT-FULL-${{ github.sha }}.zip.sha256
           if-no-files-found: error
           retention-days: 14
+      - name: Require exact full migration artifact
+        if: always()
+        run: |
+          set -euo pipefail
+          test "${{ steps.prod.outputs.ready }}" = 1 || {
+            echo "FULL_BUILD_INCOMPLETE: exact pinned UnameOne 2026-09-16 MD/MF inputs were not available to this runner." >&2
+            exit 1
+          }
+          test -s "work/staging/UrsusFlasher-VANILLA-PREGNANT-FULL-$GITHUB_SHA.zip"
+          test -s "work/staging/UrsusFlasher-VANILLA-PREGNANT-FULL-$GITHUB_SHA.zip.sha256"
+          echo "FULL_BUILD_ARTIFACT_GATE=PASS sha=$GITHUB_SHA"
