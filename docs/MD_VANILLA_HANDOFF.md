@@ -541,3 +541,125 @@ marker absent + anything else = rollback denied
 ursusstockslot master enforces guard internally
 CI PASS != HW PASS
 ```
+
+
+---
+
+## 19. Session update — 2026-09-18 / UnameOne production payload + full-build direction
+
+Live branch HEAD observed before this documentation update:
+
+`cf4837a41b9554855a09a8449b21fd11d41b0135` — `ci: fetch current Vanilla initramfs bases`.
+
+Exact GitHub Actions run for that SHA:
+
+`35325588999` / **Vanilla initramfs base fetch** — CI PASS. This proves only current MD/MF initramfs base retrieval; it is **not** a complete installer build and **not** HW PASS.
+
+### Operator decision: no boot-only intermediate build
+
+The operator has UART available and explicitly requested to stop spending iterations on a separate boot-only acceptance payload.
+
+Next test kit must therefore be the **full pregnant migration variant**:
+
+```text
+stock Nokia
+-> full backup/preflight
+-> ONE meaningful y/N
+-> stock-compatible SLOT2 pregnant Linux
+-> selector/readback
+-> reboot
+-> autonomous stage2
+-> canonical UBI migration
+-> production UnameOne sysupgrade
+-> Vanilla FIP
+-> identity restore
+-> BL2 LAST
+-> final readback
+-> reboot into production
+```
+
+Rollback/evidence guards from sections 10–14 remain mandatory. Removing the boot-only iteration does **not** remove automatic safety checks.
+
+### UnameOne Edition 2026-09-16 is the production source-of-truth
+
+The operator supplied four matching images. Their metadata is pinned in:
+
+`config/UNAMEONE_2026-09-16_PAYLOADS.json`
+
+Pinned metadata commit:
+
+`83fc80a5ae4b3a7de42e22228d47b1a253676df4`
+
+Production payload policy:
+
+```text
+EXPERT item 1
+ONE-CLICK
+EXPERT item 4 pregnant migration
+        |
+        +--> one common UnameOne 2026-09-16 production set
+```
+
+MD:
+- plain stock-layout sysupgrade tar: SHA256 `1a0abfed83c52c55d60a3ef70c5df92c960fe3cc961bd2ca734e6d1749797a8d`
+- UBI sysupgrade ITB used as the pregnant payload's production child: SHA256 `9b1f0899ca4ef610f6d87e8572d369adb420f104bda667556e8a0b5979f066dd`
+
+MF:
+- plain stock-layout sysupgrade tar: SHA256 `d988d6f47d69e7264bb7a0d81392c3fdc3bca163075066ee0e0b3f971abf8cbf`
+- UBI sysupgrade ITB used as the pregnant payload's production child: SHA256 `21dcf4c6ca64ea0c5bc3d601e4a8f99a3f002371b873f399f622cbd9223fd1d1`
+
+All four identify Linux 6.18.52 / matching MD or MF board profiles. The `.bin` inputs are OpenWrt sysupgrade tar images, **not factory images**.
+
+The UBI ITB must be carried **byte-for-byte** in item 4 and verified by pinned SHA before the destructive boundary. Do not silently replace it with whatever snapshot happens to be current.
+
+### Runtime vs child firmware
+
+Keep these two concepts separate:
+
+```text
+pregnant runtime = current OpenWrt initramfs + Ursus/Medve stage2
+production child = pinned UnameOne 2026-09-16 UBI sysupgrade
+```
+
+The current OpenWrt snapshot may be used as the transient Linux/initramfs base. It must not silently change the pinned production child.
+
+### Build plumbing
+
+The earlier ImageBuilder experiment proved that `make image` does not emit the required initramfs ITB for this path. Do not return to that approach.
+
+Use the already proven MedveFlasher-style FIT/initramfs surgery:
+- obtain current official MD/MF initramfs FIT;
+- unpack kernel/LZMA + linked newc initramfs;
+- inject Ursus stage2, `ursusstockslot`, SSH/status/log and required manifests/tools;
+- rebuild newc without corrupting bytes outside the linked initramfs window;
+- rebuild compressed kernel/FIT and hashes;
+- create the stock-compatible SLOT2 wrapper;
+- carry the pinned UnameOne UBI sysupgrade as the production child/bundle component rather than selecting a new production snapshot.
+
+### MedveFlasher reuse boundary
+
+Reuse proven mechanics, not the old failure topology:
+- autonomous autoflash/stage2;
+- UBI migration;
+- identity preservation/restore;
+- SSH monitoring/reconnect;
+- status/log;
+- production boot detection.
+
+Do **not** recreate the old MedveFlasher condition where recovery image and production write target are the same object. SLOT1 remains the pre-destructive fallback, SLOT2 is installer, production writes target canonical OpenWrt layout.
+
+### Immediate next work
+
+1. Implement the full MD/MF pregnant builder using current initramfs bases.
+2. Inject autonomous stage2 and guarded Linux `ursusstockslot`.
+3. Embed/reference the exact pinned UnameOne UBI child for the selected profile and verify SHA before writes.
+4. Reuse proven MedveFlasher UBI/identity mechanics, adapted to Ursus state/readback rules.
+5. Preserve Fudan/FMSH-capable final MD boot-chain provenance.
+6. Keep FIP/profile artifacts explicit; never infer MD/MF offsets from the other profile.
+7. BL2/preloader is written LAST.
+8. Produce a dedicated GitHub Actions workflow/artifact for the full MD+MF test kit.
+9. Verify the **exact workflow run against the exact resulting SHA** before calling CI PASS.
+10. Give the operator a direct ZIP link after success.
+11. First full hardware run is still HW TEST; CI success must not be described as HW success.
+
+TRANSITION2 U-Boot network/switch investigation remains frozen for Vanilla unless explicitly reopened by the operator.
