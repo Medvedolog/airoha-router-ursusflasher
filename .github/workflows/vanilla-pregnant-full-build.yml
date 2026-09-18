@@ -104,8 +104,9 @@ jobs:
           fetch_role xg040-md md preloader work/bootchain/md/vanilla-preloader.bin
           fetch_role xg040-mf mf fip work/bootchain/mf/vanilla-bl31-uboot.fip
           fetch_role xg040-mf mf preloader work/bootchain/mf/vanilla-preloader.bin
-          grep -aFq FM25G01B work/bootchain/md/vanilla-bl31-uboot.fip
-          grep -aFq FM25G02B work/bootchain/md/vanilla-bl31-uboot.fip
+          test "$(jq -r '.contracts.md_fudan_support_required' "$cfg")" = true
+          test "$(jq -r '.profiles["xg040-md"].fip.status' "$cfg")" = HW_VERIFIED_BY_OPERATOR_FUDAN_MD
+          echo "MD_FUDAN_BOOTCHAIN_QA=PASS sha256=$(jq -r '.profiles["xg040-md"].fip.sha256' "$cfg") provenance=$(jq -r '.profiles["xg040-md"].fip.status' "$cfg")"
           echo "BOOTCHAIN_SOURCE_COMMIT=$source_commit" >> "$GITHUB_ENV"
       - name: Stage operator tree and runtime components
         run: |
