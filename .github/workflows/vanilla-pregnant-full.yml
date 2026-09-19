@@ -166,6 +166,8 @@ jobs:
           mkdir -p "$KIT"
           cp START_EXPERT.cmd START_EXPERT.sh VERSION README.md "$KIT/"
           cp -a config fw payloads ursusflasher docs "$KIT/"
+          mkdir -p "$KIT/openwrt"
+          cp -a openwrt/pregnant-overlay "$KIT/openwrt/"
           cp work/PREGNANT_PAYLOAD_SHA256SUMS "$KIT/"
           cat > "$KIT/READ-ME-FIRST.txt" <<EOF
           UrsusFlasher EXPERT item 4 - FULL VANILLA PREGNANT MIGRATION - MD/MF UART TEST KIT
@@ -193,6 +195,10 @@ jobs:
           find "$KIT" -type d -name __pycache__ -prune -exec rm -rf {} + || true
           find "$KIT" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
           git rev-parse HEAD > "$KIT/URSUSFLASHER_COMMIT.txt"
+          (cd "$KIT" && python3 ursusflasher/tools/selftest_pregnant_item4.py)
+          (cd "$KIT" && sh -n openwrt/pregnant-overlay/usr/sbin/ursus-vanilla-stage2 && sh -n openwrt/pregnant-overlay/usr/sbin/ursusstockslot)
+          find "$KIT" -type d -name __pycache__ -prune -exec rm -rf {} + || true
+          find "$KIT" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
           (cd "$KIT" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
           python3 - "$KIT" "$OUT" <<'PY'
           import pathlib, sys, zipfile
