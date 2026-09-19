@@ -416,15 +416,20 @@ def patch_fit(blob: bytes, overlay_root: Path, family: str):
     verify_raw = lzma.decompress(verify_kernel.get("data"), format=lzma.FORMAT_ALONE)
     if len(verify_raw) != len(raw):
         raise AssertionError("linked Image raw size changed")
-    names = {entry.name for entry in find_archive(verify_raw)[2]}
+    verify_entries = find_archive(verify_raw)[2]
+    by_name = {entry.name: entry for entry in verify_entries}
     for required in (
         "usr/sbin/ursus-vanilla-stage2",
         "usr/sbin/ursusstockslot",
         "etc/ursus/PREGNANT_RUNTIME",
         "etc/init.d/ursus-pregnant",
+        "etc/rc.d/S98ursus-pregnant",
     ):
-        if required not in names:
+        if required not in by_name:
             raise AssertionError(f"injected path missing: {required}")
+    init_link = by_name["etc/rc.d/S98ursus-pregnant"]
+    if not stat.S_ISLNK(init_link.vals[1]) or init_link.data != b"../init.d/ursus-pregnant":
+        raise AssertionError("pregnant stage2 rc.d link is not a symlink to ../init.d/ursus-pregnant")
     return out, {
         "family": family,
         "raw_size": len(raw),

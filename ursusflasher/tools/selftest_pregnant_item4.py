@@ -36,9 +36,6 @@ def test_slot_layout_contract():
 def test_runtime_safety_contract():
     stage2=(ROOT/"openwrt"/"pregnant-overlay"/"usr"/"sbin"/"ursus-vanilla-stage2").read_text()
     slot=(ROOT/"openwrt"/"pregnant-overlay"/"usr"/"sbin"/"ursusstockslot").read_text()
-    init_link=ROOT/"openwrt"/"pregnant-overlay"/"etc"/"rc.d"/"S98ursus-pregnant"
-    assert init_link.is_symlink()
-    assert os.readlink(init_link)=="../init.d/ursus-pregnant"
     for forbidden in ("CONFIRM FORMAT AND FLASH","YES I UNDERSTAND","--force"):
         assert forbidden not in stage2 and forbidden not in slot
     start=slot.index("write_target()"); end=slot.index('case "${1:-status}"')
