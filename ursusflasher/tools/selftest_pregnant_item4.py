@@ -54,6 +54,20 @@ def test_md_uses_hw_proven_stock_wrapper():
     assert 'files["handoff"]' in pregnant
     assert "pregnant-handoff.linuximg" in pregnant
 
+def test_md_handoff_is_networkless_and_returns_to_stock_ab():
+    cfg=(ROOT/"ursusboot"/"configs"/"ursusboot-pregnant-handoff.cfg").read_text(encoding="utf-8")
+    patch=(ROOT/"ursusboot"/"patches"/"191-md-pregnant-handoff.patch").read_text(encoding="utf-8")
+    build=(ROOT/"ursusboot"/"scripts"/"build_md_pregnant_handoff.sh").read_text(encoding="utf-8")
+    for sym in ("CONFIG_NET_LWIP","CONFIG_CMD_PING","CONFIG_CMD_DHCP","CONFIG_CMD_WGET"):
+        assert f"# {sym} is not set" in cfg
+    assert "CONFIG_CMD_RESET=y" in cfg
+    assert 'run_command("bootm 0x92000000", 0)' in patch
+    assert 'run_command("reset", 0)' in patch
+    assert "resetting for stock A/B retry" in patch
+    assert "WEB=DISABLED" in build
+    assert "NETWORK=DISABLED" in build
+    assert "BOOTM_RETURN=RESET_TO_STOCK_AB" in build
+
 def test_pinned_unameone_manifest():
     data=json.loads((ROOT/"config"/"UNAMEONE_2026-09-16_PAYLOADS.json").read_text())
     assert data["policy"]["single_production_payload_source"] is True
@@ -73,5 +87,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_md_uses_hw_proven_stock_wrapper(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
