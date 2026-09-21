@@ -133,6 +133,8 @@ jobs:
           set -euo pipefail
           ART=work/staging/operator; mkdir -p "$ART"; cp -a kit/START_EXPERT.cmd kit/START_ONECLICK.cmd kit/VERSION kit/README.md "$ART/"; cp -a kit/config kit/fw kit/payloads kit/ursusflasher kit/docs "$ART/"
           mkdir -p "$ART/openwrt"; cp -a kit/openwrt/pregnant-overlay "$ART/openwrt/"
+          mkdir -p "$ART/ursusboot/configs"
+          cp kit/ursusboot/configs/ursusboot-pregnant-handoff.cfg "$ART/ursusboot/configs/"
           rm -rf "$ART/payloads/vanilla-pregnant"; mkdir -p "$ART/payloads/vanilla-pregnant/md" "$ART/payloads/vanilla-pregnant/mf"
           cp work/runtime/md-runtime.itb "$ART/payloads/vanilla-pregnant/md/runtime.itb"; cp work/bootchain/md/vanilla-bl31-uboot.fip "$ART/payloads/vanilla-pregnant/md/vanilla-bl31-uboot.fip"; cp work/bootchain/md/vanilla-preloader.bin "$ART/payloads/vanilla-pregnant/md/vanilla-preloader.bin"
           cp kit/work/md-pregnant-handoff/out/ursusboot-md-0.1.0-alpha5-UBIUX1-PREGNANT1.linuximg "$ART/payloads/vanilla-pregnant/md/pregnant-handoff.linuximg"
