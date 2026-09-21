@@ -16,6 +16,7 @@ on:
       - '.github/workflows/vanilla-pregnant-full-build.yml'
       - 'openwrt/pregnant-overlay/**'
       - 'ursusflasher/src/stock_ab_pregnant.py'
+      - 'ursusflasher/src/one_key_multi.py'
       - 'ursusflasher/src/stock_fit_initramfs.py'
       - 'ursusflasher/src/expert.py'
       - 'ursusflasher/src/expert_multi.py'
@@ -44,7 +45,7 @@ jobs:
         working-directory: kit
         run: |
           set -euo pipefail
-          python3 -m py_compile ursusflasher/src/stock_ab_pregnant.py ursusflasher/src/stock_fit_initramfs.py ursusflasher/tools/build_pregnant_runtime.py ursusflasher/tools/repack_vanilla_fip.py ursusflasher/tools/assemble_pregnant_payload.py ursusflasher/tools/selftest_pregnant_item4.py
+          python3 -m py_compile ursusflasher/src/stock_ab_pregnant.py ursusflasher/src/one_key_multi.py ursusflasher/src/stock_fit_initramfs.py ursusflasher/tools/build_pregnant_runtime.py ursusflasher/tools/repack_vanilla_fip.py ursusflasher/tools/assemble_pregnant_payload.py ursusflasher/tools/selftest_pregnant_item4.py
           python3 ursusflasher/tools/selftest_pregnant_item4.py
           sh -n openwrt/pregnant-overlay/usr/sbin/ursus-vanilla-stage2
           sh -n openwrt/pregnant-overlay/usr/sbin/ursusstockslot
