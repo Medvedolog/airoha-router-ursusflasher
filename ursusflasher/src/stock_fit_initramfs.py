@@ -4,6 +4,8 @@ from __future__ import annotations
 import hashlib
 import struct
 
+import stock_fit_wrapper as sfw
+
 FDT_MAGIC = 0xD00DFEED
 FIP_MAGIC = bytes.fromhex('010064aa78563412')
 
@@ -199,6 +201,8 @@ def build_installer_slot(stock_slot: bytes, installer_fit: bytes, *, slot_size: 
     }
 
 
+PREGNANT_RUNTIME_OFF = 0x00600000
+PREGNANT_RUNTIME_WINDOW = 0x00900000
 PREGNANT_META_OFF = 0x00F00000
 PREGNANT_META_SIZE = 0x00020000
 PREGNANT_PRODUCTION_OFF = 0x01000000
@@ -213,6 +217,171 @@ def _pregnant_overlap(a_off: int, a_size: int, b_off: int, b_size: int) -> bool:
     return max(a_off, b_off) < min(a_off + a_size, b_off + b_size)
 
 
+def _patch_md_handoff(handoff: bytes, *, runtime_fit_off: int, runtime_fit_size: int) -> bytes:
+    marker = b"URSPREG1" + struct.pack("<II", 0xFEEDFACE, 0xCAFEF00D)
+    if handoff.count(marker) != 1:
+        raise RuntimeError("MD pregnant handoff placeholder marker is missing or ambiguous")
+    sfw.validate_linux_image(handoff)
+    out = bytearray(handoff)
+    pos = out.index(marker)
+    struct.pack_into("<II", out, pos + 8, runtime_fit_off, runtime_fit_size)
+    sfw.validate_linux_image(bytes(out))
+    return bytes(out)
+
+
+def _build_md_proven_pregnant_slot(
+    stock_slot: bytes,
+    handoff_linux: bytes,
+    runtime_fit: bytes,
+    production_itb: bytes,
+    vanilla_fip: bytes,
+    vanilla_preloader: bytes,
+    *,
+    slot_size: int,
+    evidence: dict,
+) -> tuple[bytes, dict]:
+    """Build MD SLOT2 on the hardware-proven stock tcboot wrapper.
+
+    tcboot sees the original Nokia FIP/HDR2/FIT topology and original fdt@1.
+    Only kernel@1 data/compression/SHA1 follow the proven TRANSITION2 handoff.
+    The stock filesystem@1 data span is a carrier only; hardware logs prove
+    tcboot does not load it before starting the handoff kernel.
+    """
+    nt_uuid = bytes.fromhex("d6d0eea7fcead54b97829934f234b6e4")
+    nt_off, nt_size = sfw.fip_nt_fw(stock_slot, slot_size=slot_size, nt_fw_uuid=nt_uuid)
+    props, fit_meta = sfw.stock_fit_contract(stock_slot, nt_off, nt_size)
+    fit_off = int(fit_meta["fit_offset"])
+    fs_off, fs_size = props["/images/filesystem@1/data"]
+    fs_end = fs_off + fs_size
+
+    reserved = [
+        ("runtime", PREGNANT_RUNTIME_OFF, PREGNANT_RUNTIME_WINDOW),
+        ("manifest", PREGNANT_META_OFF, PREGNANT_META_SIZE),
+        ("production", PREGNANT_PRODUCTION_OFF, PREGNANT_PRODUCTION_WINDOW),
+        ("fip", PREGNANT_FIP_OFF, PREGNANT_FIP_WINDOW),
+        ("preloader", PREGNANT_PRELOADER_OFF, PREGNANT_PRELOADER_WINDOW),
+    ]
+    for name, off, size in reserved:
+        if off % 0x20000 or size % 0x20000 or not (fs_off <= off < off + size <= fs_end):
+            raise RuntimeError(
+                f"MD pregnant carrier region {name} is outside stock filesystem@1 data: "
+                f"region={off:#x}+{size:#x} filesystem={fs_off:#x}..{fs_end:#x}"
+            )
+    for i, (name_a, off_a, size_a) in enumerate(reserved):
+        for name_b, off_b, size_b in reserved[i + 1:]:
+            if _pregnant_overlap(off_a, size_a, off_b, size_b):
+                raise RuntimeError(f"MD pregnant carrier regions overlap: {name_a}/{name_b}")
+
+    if len(runtime_fit) > PREGNANT_RUNTIME_WINDOW:
+        raise RuntimeError("pregnant runtime exceeds MD filesystem carrier window")
+    runtime_ram_offset = PREGNANT_RUNTIME_OFF - fit_off
+    if runtime_ram_offset < 0 or runtime_ram_offset + len(runtime_fit) > int(fit_meta["total_size"]):
+        raise RuntimeError("pregnant runtime is outside tcboot-loaded stock FIT memory")
+    patched_handoff = _patch_md_handoff(
+        handoff_linux,
+        runtime_fit_off=runtime_ram_offset,
+        runtime_fit_size=len(runtime_fit),
+    )
+    base, wrapper = sfw.build_transition_slot(
+        stock_slot,
+        patched_handoff,
+        slot_size=slot_size,
+        nt_fw_uuid=nt_uuid,
+    )
+
+    fields = [
+        "URSUS_PREGNANT_V1",
+        f"FAMILY={evidence['family']}",
+        f"PROFILE={evidence['profile']}",
+        f"SLOT_SIZE=0x{slot_size:08x}",
+        f"META_SLOT_OFF=0x{PREGNANT_META_OFF:08x}",
+        f"RUNTIME_FIT_SLOT_OFF=0x{PREGNANT_RUNTIME_OFF:08x}",
+        f"RUNTIME_FIT_SIZE={len(runtime_fit)}",
+        f"RUNTIME_FIT_SHA256={sha256_bytes(runtime_fit)}",
+        f"PRODUCTION_SLOT_OFF=0x{PREGNANT_PRODUCTION_OFF:08x}",
+        f"PRODUCTION_SIZE={len(production_itb)}",
+        f"PRODUCTION_SHA256={sha256_bytes(production_itb)}",
+        f"FIP_SLOT_OFF=0x{PREGNANT_FIP_OFF:08x}",
+        f"FIP_SIZE={len(vanilla_fip)}",
+        f"FIP_SHA256={sha256_bytes(vanilla_fip)}",
+        f"PRELOADER_SLOT_OFF=0x{PREGNANT_PRELOADER_OFF:08x}",
+        f"PRELOADER_SIZE={len(vanilla_preloader)}",
+        f"PRELOADER_SHA256={sha256_bytes(vanilla_preloader)}",
+        f"STOCK_BOOTLOADER_SHA256={str(evidence['bootloader_sha256']).lower()}",
+        f"STOCK_MASTER_SHA256={str(evidence['master_sha256']).lower()}",
+        f"STOCK_FLAGBACK_SHA256={str(evidence['flagback_sha256']).lower()}",
+        f"STOCK_FLAG_TAIL_SHA256={str(evidence['flag_tail_sha256']).lower()}",
+        f"STOCK_BOSA_SHA256={str(evidence['bosa_sha256']).lower()}",
+        f"STOCK_RI_SHA256={str(evidence['ri_sha256']).lower()}",
+    ]
+    body = ("\n".join(fields) + "\n").encode("ascii")
+    manifest_sha = sha256_bytes(body)
+    manifest = body + f"META_SHA256={manifest_sha}\n".encode("ascii")
+    if len(manifest) > PREGNANT_META_SIZE:
+        raise RuntimeError("pregnant manifest exceeds reserved eraseblock")
+
+    out = bytearray(base)
+    out[PREGNANT_RUNTIME_OFF:PREGNANT_RUNTIME_OFF + PREGNANT_RUNTIME_WINDOW] = (
+        runtime_fit + b"\0" * (PREGNANT_RUNTIME_WINDOW - len(runtime_fit))
+    )
+    out[PREGNANT_META_OFF:PREGNANT_META_OFF + PREGNANT_META_SIZE] = (
+        manifest + b"\0" * (PREGNANT_META_SIZE - len(manifest))
+    )
+    out[PREGNANT_PRODUCTION_OFF:PREGNANT_PRODUCTION_OFF + PREGNANT_PRODUCTION_WINDOW] = (
+        production_itb + b"\0" * (PREGNANT_PRODUCTION_WINDOW - len(production_itb))
+    )
+    out[PREGNANT_FIP_OFF:PREGNANT_FIP_OFF + PREGNANT_FIP_WINDOW] = (
+        vanilla_fip + b"\0" * (PREGNANT_FIP_WINDOW - len(vanilla_fip))
+    )
+    out[PREGNANT_PRELOADER_OFF:PREGNANT_PRELOADER_OFF + PREGNANT_PRELOADER_WINDOW] = (
+        vanilla_preloader + b"\0" * (PREGNANT_PRELOADER_WINDOW - len(vanilla_preloader))
+    )
+
+    # After the proven kernel wrapper, only the declared filesystem carrier
+    # windows may differ. Stock FIP/HDR2, FIT structure and fdt@1 remain exact.
+    cursor = 0
+    for _name, begin, size in sorted(reserved, key=lambda row: row[1]):
+        if bytes(out[cursor:begin]) != base[cursor:begin]:
+            raise RuntimeError("unexpected MD pregnant byte change outside filesystem carrier")
+        cursor = begin + size
+    if bytes(out[cursor:]) != base[cursor:]:
+        raise RuntimeError("unexpected MD pregnant byte change after filesystem carrier")
+
+    fdt_off, fdt_size = props["/images/fdt@1/data"]
+    if bytes(out[fdt_off:fdt_off + fdt_size]) != stock_slot[fdt_off:fdt_off + fdt_size]:
+        raise RuntimeError("stock tcboot fdt@1 changed in MD pregnant wrapper")
+
+    meta = dict(wrapper)
+    meta.update({
+        "wrapper_contract": "STOCK_FIP_HDR2_PROVEN_HANDOFF_FILESYSTEM_CARRIER_V1",
+        "candidate_sha256": sha256_bytes(bytes(out)),
+        "runtime_offset": PREGNANT_RUNTIME_OFF,
+        "runtime_size": len(runtime_fit),
+        "runtime_sha256": sha256_bytes(runtime_fit),
+        "runtime_ram_source_offset": runtime_ram_offset,
+        "runtime_ram_destination": "0x92000000",
+        "manifest_offset": PREGNANT_META_OFF,
+        "manifest_size": len(manifest),
+        "manifest_sha256": manifest_sha,
+        "production_offset": PREGNANT_PRODUCTION_OFF,
+        "production_size": len(production_itb),
+        "production_sha256": sha256_bytes(production_itb),
+        "fip_offset": PREGNANT_FIP_OFF,
+        "fip_size": len(vanilla_fip),
+        "fip_sha256": sha256_bytes(vanilla_fip),
+        "preloader_offset": PREGNANT_PRELOADER_OFF,
+        "preloader_size": len(vanilla_preloader),
+        "preloader_sha256": sha256_bytes(vanilla_preloader),
+        "stock_tcboot_fdt_byte_identical": True,
+        "stock_fit_topology_preserved": True,
+        "filesystem_node_preserved_as_carrier": True,
+        "handoff_linux_image_size": len(patched_handoff),
+        "destructive_stage2_embedded": True,
+        "stock_evidence_embedded": True,
+    })
+    return bytes(out), meta
+
+
 def build_pregnant_slot(
     stock_slot: bytes,
     runtime_fit: bytes,
@@ -222,15 +391,31 @@ def build_pregnant_slot(
     *,
     slot_size: int,
     evidence: dict,
+    handoff_linux: bytes | None = None,
 ) -> tuple[bytes, dict]:
     """Build one stock-bootable SLOT2 carrying the complete autonomous migration.
 
-    The transient UBI-recovery FIT is the only object consumed by tcboot.  Pinned
+    MD uses the hardware-proven stock FIT -> Linux Image shim -> transient
+    UrsusBoot handoff. MF retains the generic path until its stock wrapper is
+    proven independently on hardware.
     production/FIP/preloader children are stored at erase-aligned fixed offsets
     in the same stock SLOT2 and are read back by Linux through the nsb_slave
     alias before any destructive operation.
     """
     runtime = source_fit_contract(runtime_fit)
+    if str(evidence.get("family")) == "md":
+        if handoff_linux is None:
+            raise RuntimeError("MD pregnant payload is missing the proven stock handoff Linux Image")
+        return _build_md_proven_pregnant_slot(
+            stock_slot,
+            handoff_linux,
+            runtime_fit,
+            production_itb,
+            vanilla_fip,
+            vanilla_preloader,
+            slot_size=slot_size,
+            evidence=evidence,
+        )
     if len(runtime_fit) != int(runtime["fit_total_size"]):
         raise RuntimeError("pregnant runtime must contain exactly one FIT with no untracked tail")
     if len(production_itb) < 40 or struct.unpack_from(">I", production_itb, 0)[0] != FDT_MAGIC:
