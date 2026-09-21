@@ -54,7 +54,7 @@ grep -q '^CONFIG_ENV_IS_NOWHERE=y$' .config || { echo 'PREGNANT1: ENV_IS_NOWHERE
 grep -q '^CONFIG_TEXT_BASE=0x81e00000$' .config || { echo 'PREGNANT1: unexpected TEXT_BASE' >&2; exit 1; }
 grep -q '^CONFIG_PSCI_RESET=y$' .config || { echo 'PREGNANT1: PSCI reset backend missing' >&2; exit 1; }
 grep -q '^CONFIG_RESET_AIROHA=y$' .config || { echo 'PREGNANT1: Airoha reset backend missing' >&2; exit 1; }
-for sym in CONFIG_NET_LWIP CONFIG_CMD_PING CONFIG_CMD_DHCP CONFIG_CMD_DNS CONFIG_CMD_SNTP CONFIG_CMD_TFTPBOOT CONFIG_CMD_WGET CONFIG_CMD_MTD; do
+for sym in CONFIG_CMD_PING CONFIG_CMD_DHCP CONFIG_CMD_DNS CONFIG_CMD_SNTP CONFIG_CMD_TFTPBOOT CONFIG_CMD_WGET CONFIG_CMD_MTD; do
     if grep -q "^${sym}=y$" .config; then
         echo "PREGNANT1: forbidden transient handoff capability ${sym}=y" >&2
         exit 1
@@ -62,6 +62,7 @@ for sym in CONFIG_NET_LWIP CONFIG_CMD_PING CONFIG_CMD_DHCP CONFIG_CMD_DNS CONFIG
 done
 grep -Fq '#define URSUS_PREGNANT_HANDOFF 1' include/ursus_version.h || { echo 'PREGNANT1 marker missing' >&2; exit 1; }
 grep -Fq 'resetting for stock A/B retry' cmd/ursusdispatch.c || { echo 'PREGNANT1: rollback reset path missing' >&2; exit 1; }
+grep -Fq 'URSUS_PREGNANT_HANDOFF_BEGIN addr=0x92000000' cmd/ursusdispatch.c || { echo 'PREGNANT1: direct handoff path missing' >&2; exit 1; }
 
 make -j"${JOBS:-$(nproc)}"
 
@@ -193,7 +194,7 @@ print('PREGNANT_LINUX_HANDOFF_SHA256='+hashlib.sha256(image).hexdigest())
 PYQA
 
 sha256sum u-boot.bin "$OUT/ursusboot-md-${VERSION}.linuximg" | tee "$OUT/SHA256SUMS"
-printf '%s\n'     "UrsusBoot ${VERSION}"     "MODE=PREGNANT_HANDOFF"     "PERSISTENCE_TARGET=NONE"     "WEB=DISABLED"     "NETWORK=DISABLED"     "BOOTM_RETURN=RESET_TO_STOCK_AB"     "RUNTIME_DEST=${RUNTIME_DEST}"     "STOCK_KERNEL_LOAD=${STOCK_KERNEL_LOAD}"     "TEXT_BASE=${TEXT_BASE}"     "SOURCE_DATE_EPOCH=${RELEASE_EPOCH}" > "$OUT/PREGNANT-HANDOFF-BUILD_INFO.txt"
+printf '%s\n'     "UrsusBoot ${VERSION}"     "MODE=PREGNANT_HANDOFF"     "PERSISTENCE_TARGET=NONE"     "WEB=DISABLED"     "NETWORK_RUNTIME=UNUSED"     "BOOTM_RETURN=RESET_TO_STOCK_AB"     "RUNTIME_DEST=${RUNTIME_DEST}"     "STOCK_KERNEL_LOAD=${STOCK_KERNEL_LOAD}"     "TEXT_BASE=${TEXT_BASE}"     "SOURCE_DATE_EPOCH=${RELEASE_EPOCH}" > "$OUT/PREGNANT-HANDOFF-BUILD_INFO.txt"
 
 echo "MD_PREGNANT_HANDOFF_BUILD=PASS"
 echo "Artifacts: $OUT"
