@@ -1,0 +1,37 @@
+--- a/include/ursus_version.h
++++ b/include/ursus_version.h
+@@ -3,7 +3,13 @@
+ #define __URSUS_VERSION_H
+ 
+ #define URSUS_PRODUCT_NAME "UrsusBoot"
+-#define URSUS_VERSION "0.1.0-alpha5-UBIUX1-TEST61"
++#define URSUS_VERSION "0.1.0-alpha5-UBIUX1-PREGNANT1"
+ #define URSUS_PRODUCT_VERSION URSUS_PRODUCT_NAME " " URSUS_VERSION
++#define URSUS_MODE "PREGNANT_HANDOFF"
++#define URSUS_PERSISTENCE_TARGET "NONE"
++#define URSUS_FINAL_TARGET "VANILLA_OPENWRT"
++#define URSUS_TRANSITION_HANDOFF_ONLY 0
++#define URSUS_TRANSITION_WEB_ONLY 0
++#define URSUS_PREGNANT_HANDOFF 1
+ 
+ #endif
+--- a/.scmversion
++++ b/.scmversion
+@@ -1 +1 @@
+--UrsusBoot-0.1.0-alpha5-UBIUX1-TEST61
++-UrsusBoot-0.1.0-alpha5-UBIUX1-PREGNANT1
+--- a/cmd/ursusdispatch.c
++++ b/cmd/ursusdispatch.c
+@@ -140,6 +140,12 @@ static int do_ursusdispatch(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
+     int ret;
+ 
+     printf("URSUS_DISPATCH_BEGIN\n");
++#if URSUS_PREGNANT_HANDOFF
++    printf("URSUS_PREGNANT_HANDOFF_BEGIN addr=0x92000000\n");
++    ret = run_command("bootm 0x92000000", 0);
++    printf("URSUS_PREGNANT_HANDOFF_FAILED rc=%d\n", ret);
++    return ret;
++#endif
+     printf("URSUS_RESET_POLICY=HELD_AT_BOOT debounce_ms=%lu legacy_hold_ms=%lu\n",
+            URSUS_RESET_BOOT_DEBOUNCE_MS, URSUS_RESET_HOLD_MS);
+     if (ursus_recovery_latched)
