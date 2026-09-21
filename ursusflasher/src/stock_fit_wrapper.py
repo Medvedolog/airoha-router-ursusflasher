@@ -58,8 +58,11 @@ def fit_props(slot: bytes, fit_off: int, nt_size: int) -> tuple[dict[str, tuple[
     magic, total, off_struct, off_strings, _off_mem, version, last_comp, _bootcpu, size_strings, size_struct = hdr
     if magic != 0xD00DFEED or version < 17 or last_comp > version:
         raise RuntimeError("stock inner image is not a supported FIT/FDT")
-    if total != nt_size - 0x100 or fit_off + total > len(slot):
-        raise RuntimeError(f"stock FIT/NT-FW size mismatch: fit={total:#x} nt_payload={nt_size - 0x100:#x}")
+    nt_payload = nt_size - 0x100
+    if total < 40 or total > nt_payload or fit_off + total > len(slot):
+        raise RuntimeError(
+            f"stock FIT range is invalid: fit={total:#x} nt_payload={nt_payload:#x}"
+        )
     struct_start = fit_off + off_struct
     struct_end = struct_start + size_struct
     strings_start = fit_off + off_strings
@@ -122,6 +125,44 @@ def prop(slot: bytes, props: dict[str, tuple[int, int]], key: str) -> bytes:
     return slot[off:off + size]
 
 
+def image_data_range(
+    slot: bytes,
+    props: dict[str, tuple[int, int]],
+    node: str,
+    *,
+    fit_off: int,
+    fit_total: int,
+    nt_end: int,
+) -> tuple[int, int]:
+    base = f"/images/{node}"
+    inline = f"{base}/data"
+    if inline in props:
+        off, size = props[inline]
+    else:
+        size_raw = prop(slot, props, f"{base}/data-size")
+        if len(size_raw) != 4:
+            raise RuntimeError(f"{node} data-size has unexpected length")
+        size = struct.unpack(">I", size_raw)[0]
+        if f"{base}/data-position" in props:
+            pos_raw = prop(slot, props, f"{base}/data-position")
+            if len(pos_raw) != 4:
+                raise RuntimeError(f"{node} data-position has unexpected length")
+            off = fit_off + struct.unpack(">I", pos_raw)[0]
+        elif f"{base}/data-offset" in props:
+            off_raw = prop(slot, props, f"{base}/data-offset")
+            if len(off_raw) != 4:
+                raise RuntimeError(f"{node} data-offset has unexpected length")
+            external_base = (fit_off + fit_total + 3) & ~3
+            off = external_base + struct.unpack(">I", off_raw)[0]
+        else:
+            raise RuntimeError(f"{node} has neither inline data nor external data reference")
+    if size <= 0 or off < fit_off or off + size > nt_end:
+        raise RuntimeError(
+            f"{node} data range is outside stock NT-FW payload: off={off:#x} size={size:#x} nt_end={nt_end:#x}"
+        )
+    return int(off), int(size)
+
+
 def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[dict[str, tuple[int, int]], dict]:
     fit_off = nt_off + 0x100
     props, meta = fit_props(stock_slot, fit_off, nt_size)
@@ -151,9 +192,21 @@ def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[di
     entry = struct.unpack(">I", prop(stock_slot, props, "/images/kernel@1/entry"))[0]
     if load != 0x80088000 or entry != 0x80088000:
         raise RuntimeError(f"unexpected stock kernel load/entry: {load:#x}/{entry:#x}")
-    kernel_len = props["/images/kernel@1/data"][1]
-    fdt_data = prop(stock_slot, props, "/images/fdt@1/data")
-    fs_data = prop(stock_slot, props, "/images/filesystem@1/data")
+    nt_end = nt_off + nt_size
+    kernel_off, kernel_len = image_data_range(
+        stock_slot, props, "kernel@1",
+        fit_off=fit_off, fit_total=meta["total_size"], nt_end=nt_end,
+    )
+    fdt_off, fdt_len = image_data_range(
+        stock_slot, props, "fdt@1",
+        fit_off=fit_off, fit_total=meta["total_size"], nt_end=nt_end,
+    )
+    fs_off, fs_len = image_data_range(
+        stock_slot, props, "filesystem@1",
+        fit_off=fit_off, fit_total=meta["total_size"], nt_end=nt_end,
+    )
+    fdt_data = stock_slot[fdt_off:fdt_off + fdt_len]
+    fs_data = stock_slot[fs_off:fs_off + fs_len]
     if not fdt_data.startswith(bytes.fromhex("d00dfeed")):
         raise RuntimeError("stock fdt@1 data is not an FDT")
     if not fs_data.startswith(b"hsqs"):
@@ -165,9 +218,13 @@ def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[di
     if struct.unpack_from("<I", stock_slot, nt_off + 0x54)[0] != len(fs_data):
         raise RuntimeError("HDR2 filesystem size does not match stock FIT filesystem@1 data")
     meta.update({
+        "kernel_data_offset": kernel_off,
         "kernel_data_size": kernel_len,
+        "filesystem_data_offset": fs_off,
         "filesystem_data_size": len(fs_data),
+        "fdt_data_offset": fdt_off,
         "fdt_data_size": len(fdt_data),
+        "fit_trailing_payload_size": (nt_size - 0x100) - meta["total_size"],
         "kernel_load": load,
         "kernel_entry": entry,
         "stock_kernel_compression": stock_compression.rstrip(b"\0").decode("ascii"),
@@ -181,7 +238,8 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
     if stock_slot[nt_off:nt_off + 4] != b"HDR2":
         raise RuntimeError(f"stock NT-FW does not start with HDR2 at {nt_off:#x}")
     props, fit_meta = stock_fit_contract(stock_slot, nt_off, nt_size)
-    kernel_off, kernel_size = props["/images/kernel@1/data"]
+    kernel_off = fit_meta["kernel_data_offset"]
+    kernel_size = fit_meta["kernel_data_size"]
     if len(linux_image) > kernel_size:
         raise RuntimeError(f"TRANSITION Linux Image does not fit stock kernel@1: {len(linux_image)} > {kernel_size}")
 
@@ -199,10 +257,14 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
 
     if bytes(out[:nt_off + 0x100]) != stock_slot[:nt_off + 0x100]:
         raise RuntimeError("stock FIP/HDR2 preservation invariant failed")
-    for key in ("/images/fdt@1/data", "/images/filesystem@1/data"):
-        off, size = props[key]
+    for label, off_key, size_key in (
+        ("fdt@1", "fdt_data_offset", "fdt_data_size"),
+        ("filesystem@1", "filesystem_data_offset", "filesystem_data_size"),
+    ):
+        off = fit_meta[off_key]
+        size = fit_meta[size_key]
         if bytes(out[off:off + size]) != stock_slot[off:off + size]:
-            raise RuntimeError(f"stock FIT preservation invariant failed for {key}")
+            raise RuntimeError(f"stock FIT preservation invariant failed for {label}")
     allowed = sorted([
         (kernel_off, kernel_off + kernel_size),
         (comp_off, comp_off + comp_len),
@@ -223,6 +285,7 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
         "nt_fw_size": nt_size,
         "fit_offset": fit_meta["fit_offset"],
         "fit_total_size": fit_meta["total_size"],
+        "fit_trailing_payload_size": fit_meta["fit_trailing_payload_size"],
         "kernel_data_size": kernel_size,
         "transition_linux_image_size": len(linux_image),
         "transition_kernel_padding": kernel_size - len(linux_image),
