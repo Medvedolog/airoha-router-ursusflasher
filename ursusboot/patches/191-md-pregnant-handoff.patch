@@ -29,8 +29,16 @@
 +#if URSUS_PREGNANT_HANDOFF
 +    printf("URSUS_PREGNANT_HANDOFF_BEGIN addr=0x92000000\n");
 +    ret = run_command("bootm 0x92000000", 0);
-+    printf("URSUS_PREGNANT_HANDOFF_FAILED rc=%d\n", ret);
-+    return ret;
++    printf("URSUS_PREGNANT_HANDOFF_FAILED rc=%d; resetting for stock A/B retry\n", ret);
++    /*
++     * Never strand the router at a transient U-Boot prompt. Returning here
++     * would stop Nokia tcboot's SLOT2 retry/rollback counter from advancing.
++     * A reset hands control back to stock tcboot, which can retry SLOT2 and
++     * eventually fall back to untouched MASTER according to its own policy.
++     */
++    run_command("reset", 0);
++    for (;;)
++        ;
 +#endif
      printf("URSUS_RESET_POLICY=HELD_AT_BOOT debounce_ms=%lu legacy_hold_ms=%lu\n",
             URSUS_RESET_BOOT_DEBOUNCE_MS, URSUS_RESET_HOLD_MS);
