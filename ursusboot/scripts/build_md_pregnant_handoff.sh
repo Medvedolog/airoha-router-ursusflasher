@@ -51,6 +51,7 @@ cd "$WORK/u-boot"
 make olddefconfig
 
 grep -q '^CONFIG_ENV_IS_NOWHERE=y
+
 # Hardware-proven stock tcboot handoff shape. The candidate builder patches
 # exactly two little-endian u32 placeholders after the URSPREG1 marker:
 # source offset from stock FIT loadaddr (0x81800000), and runtime FIT size.
@@ -185,6 +186,7 @@ echo "MD_PREGNANT_HANDOFF_BUILD=PASS"
 echo "Artifacts: $OUT"
  .config || { echo 'PREGNANT1: ENV_IS_NOWHERE missing' >&2; exit 1; }
 grep -q '^CONFIG_TEXT_BASE=0x81e00000
+
 # Hardware-proven stock tcboot handoff shape. The candidate builder patches
 # exactly two little-endian u32 placeholders after the URSPREG1 marker:
 # source offset from stock FIT loadaddr (0x81800000), and runtime FIT size.
@@ -319,6 +321,7 @@ echo "MD_PREGNANT_HANDOFF_BUILD=PASS"
 echo "Artifacts: $OUT"
  .config || { echo 'PREGNANT1: unexpected TEXT_BASE' >&2; exit 1; }
 grep -q '^CONFIG_CMD_RESET=y
+
 # Hardware-proven stock tcboot handoff shape. The candidate builder patches
 # exactly two little-endian u32 placeholders after the URSPREG1 marker:
 # source offset from stock FIT loadaddr (0x81800000), and runtime FIT size.
@@ -453,8 +456,8 @@ echo "MD_PREGNANT_HANDOFF_BUILD=PASS"
 echo "Artifacts: $OUT"
  .config || { echo 'PREGNANT1: RESET command missing' >&2; exit 1; }
 for sym in CONFIG_NET_LWIP CONFIG_CMD_PING CONFIG_CMD_DHCP CONFIG_CMD_DNS CONFIG_CMD_SNTP CONFIG_CMD_TFTPBOOT CONFIG_CMD_WGET CONFIG_CMD_MTD; do
-    if grep -q "^\${sym}=y$" .config; then
-        echo "PREGNANT1: forbidden transient handoff capability \${sym}=y" >&2
+    if grep -q "^${sym}=y$" .config; then
+        echo "PREGNANT1: forbidden transient handoff capability ${sym}=y" >&2
         exit 1
     fi
 done
