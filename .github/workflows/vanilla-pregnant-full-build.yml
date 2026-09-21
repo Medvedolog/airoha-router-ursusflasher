@@ -25,6 +25,8 @@ on:
       - 'ursusflasher/tools/assemble_pregnant_payload.py'
       - 'ursusflasher/tools/selftest_pregnant_item4.py'
       - 'config/UNAMEONE_2026-09-16_PAYLOADS.json'
+      - 'config/FIRMWARE_BUNDLE.json'
+      - 'config/FIRMWARE_BUNDLES.json'
       - 'config/VANILLA_BOOT_CHAIN_PROFILES.json'
       - 'ursusboot/patches/openwrt-pr24025/**'
 permissions: { contents: read }
