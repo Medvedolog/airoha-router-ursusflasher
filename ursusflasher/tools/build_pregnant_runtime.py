@@ -381,6 +381,21 @@ def patch_fit(blob: bytes, overlay_root: Path, family: str):
     if len(kernels) != 1 or len(fdts) != 1:
         raise ValueError("expected exactly one kernel and one fdt in UBI recovery FIT")
     kernel, fdt_image = kernels[0], fdts[0]
+
+    # Nokia stock tcboot is not a generic FIT consumer. Its OEM path expects
+    # the legacy unit names conf@1 -> kernel@1 + fdt@1. OpenWrt snapshots use
+    # config-1/kernel-1/fdt-1, which are valid FIT names but tcboot rejects them.
+    configs = fit.node("/configurations")
+    if len(configs.children) != 1:
+        raise ValueError(f"expected exactly one FIT configuration, got {len(configs.children)}")
+    conf = configs.children[0]
+    kernel.name = "kernel@1"
+    fdt_image.name = "fdt@1"
+    conf.name = "conf@1"
+    configs.set("default", b"conf@1\0")
+    conf.set("kernel", b"kernel@1\0")
+    conf.set("fdt", b"fdt@1\0")
+
     if cstr(kernel.get("compression")) != "lzma":
         raise ValueError("recovery kernel is not LZMA")
     old_kernel = kernel.get("data")
@@ -412,7 +427,20 @@ def patch_fit(blob: bytes, overlay_root: Path, family: str):
     out = fit.build()
 
     verify = Fdt(out)
-    verify_kernel = [node for _path, node in verify.walk() if cstr(node.get("type")) == "kernel"][0]
+    # Build-time tcboot compatibility gate. Do not accept a merely standards-
+    # compliant FIT here: the Nokia OEM parser uses these exact unit names.
+    verify_kernel = verify.node("/images/kernel@1")
+    verify_fdt = verify.node("/images/fdt@1")
+    verify_configs = verify.node("/configurations")
+    verify_conf = verify.node("/configurations/conf@1")
+    if cstr(verify_configs.get("default")) != "conf@1":
+        raise AssertionError("tcboot FIT default configuration is not conf@1")
+    if cstr(verify_conf.get("kernel")) != "kernel@1":
+        raise AssertionError("tcboot FIT configuration does not reference kernel@1")
+    if cstr(verify_conf.get("fdt")) != "fdt@1":
+        raise AssertionError("tcboot FIT configuration does not reference fdt@1")
+    if cstr(verify_kernel.get("type")) != "kernel" or cstr(verify_fdt.get("type")) != "flat_dt":
+        raise AssertionError("tcboot FIT image node types are invalid")
     verify_raw = lzma.decompress(verify_kernel.get("data"), format=lzma.FORMAT_ALONE)
     if len(verify_raw) != len(raw):
         raise AssertionError("linked Image raw size changed")
