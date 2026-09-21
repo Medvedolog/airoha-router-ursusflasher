@@ -1,25 +1,25 @@
 {
   "schema": 1,
   "target": "Nokia XG-040G-MD / Airoha AN7581",
-  "openwrt_version": "SNAPSHOT",
-  "openwrt_revision": "r36009+75-6c315233aa",
-  "kernel": "6.18.44",
-  "policy": "release-local payloads only; no runtime snapshot download",
+  "openwrt_version": "UnameOne Edition",
+  "openwrt_revision": "2026-09-16",
+  "kernel": "6.18.52",
+  "policy": "production sysupgrade payloads are pinned by config/UNAMEONE_2026-09-16_PAYLOADS.json; no runtime snapshot substitution",
   "files": [
     {
       "path": "fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin",
       "role": "OPENWRT_NONUBI_SYSUPGRADE",
       "target_layout": "OPENWRT_STOCK_LAYOUT",
-      "sha256": "23ad06174184f71c9a845734571752f62930ba1cfac45f4ad8deadd9d8965820",
-      "size": 8714513,
+      "sha256": "1a0abfed83c52c55d60a3ef70c5df92c960fe3cc961bd2ca734e6d1749797a8d",
+      "size": 8694033,
       "required": true
     },
     {
       "path": "fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb",
       "role": "OPENWRT_UBI_SYSUPGRADE",
       "target_layout": "OPENWRT_UBI",
-      "sha256": "47ea7c6f1e22a4aae9482e653a4fc6e87524f7e27847aaaed7fb75349cae7f3d",
-      "size": 10408217,
+      "sha256": "9b1f0899ca4ef610f6d87e8572d369adb420f104bda667556e8a0b5979f066dd",
+      "size": 10383641,
       "required": true
     },
     {
@@ -45,8 +45,7 @@
       "reason": "OpenWrt upstream FIP is not a persistent UrsusBoot payload; persistent bootloader FIPs are pinned under data/payloads/md/ursusboot."
     }
   ],
-  "build_date": "2026-09-06",
-  "kernel_vermagic": "bed7e2dec73efb4c3050bc8a8373af30",
-  "provenance": "UnameOne OpenWrt build 2026-09-06; production sysupgrade images supplied verbatim; no UrsusBoot/service-recovery payload replacement",
+  "build_date": "2026-09-16",
+  "provenance": "UnameOne Edition 2026-09-16 production set; hashes and sizes mirror config/UNAMEONE_2026-09-16_PAYLOADS.json. Plain .bin is sysupgrade tar, not factory.",
   "network_profile": "author build retained verbatim: LAN4 becomes WAN after OpenWrt boot; use LAN2/LAN3 for flashing and continuous management access"
 }
