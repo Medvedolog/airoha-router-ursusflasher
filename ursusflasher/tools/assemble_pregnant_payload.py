@@ -29,6 +29,7 @@ def main()->int:
     ap.add_argument("--production",type=Path,required=True)
     ap.add_argument("--fip",type=Path,required=True)
     ap.add_argument("--preloader",type=Path,required=True)
+    ap.add_argument("--handoff",type=Path)
     ap.add_argument("--output-root",type=Path,required=True)
     ap.add_argument("--source-commit",default="")
     ap.add_argument("--snapshot",default="")
@@ -41,6 +42,10 @@ def main()->int:
     runtime=checked(ns.runtime)
     fip=checked(ns.fip,str(boot_spec["fip"]["sha256"]),int(boot_spec["fip"]["size"]))
     preloader=checked(ns.preloader,str(boot_spec["preloader"]["sha256"]),int(boot_spec["preloader"]["size"]))
+    handoff=None
+    if ns.family=="md":
+        if ns.handoff is None: raise SystemExit("ERROR: MD pregnant payload requires --handoff")
+        handoff=checked(ns.handoff)
     if not (0<preloader["size"]<=129024): raise SystemExit("ERROR: preloader does not fit BL2 after mandatory 0x800 prefix")
     sys.path.insert(0,str(ROOT/"ursusflasher"/"src"))
     import stock_fit_initramfs as sfi
@@ -50,6 +55,10 @@ def main()->int:
     names={"runtime":"runtime.itb","production":str(prod_spec["filename"]),"fip":"vanilla-bl31-uboot.fip","preloader":"vanilla-preloader.bin"}
     sources={"runtime":ns.runtime,"production":ns.production,"fip":ns.fip,"preloader":ns.preloader}
     metas={"runtime":runtime,"production":prod,"fip":fip,"preloader":preloader}
+    if handoff is not None:
+        names["handoff"]="pregnant-handoff.linuximg"
+        sources["handoff"]=ns.handoff
+        metas["handoff"]=handoff
     for role,source in sources.items():
         destination=out/names[role]
         if source.resolve()!=destination.resolve():
@@ -63,11 +72,11 @@ def main()->int:
       "source_commit":commit,"snapshot":ns.snapshot,"unameone_edition":manifest["edition"],
       "unameone_build_date":manifest["build_date"],"unameone_sha256":prod["sha256"],
       "boot_chain":{"repository":boot_manifest["source"]["repository"],"commit":boot_manifest["source"]["commit"],"release_version":boot_manifest["source"]["release_version"],"fip_status":boot_spec["fip"]["status"],"preloader_status":boot_spec["preloader"]["status"]},
-      "files":{role:{"filename":names[role],"sha256":metas[role]["sha256"],"size":metas[role]["size"]} for role in ("runtime","production","fip","preloader")},
+      "files":{role:{"filename":names[role],"sha256":metas[role]["sha256"],"size":metas[role]["size"]} for role in metas},
       "contracts":{"production_child_exact_manifest_bytes":True,"boot_chain_exact_profile_bytes":True,"runtime_fit_has_no_untracked_tail":True,"bl2_written_last_by_stage2":True,"identity_restore_required":True,"single_operator_confirmation":True,"hw_status":"HW_PENDING"}
     }
     (out/"PAYLOAD.json").write_text(json.dumps(payload,indent=2,sort_keys=True)+"\n",encoding="utf-8")
     print(f"PREGNANT_PAYLOAD_ASSEMBLY=PASS family={ns.family}")
-    for role in ("production","runtime","fip","preloader"): print(f"{role.upper()}_SHA256={metas[role]['sha256']}")
+    for role in metas: print(f"{role.upper()}_SHA256={metas[role]['sha256']}")
     return 0
 if __name__=="__main__": raise SystemExit(main())
