@@ -242,6 +242,20 @@ def _monitor(host: str, policy: Policy, payload_meta: dict, seconds: int = 600) 
         ui.status("WARNING", "Telemetry window ended. No write was retried; inspect UART or reconnect and read state/log.")
 
 
+def _reopen_verified_stock_root(host: str, policy: Policy):
+    access, telnet = ubi.open_root_auto(host)
+    reported = str(getattr(access, "family", "") or "").strip().lower()
+    if reported not in ("", "unknown", policy.family):
+        raise RuntimeError(f"board profile mismatch after reconnect: selected {policy.profile}, stock reports {reported}")
+    _require_stock_geometry(telnet, policy)
+    rc_uid, uid_text = telnet.command_clean("id -u", timeout=15)
+    uid_lines = [line.strip() for line in uid_text.replace("\r", "\n").split("\n") if line.strip().isdigit()]
+    if rc_uid or not uid_lines or uid_lines[-1] != "0":
+        raise RuntimeError(f"reconnected stock Telnet is not UID 0: rc={rc_uid} output={uid_text!r}")
+    access.family = policy.family
+    return access, telnet
+
+
 def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True) -> int:
     policy = _policy(profile)
     ui.enable()
@@ -396,19 +410,48 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True) -> int
             ui.status("STOP", pb.tr("Операция отменена; NAND не изменялась.", "Operation cancelled; NAND was not modified."))
             return 0
 
-        sat._write_partition(
-            telnet,
-            remote_slot,
-            "nsb_slave",
-            f"/dev/mtd{policy.slave_mtd}",
-            policy.slot_size,
-            writer,
-            policy.erase_size,
-            timeout=900,
-        )
-        got = sat._remote_partition_sha(telnet, f"/dev/mtd{policy.slave_mtd}", timeout=600)
+        slot_dev = f"/dev/mtd{policy.slave_mtd}"
+        try:
+            sat._write_partition(
+                telnet,
+                remote_slot,
+                "nsb_slave",
+                slot_dev,
+                policy.slot_size,
+                writer,
+                policy.erase_size,
+                timeout=900,
+            )
+        except OSError as exc:
+            # A stock Telnet session may be reset while mtd_debug is still
+            # completing a long SLOT2 write. Never retry the writer blindly:
+            # reconnect and let full-partition SHA decide whether the original
+            # write completed. SLOT1 is still active at this point.
+            pb._write_session_only(f"[PREGNANT-SLOT2-DISCONNECT] {exc!r}")
+            ui.status(
+                "WARNING",
+                "Stock Telnet disconnected during SLOT2 write; reconnecting for readback only. NAND write will NOT be retried automatically.",
+            )
+            try:
+                if telnet:
+                    telnet.close()
+            except Exception:
+                pass
+            try:
+                if access:
+                    access.close_web(announce=False)
+            except Exception:
+                pass
+            access = telnet = None
+            time.sleep(5)
+            access, telnet = _reopen_verified_stock_root(host, policy)
+
+        got = sat._remote_partition_sha(telnet, slot_dev, timeout=600)
         if got != slot_meta["candidate_sha256"]:
-            raise RuntimeError(f"nsb_slave readback mismatch: {got} != {slot_meta['candidate_sha256']}")
+            raise RuntimeError(
+                f"nsb_slave readback mismatch after write/disconnect handling: {got} != {slot_meta['candidate_sha256']}; "
+                "selector was NOT written and SLOT1 remains active"
+            )
         ui.status("PASS", "SLOT2 pregnant installer write/readback verified; SLOT1 untouched")
 
         expected_flag_sha = sha_bytes(flag_candidate)
