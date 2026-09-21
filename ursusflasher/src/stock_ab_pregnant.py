@@ -197,6 +197,7 @@ def _monitor(host: str, policy: Policy, payload_meta: dict, seconds: int = 600) 
             host,
             "cat /tmp/ursus-install/status.json 2>/dev/null; echo __URSUS_LOG__; tail -n 8 /tmp/ursus-install/install.log 2>/dev/null",
             timeout=15,
+            allow_disconnect=True,
             quiet=True,
             batch_mode=True,
             minimal_auth=True,
@@ -220,6 +221,7 @@ def _monitor(host: str, policy: Policy, payload_meta: dict, seconds: int = 600) 
                 host,
                 confirm_cmd,
                 timeout=30,
+                allow_disconnect=True,
                 quiet=True,
                 batch_mode=True,
                 minimal_auth=True,
@@ -328,6 +330,19 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True) -> int
         transport, remote_slot, remote_flag = sat._select_and_preflight_transport(
             telnet, access, slot_path, flag_out
         )
+
+        # Reboot is part of the same destructive transaction. Freeze its stock
+        # root transport before asking the sole y/N so we never discover after
+        # selector write that the session was unprivileged or reboot unavailable.
+        rc_uid, uid_text = telnet.command_clean("id -u", timeout=15)
+        uid_lines = [line.strip() for line in uid_text.replace("\r", "\n").split("\n") if line.strip().isdigit()]
+        if rc_uid or not uid_lines or uid_lines[-1] != "0":
+            raise RuntimeError(f"stock reboot preflight requires UID 0 Telnet, got rc={rc_uid} output={uid_text!r}")
+        rc_reboot, reboot_text = telnet.command_clean("command -v reboot", timeout=15)
+        reboot_lines = [line.strip() for line in reboot_text.replace("\r", "\n").split("\n") if line.strip() and not line.startswith("__")]
+        if rc_reboot or not reboot_lines:
+            raise RuntimeError("stock root Telnet has no reboot command")
+        reboot_command = reboot_lines[-1]
         report = {
             "operation": f"{policy.profile}_vanilla_pregnant_migration",
             "profile": policy.profile,
@@ -337,6 +352,7 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True) -> int
             "flagback_observed": flagback_state,
             "writer": writer,
             "transport": transport,
+            "reboot": {"transport": "stock-root-telnet", "command": reboot_command, "uid": 0},
             "backup": {
                 "stock_family": backup_result.get("stock_family"),
                 "stock_variant": backup_result.get("stock_variant"),
@@ -366,6 +382,7 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True) -> int
         ui.status("READY", f"SLOT2 candidate SHA256 {slot_meta['candidate_sha256']}")
         ui.status("READY", f"Pinned UnameOne production SHA256 {payload_meta['unameone_sha256']}")
         ui.status("READY", f"writer={writer}; transport={transport}; both frozen before destructive boundary")
+        ui.status("READY", f"reboot=stock root Telnet uid=0; command={reboot_command}")
         ui.note(
             "One authorization covers SLOT2 write/readback -> selector -> reboot -> autonomous UBI -> pinned UnameOne -> identity -> Vanilla FIP -> BL2-last -> final readback. No confirmation exists after reboot."
         )
@@ -414,9 +431,15 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True) -> int
             "Rebooting immediately into SLOT2. Autonomous stage2 owns all remaining writes; no second confirmation exists.",
         )
         try:
-            telnet.send_line("sync; reboot")
-        except Exception:
-            pass
+            telnet.send_line(f"sync; sleep 1; {shlex.quote(reboot_command)} -f")
+            # A clean disconnect here is success: the stock userspace is dying.
+            try:
+                telnet.read(4.0, echo=False)
+            except Exception:
+                pass
+        except Exception as exc:
+            raise RuntimeError(f"failed to send reboot through verified stock root Telnet: {exc}") from exc
+        time.sleep(2)
     finally:
         if telnet:
             try:
