@@ -1,29 +1,6 @@
 name: XG140 UrsusFlasher EXPERT HW test
 
 on:
-  push:
-    branches:
-      - feature/ursusboot-modular-airoha
-    paths:
-      - 'START_EXPERT.cmd'
-      - 'START_EXPERT.sh'
-      - 'config/BOARD_PROFILES.json'
-      - 'openwrt/xg140-rescue/**'
-      - 'ursusflasher/src/bootloader_install_menu.py'
-      - 'ursusflasher/src/expert_airoha.py'
-      - 'ursusflasher/src/xg140_profile.py'
-      - 'ursusflasher/src/xg140_stock_transport.py'
-      - 'ursusflasher/src/xg140_runtime_install.py'
-      - 'ursusflasher/src/xg140_emergency_initramfs.py'
-      - 'ursusflasher/src/xg140_emergency_persistent.py'
-      - 'ursusflasher/src/xg140_native_persistent_install.py'
-      - 'ursusflasher/src/ursusboot_install.py'
-      - 'ursusflasher/tools/repack_xg140_native_fip.py'
-      - 'ursusflasher/tools/selftest_xg140_native_fip_repack.py'
-      - 'ursusboot/configs/**'
-      - 'ursusboot/board-policies/**'
-      - 'ursusboot/scripts/**'
-      - '.github/workflows/xg140-expert-hwtest.yml'
   workflow_dispatch:
 
 permissions:
