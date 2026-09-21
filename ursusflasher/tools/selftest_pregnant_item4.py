@@ -43,6 +43,11 @@ def test_runtime_safety_contract():
     order=[stage2.index('ubiupdatevol "/dev/${UBI_DEV}_5" "$PROD"'),stage2.index('ubiupdatevol "/dev/${UBI_DEV}_2" "$WORK/bosa.bin"'),stage2.index('ubiupdatevol "/dev/${UBI_DEV}_4" "$FIP"'),stage2.index('mtd write "$WORK/bl2.bin" bl2'),stage2.index("persist_state PROD_VERIFIED")]
     assert order==sorted(order),order
     for state in ("PROD_WRITING","PROD_VERIFIED","BOOT_CONFIRMED"): assert state in slot or state in stage2
+    assert "DESTRUCTIVE=0" in stage2
+    assert "Pre-destructive failure: rebooting through stock tcboot" in stage2
+    boundary=stage2.index("DESTRUCTIVE=1")
+    assert boundary < stage2.index('ubiformat -y "/dev/mtd${UBI_IDX}"')
+    assert "automatic stock rollback/reboot is disabled" in stage2
 
 
 def test_md_uses_hw_proven_stock_wrapper():
