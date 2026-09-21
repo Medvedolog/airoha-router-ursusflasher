@@ -42,10 +42,20 @@ def _read_words(telnet, dev: str) -> tuple[int, int, int, int]:
     cmd = (
         f"rm -f {qhead}; "
         f"dd if={qdev} of={qhead} bs=16 count=1 2>/dev/null || exit 91; "
-        f"if command -v od >/dev/null 2>&1; then od -An -tx4 -N16 {qhead}; "
-        f"elif command -v busybox >/dev/null 2>&1; then busybox od -An -tx4 -N16 {qhead}; "
-        f"elif command -v hexdump >/dev/null 2>&1; then hexdump -v -e '4/4 \"%08x \" \"\\n\"' {qhead}; "
-        f"else exit 92; fi"
+        f"ok=0; "
+        f"if command -v hexdump >/dev/null 2>&1; then "
+        f"  hexdump -v -e '4/4 \"%08x \" \"\\n\"' {qhead} 2>/dev/null && ok=1; "
+        f"fi; "
+        f"if [ \"$ok\" -eq 0 ] && command -v busybox >/dev/null 2>&1; then "
+        f"  busybox hexdump -v -e '4/4 \"%08x \" \"\\n\"' {qhead} 2>/dev/null && ok=1; "
+        f"fi; "
+        f"if [ \"$ok\" -eq 0 ] && command -v xxd >/dev/null 2>&1; then "
+        f"  xxd -e -g4 -l16 {qhead} 2>/dev/null && ok=1; "
+        f"fi; "
+        f"if [ \"$ok\" -eq 0 ] && command -v od >/dev/null 2>&1; then "
+        f"  od -An -tx4 -N16 {qhead} 2>/dev/null && ok=1; "
+        f"fi; "
+        f"[ \"$ok\" -eq 1 ]"
     )
     rc, text = telnet.command_clean(cmd, timeout=20)
     if rc:
