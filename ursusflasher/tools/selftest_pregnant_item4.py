@@ -65,7 +65,9 @@ def test_md_handoff_is_networkless_and_returns_to_stock_ab():
     build=(ROOT/"ursusboot"/"scripts"/"build_md_pregnant_handoff.sh").read_text(encoding="utf-8")
     for sym in ("CONFIG_NET_LWIP","CONFIG_CMD_PING","CONFIG_CMD_DHCP","CONFIG_CMD_WGET"):
         assert f"# {sym} is not set" in cfg
-    assert "CONFIG_CMD_RESET=y" in cfg
+    baseline=(ROOT/"ursusboot"/"configs"/"u-boot.TEST61.full.config").read_text(encoding="utf-8")
+    assert "CONFIG_PSCI_RESET=y" in baseline
+    assert "CONFIG_RESET_AIROHA=y" in baseline
     assert 'run_command("bootm 0x92000000", 0)' in patch
     assert 'run_command("reset", 0)' in patch
     assert "resetting for stock A/B retry" in patch
