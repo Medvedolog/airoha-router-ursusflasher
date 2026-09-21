@@ -403,6 +403,30 @@ def build_pregnant_slot(
     alias before any destructive operation.
     """
     runtime = source_fit_contract(runtime_fit)
+    if len(runtime_fit) != int(runtime["fit_total_size"]):
+        raise RuntimeError("pregnant runtime must contain exactly one FIT with no untracked tail")
+    if len(production_itb) < 40 or struct.unpack_from(">I", production_itb, 0)[0] != FDT_MAGIC:
+        raise RuntimeError("pinned production child is not a FIT image")
+    if len(production_itb) > PREGNANT_PRODUCTION_WINDOW:
+        raise RuntimeError("pinned production child exceeds reserved SLOT2 window")
+    if len(vanilla_fip) < 16 or vanilla_fip[:8] != FIP_MAGIC:
+        raise RuntimeError("Vanilla FIP magic mismatch")
+    if len(vanilla_fip) > 0x00100000 or len(vanilla_fip) > PREGNANT_FIP_WINDOW:
+        raise RuntimeError("Vanilla FIP exceeds allowed carrier/canonical volume size")
+    if not vanilla_preloader or len(vanilla_preloader) > 129024 or len(vanilla_preloader) > PREGNANT_PRELOADER_WINDOW:
+        raise RuntimeError("Vanilla preloader does not fit BL2/carrier constraints")
+    required_evidence = (
+        "family", "profile", "bootloader_sha256", "master_sha256",
+        "flagback_sha256", "flag_tail_sha256", "bosa_sha256", "ri_sha256",
+    )
+    for key in required_evidence:
+        if key not in evidence:
+            raise RuntimeError(f"missing stock evidence field: {key}")
+    for key in required_evidence[2:]:
+        value = str(evidence[key]).lower()
+        if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+            raise RuntimeError(f"invalid stock evidence SHA256: {key}")
+
     if str(evidence.get("family")) == "md":
         if handoff_linux is None:
             raise RuntimeError("MD pregnant payload is missing the proven stock handoff Linux Image")
