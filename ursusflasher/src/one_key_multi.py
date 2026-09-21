@@ -17,6 +17,7 @@ import mf_runtime_install
 import network_guidance
 import one_key as md_one_key
 import proven_backend as pb
+import stock_ab_pregnant
 import ursus_web_client as uw
 
 choose_language = md_one_key.choose_language
@@ -126,6 +127,33 @@ def _family_from_ursus(st: dict) -> str:
     return match[0]
 
 
+def _choose_stock_install_mode() -> str:
+    ui.section(tr("РЕЖИМ УСТАНОВКИ", "INSTALL MODE"), style="amber2")
+    print(tr(
+        "  1  Постоянный UrsusBoot (рекомендуется)",
+        "  1  Persistent UrsusBoot (recommended)",
+    ))
+    print(tr(
+        "     Оставляет WebFailsafe/Recovery: проще обновлять OpenWrt и восстанавливать роутер без UART.",
+        "     Keeps WebFailsafe/Recovery: easier OpenWrt upgrades and recovery without UART.",
+    ))
+    print(tr(
+        "  2  Vanilla OpenWrt",
+        "  2  Vanilla OpenWrt",
+    ))
+    print(tr(
+        "     Без постоянного UrsusBoot: после миграции используется штатный OpenWrt U-Boot/FIP.",
+        "     No persistent UrsusBoot: after migration the standard OpenWrt U-Boot/FIP is used.",
+    ))
+    while True:
+        choice = ui.prompt(tr("Режим [1]: ", "Mode [1]: ")).strip() or "1"
+        if choice == "1":
+            return "ursus"
+        if choice == "2":
+            return "vanilla"
+        ui.status(tr("СТОП", "STOP"), tr("Выберите 1 или 2.", "Choose 1 or 2."))
+
+
 def _install_bootloader(state: ds.DeviceState, family: str, skip_full_backup: bool) -> dict:
     if family == "md":
         if state.current_system == "NOKIA_STOCK":
@@ -218,9 +246,22 @@ def main(*, skip_full_backup: bool = False) -> int:
     if state.current_system.startswith("OPENWRT") and state.probe_status != ds.PROBE_COMPLETE:
         state = _probe(interactive_ssh=True)
     family = _family(state)
-    verify_family_payloads(family)
     ui.status(tr("УСТРОЙСТВО", "DEVICE"), f"{state.model} / {state.soc} / {family.upper()}")
 
+    if state.current_system == "NOKIA_STOCK":
+        install_mode = _choose_stock_install_mode()
+        if install_mode == "vanilla":
+            ui.note(tr(
+                "Vanilla использует полный stock backup, SLOT2 pregnant initramfs и одну общую авторизацию; после перехода постоянного UrsusBoot в NAND не остаётся.",
+                "Vanilla uses a complete stock backup, SLOT2 pregnant initramfs and one transaction authorization; no persistent UrsusBoot remains in NAND after migration.",
+            ))
+            return stock_ab_pregnant.run(
+                host=HOST,
+                profile=f"xg040-{family}",
+                monitor=True,
+            )
+
+    verify_family_payloads(family)
     already_authorized = False
     if state.current_system == "RECOVERY":
         st = uw.status(HOST)
