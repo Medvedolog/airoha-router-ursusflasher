@@ -22,7 +22,7 @@
 +-UrsusBoot-0.1.0-alpha5-UBIUX1-PREGNANT1
 --- a/cmd/ursusdispatch.c
 +++ b/cmd/ursusdispatch.c
-@@ -140,6 +140,12 @@ static int do_ursusdispatch(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
+@@ -140,6 +140,20 @@ static int do_ursusdispatch(struct cmd_tbl *cmdtp, int flag, int argc, char *const argv[])
      int ret;
  
      printf("URSUS_DISPATCH_BEGIN\n");
