@@ -7,6 +7,7 @@ ROOT=Path(__file__).resolve().parents[2]
 SRC=ROOT/"ursusflasher"/"src"
 sys.path.insert(0,str(SRC))
 import stock_fit_initramfs as sfi
+import stock_fit_wrapper as sfw
 
 def test_shipped_route():
     expert=(SRC/"expert.py").read_text(encoding="utf-8")
@@ -48,6 +49,25 @@ def test_runtime_safety_contract():
     boundary=stage2.index("DESTRUCTIVE=1")
     assert boundary < stage2.index('ubiformat -y "/dev/mtd${UBI_IDX}"')
     assert "automatic stock rollback/reboot is disabled" in stage2
+
+
+def test_stock_wrapper_accepts_fit_smaller_than_nt_payload():
+    src=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
+    assert "total != nt_size - 0x100" not in src
+    assert "fit_trailing_payload_size" in src
+    fit_off=0x1000
+    fit_total=0x200
+    nt_end=0x5000
+    blob=bytearray(b"\0"*nt_end)
+    props={
+        "/images/filesystem@1/data-position": (0x100,4),
+        "/images/filesystem@1/data-size": (0x104,4),
+    }
+    import struct
+    struct.pack_into(">I", blob, 0x100, 0x800)
+    struct.pack_into(">I", blob, 0x104, 0x300)
+    off,size=sfw.image_data_range(bytes(blob),props,"filesystem@1",fit_off=fit_off,fit_total=fit_total,nt_end=nt_end)
+    assert (off,size)==(0x1800,0x300)
 
 
 def test_md_uses_hw_proven_stock_wrapper():
@@ -95,5 +115,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
