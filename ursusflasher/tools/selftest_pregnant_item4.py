@@ -44,6 +44,16 @@ def test_runtime_safety_contract():
     assert order==sorted(order),order
     for state in ("PROD_WRITING","PROD_VERIFIED","BOOT_CONFIRMED"): assert state in slot or state in stage2
 
+
+def test_md_uses_hw_proven_stock_wrapper():
+    sfi_source=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
+    pregnant=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
+    assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_FILESYSTEM_CARRIER_V1" in sfi_source
+    assert "sfw.build_transition_slot(" in sfi_source
+    assert "stock_tcboot_fdt_byte_identical" in sfi_source
+    assert 'files["handoff"]' in pregnant
+    assert "pregnant-handoff.linuximg" in pregnant
+
 def test_pinned_unameone_manifest():
     data=json.loads((ROOT/"config"/"UNAMEONE_2026-09-16_PAYLOADS.json").read_text())
     assert data["policy"]["single_production_payload_source"] is True
@@ -63,5 +73,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_md_uses_hw_proven_stock_wrapper(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
