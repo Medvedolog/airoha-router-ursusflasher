@@ -107,6 +107,8 @@ def _load_payload(policy: Policy) -> tuple[dict[str, Path], dict]:
         "fip": root / "vanilla-bl31-uboot.fip",
         "preloader": root / "vanilla-preloader.bin",
     }
+    if policy.family == "md":
+        files["handoff"] = root / "pregnant-handoff.linuximg"
     for role, path in files.items():
         spec = meta.get("files", {}).get(role, {})
         if not path.is_file():
@@ -359,6 +361,7 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True) -> int
             files["preloader"].read_bytes(),
             slot_size=policy.slot_size,
             evidence=evidence,
+            handoff_linux=files["handoff"].read_bytes() if policy.family == "md" else None,
         )
         slot_path = run_dir / f"mtd{policy.slave_mtd}_nsb_slave_pregnant.bin"
         slot_path.write_bytes(slot)
