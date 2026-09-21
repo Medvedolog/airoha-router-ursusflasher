@@ -31,6 +31,11 @@ on:
       - 'config/FIRMWARE_BUNDLES.json'
       - 'config/VANILLA_BOOT_CHAIN_PROFILES.json'
       - 'ursusboot/patches/openwrt-pr24025/**'
+      - 'ursusboot/configs/ursusboot-pregnant-handoff.cfg'
+      - 'ursusboot/patches/191-md-pregnant-handoff.patch'
+      - 'ursusboot/scripts/build_md_pregnant_handoff.sh'
+      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
+      - 'toolchains/openwrt-sdk-r35906/**'
 permissions: { contents: read }
 concurrency:
   group: vanilla-pregnant-proven-${{ github.ref }}
@@ -38,7 +43,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with: { path: kit, fetch-depth: 1 }
@@ -48,6 +53,7 @@ jobs:
           set -euo pipefail
           python3 -m py_compile ursusflasher/src/stock_ab_pregnant.py ursusflasher/src/stock_slot_telnet.py ursusflasher/src/one_key_multi.py ursusflasher/src/stock_fit_initramfs.py ursusflasher/tools/build_pregnant_runtime.py ursusflasher/tools/repack_vanilla_fip.py ursusflasher/tools/assemble_pregnant_payload.py ursusflasher/tools/selftest_pregnant_item4.py
           python3 ursusflasher/tools/selftest_pregnant_item4.py
+          sh -n ursusboot/scripts/build_md_pregnant_handoff.sh
           sh -n openwrt/pregnant-overlay/usr/sbin/ursus-vanilla-stage2
           sh -n openwrt/pregnant-overlay/usr/sbin/ursusstockslot
           sh -n openwrt/pregnant-overlay/etc/init.d/ursus-pregnant
@@ -72,6 +78,16 @@ jobs:
           fetch_family mf an7583 nokia_xg-040g-mf
           echo "MD_SNAPSHOT=$(cat work/snapshot/md/version.buildinfo)" >> "$GITHUB_ENV"
           echo "MF_SNAPSHOT=$(cat work/snapshot/mf/version.buildinfo)" >> "$GITHUB_ENV"
+      - name: Build hardware-proven MD stock handoff
+        working-directory: kit
+        run: |
+          set -euo pipefail
+          bash ursusboot/scripts/build_md_pregnant_handoff.sh
+          test -s work/md-pregnant-handoff/out/ursusboot-md-0.1.0-alpha5-UBIUX1-PREGNANT1.linuximg
+          grep -Fq 'MODE=PREGNANT_HANDOFF' work/md-pregnant-handoff/out/PREGNANT-HANDOFF-BUILD_INFO.txt
+          grep -aFq 'URSPREG1' work/md-pregnant-handoff/out/ursusboot-md-0.1.0-alpha5-UBIUX1-PREGNANT1.linuximg
+          echo "MD_STOCK_HANDOFF_QA=PASS"
+
       - name: Build linked-newc pregnant runtimes
         run: |
           set -euo pipefail; mkdir -p work/runtime
@@ -119,6 +135,7 @@ jobs:
           mkdir -p "$ART/openwrt"; cp -a kit/openwrt/pregnant-overlay "$ART/openwrt/"
           rm -rf "$ART/payloads/vanilla-pregnant"; mkdir -p "$ART/payloads/vanilla-pregnant/md" "$ART/payloads/vanilla-pregnant/mf"
           cp work/runtime/md-runtime.itb "$ART/payloads/vanilla-pregnant/md/runtime.itb"; cp work/bootchain/md/vanilla-bl31-uboot.fip "$ART/payloads/vanilla-pregnant/md/vanilla-bl31-uboot.fip"; cp work/bootchain/md/vanilla-preloader.bin "$ART/payloads/vanilla-pregnant/md/vanilla-preloader.bin"
+          cp kit/work/md-pregnant-handoff/out/ursusboot-md-0.1.0-alpha5-UBIUX1-PREGNANT1.linuximg "$ART/payloads/vanilla-pregnant/md/pregnant-handoff.linuximg"
           cp work/runtime/mf-runtime.itb "$ART/payloads/vanilla-pregnant/mf/runtime.itb"; cp work/bootchain/mf/vanilla-bl31-uboot.fip "$ART/payloads/vanilla-pregnant/mf/vanilla-bl31-uboot.fip"; cp work/bootchain/mf/vanilla-preloader.bin "$ART/payloads/vanilla-pregnant/mf/vanilla-preloader.bin"
           cat > "$ART/payloads/vanilla-pregnant/NEEDS_PINNED_UNAMEONE.txt" <<EOF
           Exact UnameOne 2026-09-16 production children are intentionally not substituted by snapshots.
@@ -147,7 +164,7 @@ jobs:
         if: steps.prod.outputs.ready == '1'
         run: |
           set -euo pipefail; ART=work/staging/operator
-          python3 kit/ursusflasher/tools/assemble_pregnant_payload.py --family md --runtime "$ART/payloads/vanilla-pregnant/md/runtime.itb" --production work/production/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb --fip "$ART/payloads/vanilla-pregnant/md/vanilla-bl31-uboot.fip" --preloader "$ART/payloads/vanilla-pregnant/md/vanilla-preloader.bin" --output-root "$ART/payloads/vanilla-pregnant" --source-commit "$GITHUB_SHA" --snapshot "$MD_SNAPSHOT"
+          python3 kit/ursusflasher/tools/assemble_pregnant_payload.py --family md --runtime "$ART/payloads/vanilla-pregnant/md/runtime.itb" --production work/production/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb --fip "$ART/payloads/vanilla-pregnant/md/vanilla-bl31-uboot.fip" --preloader "$ART/payloads/vanilla-pregnant/md/vanilla-preloader.bin" --handoff "$ART/payloads/vanilla-pregnant/md/pregnant-handoff.linuximg" --output-root "$ART/payloads/vanilla-pregnant" --source-commit "$GITHUB_SHA" --snapshot "$MD_SNAPSHOT"
           python3 kit/ursusflasher/tools/assemble_pregnant_payload.py --family mf --runtime "$ART/payloads/vanilla-pregnant/mf/runtime.itb" --production work/production/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb --fip "$ART/payloads/vanilla-pregnant/mf/vanilla-bl31-uboot.fip" --preloader "$ART/payloads/vanilla-pregnant/mf/vanilla-preloader.bin" --output-root "$ART/payloads/vanilla-pregnant" --source-commit "$GITHUB_SHA" --snapshot "$MF_SNAPSHOT"
           rm -f "$ART/payloads/vanilla-pregnant/NEEDS_PINNED_UNAMEONE.txt"; (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
           cd work/staging; zip -qr "UrsusFlasher-VANILLA-PREGNANT-FULL-$GITHUB_SHA.zip" operator; sha256sum "UrsusFlasher-VANILLA-PREGNANT-FULL-$GITHUB_SHA.zip" > "UrsusFlasher-VANILLA-PREGNANT-FULL-$GITHUB_SHA.zip.sha256"
