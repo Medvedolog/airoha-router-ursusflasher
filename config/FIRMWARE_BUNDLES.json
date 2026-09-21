@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "source": "UnameOne paired MD/MF OpenWrt snapshot set supplied for UrsusFlasher 0.2.62 hardware testing",
+  "source": "UnameOne Edition 2026-09-16 paired MD/MF production set; production sysupgrade hashes/sizes mirror config/UNAMEONE_2026-09-16_PAYLOADS.json",
   "profiles": {
     "md": {
       "target": "Nokia XG-040G-MD / Airoha AN7581",
@@ -8,15 +8,15 @@
         {
           "path": "fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin",
           "role": "OPENWRT_NONUBI_SYSUPGRADE",
-          "sha256": "23ad06174184f71c9a845734571752f62930ba1cfac45f4ad8deadd9d8965820",
-          "size": 8714513,
+          "sha256": "1a0abfed83c52c55d60a3ef70c5df92c960fe3cc961bd2ca734e6d1749797a8d",
+          "size": 8694033,
           "required": true
         },
         {
           "path": "fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb",
           "role": "OPENWRT_UBI_SYSUPGRADE",
-          "sha256": "47ea7c6f1e22a4aae9482e653a4fc6e87524f7e27847aaaed7fb75349cae7f3d",
-          "size": 10408217,
+          "sha256": "9b1f0899ca4ef610f6d87e8572d369adb420f104bda667556e8a0b5979f066dd",
+          "size": 10383641,
           "required": true
         },
         {
@@ -49,15 +49,15 @@
         {
           "path": "fw/openwrt-airoha-an7583-nokia_xg-040g-mf-squashfs-sysupgrade.bin",
           "role": "OPENWRT_NONUBI_SYSUPGRADE",
-          "sha256": "bd2a4947468ddd7ca71a42d36c7fd4462a24a1ceb6be4658f79c5c2bcb0ccf29",
-          "size": 8540433,
+          "sha256": "d988d6f47d69e7264bb7a0d81392c3fdc3bca163075066ee0e0b3f971abf8cbf",
+          "size": 8519953,
           "required": true
         },
         {
           "path": "fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb",
           "role": "OPENWRT_UBI_SYSUPGRADE",
-          "sha256": "0043b450c1d8e311b6f6c12458c66e976a72cb93ed657e12029fa79fffe5dc3a",
-          "size": 10240281,
+          "sha256": "21dcf4c6ca64ea0c5bc3d601e4a8f99a3f002371b873f399f622cbd9223fd1d1",
+          "size": 10223897,
           "required": true
         },
         {
