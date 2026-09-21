@@ -15,6 +15,7 @@ FIP_SLOT_OFF=$((0x01c00000)); FIP_WINDOW=$((0x00200000))
 PRE_SLOT_OFF=$((0x01e00000)); PRE_WINDOW=$((0x00100000))
 UBI_DEV=
 FAMILY=unknown
+DESTRUCTIVE=0
 
 mkdir -p "$WORK"
 mkdir "$LOCK" 2>/dev/null || exit 0
@@ -85,7 +86,14 @@ fail() {
     fi
     json_state FAILED "$reason"
     log "[ERROR] $reason"
-    log 'Autonomous stage2 stopped. Keep power on and inspect status/log over SSH/UART.'
+    if [ "$DESTRUCTIVE" -eq 0 ]; then
+        log 'Pre-destructive failure: rebooting through stock tcboot so the SLOT2 retry/rollback counter can advance toward untouched MASTER.'
+        sync
+        sleep 2
+        reboot -f
+        sleep 5
+    fi
+    log 'Destructive stage has started; automatic stock rollback/reboot is disabled. Keep power on and inspect status/log over SSH/UART.'
     exit 1
 }
 
@@ -214,6 +222,10 @@ for path in /sys/class/ubi/ubi[0-9]*; do
     ubidetach -m "$UBI_IDX" >>"$LOG" 2>&1 || fail UBI_DETACH
 done
 state PREPARING_UBI
+# Last point where untouched stock A/B remains a valid recovery authority.
+# From the first ubiformat byte onward, never reboot merely to consume the
+# stock retry counter: the canonical UBI conversion has become destructive.
+DESTRUCTIVE=1
 ubiformat -y "/dev/mtd${UBI_IDX}" >>"$LOG" 2>&1 || fail UBIFORMAT
 ubiattach -m "$UBI_IDX" >>"$LOG" 2>&1 || fail UBIATTACH
 UBI_DEV="$(find_ubi "$UBI_IDX" 2>/dev/null || true)"
