@@ -582,8 +582,6 @@ def main() -> int:
                 ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
             network_guidance.show()
-            ui.section(tr("Перед первым запуском на stock Nokia", "Before first run on Nokia stock"), style="amber2")
-            ui.note(tr("На включённом роутере удерживайте Reset не менее 30 секунд, отпустите и дождитесь полной загрузки stock Web UI.", "With the router powered on, hold Reset for at least 30 seconds, release it, and wait for the stock Web UI to boot fully."))
             run_action(lambda: stock_ab_pregnant.run_expert(host=host, profile=profile), write_may_happen=True)
             continue
 
