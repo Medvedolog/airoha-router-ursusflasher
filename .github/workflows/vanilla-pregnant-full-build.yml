@@ -135,6 +135,7 @@ jobs:
           mkdir -p "$ART/openwrt"; cp -a kit/openwrt/pregnant-overlay "$ART/openwrt/"
           mkdir -p "$ART/ursusboot/configs" "$ART/ursusboot/patches" "$ART/ursusboot/scripts"
           cp kit/ursusboot/configs/ursusboot-pregnant-handoff.cfg "$ART/ursusboot/configs/"
+          cp kit/ursusboot/configs/u-boot.TEST61.full.config "$ART/ursusboot/configs/"
           cp kit/ursusboot/patches/191-md-pregnant-handoff.patch "$ART/ursusboot/patches/"
           cp kit/ursusboot/scripts/build_md_pregnant_handoff.sh "$ART/ursusboot/scripts/"
           rm -rf "$ART/payloads/vanilla-pregnant"; mkdir -p "$ART/payloads/vanilla-pregnant/md" "$ART/payloads/vanilla-pregnant/mf"
