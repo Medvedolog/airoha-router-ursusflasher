@@ -2,20 +2,6 @@ name: MD vanilla transition + XG140 brick recovery HW test
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/ursusboot-modular-airoha
-    paths:
-      - '.github/workflows/md-transition-xg140-hwtest.yml'
-      - 'openwrt/patches/24025.patch'
-      - 'ursusboot/scripts/build_md_transition1.sh'
-      - 'ursusboot/scripts/build_xg140_native_profile.sh'
-      - 'ursusboot/**'
-      - 'ursusflasher/src/stock_ab_transition.py'
-      - 'ursusflasher/src/stock_fit_wrapper.py'
-      - 'ursusflasher/src/xg140_**'
-      - 'START_MD_TRANSITION.*'
-      - 'START_EXPERT.*'
 
 permissions:
   contents: read
