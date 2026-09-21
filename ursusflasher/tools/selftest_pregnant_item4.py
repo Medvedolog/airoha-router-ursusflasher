@@ -63,7 +63,8 @@ def test_md_handoff_is_networkless_and_returns_to_stock_ab():
     cfg=(ROOT/"ursusboot"/"configs"/"ursusboot-pregnant-handoff.cfg").read_text(encoding="utf-8")
     patch=(ROOT/"ursusboot"/"patches"/"191-md-pregnant-handoff.patch").read_text(encoding="utf-8")
     build=(ROOT/"ursusboot"/"scripts"/"build_md_pregnant_handoff.sh").read_text(encoding="utf-8")
-    for sym in ("CONFIG_NET_LWIP","CONFIG_CMD_PING","CONFIG_CMD_DHCP","CONFIG_CMD_WGET"):
+    assert "CONFIG_NET_LWIP=y" in cfg
+    for sym in ("CONFIG_CMD_PING","CONFIG_CMD_DHCP","CONFIG_CMD_WGET"):
         assert f"# {sym} is not set" in cfg
     baseline=(ROOT/"ursusboot"/"configs"/"u-boot.TEST61.full.config").read_text(encoding="utf-8")
     assert "CONFIG_PSCI_RESET=y" in baseline
@@ -72,7 +73,7 @@ def test_md_handoff_is_networkless_and_returns_to_stock_ab():
     assert 'run_command("reset", 0)' in patch
     assert "resetting for stock A/B retry" in patch
     assert "WEB=DISABLED" in build
-    assert "NETWORK=DISABLED" in build
+    assert "NETWORK_RUNTIME=UNUSED" in build
     assert "BOOTM_RETURN=RESET_TO_STOCK_AB" in build
 
 def test_pinned_unameone_manifest():
