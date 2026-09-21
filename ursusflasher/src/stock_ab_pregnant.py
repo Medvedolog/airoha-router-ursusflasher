@@ -23,6 +23,7 @@ import proven_backend as pb  # noqa: E402
 import stock_ab_transition as sat  # noqa: E402
 import stock_fit_initramfs as sfi  # noqa: E402
 import ursusboot_install as ubi  # noqa: E402
+import device_state as ds  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -183,6 +184,8 @@ def _monitor(host: str, policy: Policy, payload_meta: dict, seconds: int = 600) 
     transient_seen = False
     prod_verified = False
     last_status = ""
+    started = time.time()
+    next_stock_probe = started + 25
     ui.status(
         "WAIT",
         pb.tr(
@@ -214,6 +217,30 @@ def _monitor(host: str, policy: Policy, payload_meta: dict, seconds: int = 600) 
             if '"state":"PROD_VERIFIED"' in status:
                 prod_verified = True
                 ui.status("PASS", "Stage2 reported PROD_VERIFIED; waiting for production reboot.")
+        elif not transient_seen and time.time() >= next_stock_probe:
+            # Distinguish an OEM fallback from a generic "pregnant never appeared"
+            # timeout. This is a contextual migration outcome: the running OS is
+            # still NOKIA_STOCK, but it returned after SLOT2 had been selected.
+            next_stock_probe = time.time() + 10
+            try:
+                state = ds.probe_device_state(host, interactive_ssh=False)
+            except Exception as exc:
+                pb._write_session_only(f"[PREGNANT-FALLBACK-PROBE] {exc!r}")
+            else:
+                if state.probe_status == ds.PROBE_COMPLETE and state.current_system == "NOKIA_STOCK":
+                    model_ok = state.model in ("UNKNOWN", policy.model)
+                    if model_ok:
+                        ui.status(
+                            "STOCK_MASTER_FALLBACK",
+                            pb.tr(
+                                "После попытки SLOT2 снова загрузилась штатная Nokia stock/master. Pregnant initramfs не стартовал; stage2 и UBI migration не выполнялись.",
+                                "Nokia stock/master booted again after the SLOT2 attempt. Pregnant initramfs did not start; stage2 and UBI migration were not executed.",
+                            ),
+                        )
+                        raise RuntimeError(
+                            "STOCK_MASTER_FALLBACK: stock master booted again after SLOT2 selection; "
+                            "pregnant runtime did not start and no stage2 migration writes were attempted"
+                        )
         elif transient_seen and prod_verified and time.time() >= next_confirm_attempt:
             # The transient SSH plane disappeared after verified writes. A later
             # successful command can only run in the production child.
