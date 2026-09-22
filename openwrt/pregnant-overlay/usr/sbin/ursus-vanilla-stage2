@@ -19,6 +19,7 @@ PRE_SLOT_OFF=
 UBI_DEV=
 FAMILY=unknown
 DESTRUCTIVE=0
+PAYLOAD_MODE=LEGACY_SLOT2
 
 mkdir -p "$WORK"
 mkdir "$LOCK" 2>/dev/null || exit 0
@@ -90,7 +91,7 @@ fail() {
     json_state FAILED "$reason"
     log "[ERROR] $reason"
     if [ "$DESTRUCTIVE" -eq 0 ]; then
-        log 'Pre-destructive failure: rebooting through stock tcboot so the SLOT2 retry/rollback counter can advance toward untouched MASTER.'
+        log 'Pre-destructive failure: rebooting to the still-intact temporary UrsusBoot Recovery. NAND migration has not started.'
         sync
         sleep 2
         reboot -f
@@ -101,6 +102,20 @@ fail() {
 }
 
 read_meta() {
+    if [ -f /installer/PAYLOAD.env ] &&
+       [ "$(head -n1 /installer/PAYLOAD.env 2>/dev/null)" = URSUS_PREGNANT_RAMDISK_V1 ]; then
+        cp /installer/PAYLOAD.env "$META" || fail META_COPY
+        declared="$(meta_get META_SHA256)"
+        body=$WORK/pregnant.body
+        sed -n '1,/^META_SHA256=/p' "$META" | sed '$d' > "$body"
+        hex64 "$declared" || fail META_SHA_FIELD
+        [ "$(sha256sum "$body" | awk '{print $1}')" = "$declared" ] || fail META_SHA
+        [ "$(meta_get PAYLOAD_MODE)" = EMBEDDED_RAMDISK ] || fail META_MODE
+        PAYLOAD_MODE=EMBEDDED_RAMDISK
+        log 'PAYLOAD_SOURCE=EMBEDDED_RAMDISK'
+        return 0
+    fi
+
     sidx="$(require_geom nsb_slave 02880000 00020000)"
     block=0
     blocks=$((SLOT_SIZE / ERASE_SIZE))
@@ -128,6 +143,8 @@ read_meta() {
         block=$((block + 1))
     done
     [ -n "$found" ] || fail META_NOT_FOUND
+    PAYLOAD_MODE=LEGACY_SLOT2
+    log 'PAYLOAD_SOURCE=LEGACY_SLOT2'
 }
 read_child() {
     offset=$1; size=$2; output=$3; expected=$4
@@ -202,39 +219,49 @@ for command in awk cat cp dd grep head hexdump mknod mtd sed sha256sum sync tr u
     command -v "$command" >/dev/null 2>&1 || fail "TOOL_$command"
 done
 
-RUNTIME_SLOT_OFF="$(meta_get RUNTIME_FIT_SLOT_OFF)"
-RUNTIME_SIZE="$(meta_get RUNTIME_FIT_SIZE)"
-PROD_SLOT_OFF="$(meta_get PRODUCTION_SLOT_OFF)"
-FIP_SLOT_OFF="$(meta_get FIP_SLOT_OFF)"
-PRE_SLOT_OFF="$(meta_get PRELOADER_SLOT_OFF)"
 PROD_SIZE="$(meta_get PRODUCTION_SIZE)"; PROD_SHA="$(meta_get PRODUCTION_SHA256)"
 FIP_SIZE="$(meta_get FIP_SIZE)"; FIP_SHA="$(meta_get FIP_SHA256)"
 PRE_SIZE="$(meta_get PRELOADER_SIZE)"; PRE_SHA="$(meta_get PRELOADER_SHA256)"
-
-case "$RUNTIME_SLOT_OFF:$PROD_SLOT_OFF:$FIP_SLOT_OFF:$PRE_SLOT_OFF" in
-    *[!0-9a-fx:]*|'') fail META_OFFSET_FIELDS ;;
-esac
-case "$RUNTIME_SIZE:$PROD_SIZE:$FIP_SIZE:$PRE_SIZE" in *[!0-9:]*|'') fail META_SIZE_FIELDS;; esac
+case "$PROD_SIZE:$FIP_SIZE:$PRE_SIZE" in *[!0-9:]*|'') fail META_SIZE_FIELDS;; esac
 hex64 "$PROD_SHA" && hex64 "$FIP_SHA" && hex64 "$PRE_SHA" || fail META_SHA_FIELDS
 
-span_ok() {
-    off=$1; size=$2
-    case "$off" in 0x*) ;; *) return 1;; esac
-    off_dec=$((off))
-    [ $((off_dec % ERASE_SIZE)) -eq 0 ] || return 1
-    [ "$size" -gt 0 ] || return 1
-    [ $((off_dec + size)) -le "$SLOT_SIZE" ] || return 1
-}
-span_ok "$RUNTIME_SLOT_OFF" "$RUNTIME_SIZE" || fail RUNTIME_SPAN
-span_ok "$(printf '0x%08x' "$META_SLOT_OFF")" "$META_SIZE" || fail META_SPAN
-span_ok "$PROD_SLOT_OFF" "$PROD_SIZE" || fail PROD_SPAN
-span_ok "$FIP_SLOT_OFF" "$FIP_SIZE" || fail FIP_SPAN
-span_ok "$PRE_SLOT_OFF" "$PRE_SIZE" || fail PRE_SPAN
-
 PROD=$WORK/production.itb; FIP=$WORK/vanilla.fip; PRE=$WORK/preloader.bin
-read_child "$PROD_SLOT_OFF" "$PROD_SIZE" "$PROD" "$PROD_SHA"
-read_child "$FIP_SLOT_OFF" "$FIP_SIZE" "$FIP" "$FIP_SHA"
-read_child "$PRE_SLOT_OFF" "$PRE_SIZE" "$PRE" "$PRE_SHA"
+if [ "$PAYLOAD_MODE" = EMBEDDED_RAMDISK ]; then
+    cp /installer/production.itb "$PROD" || fail COPY_PROD
+    cp /installer/vanilla.fip "$FIP" || fail COPY_FIP
+    cp /installer/preloader.bin "$PRE" || fail COPY_PRELOADER
+    [ "$(wc -c < "$PROD")" -eq "$PROD_SIZE" ] || fail PROD_SIZE
+    [ "$(wc -c < "$FIP")" -eq "$FIP_SIZE" ] || fail FIP_SIZE
+    [ "$(wc -c < "$PRE")" -eq "$PRE_SIZE" ] || fail PRE_SIZE
+    [ "$(sha256sum "$PROD" | awk '{print $1}')" = "$PROD_SHA" ] || fail PROD_SHA
+    [ "$(sha256sum "$FIP" | awk '{print $1}')" = "$FIP_SHA" ] || fail FIP_SHA
+    [ "$(sha256sum "$PRE" | awk '{print $1}')" = "$PRE_SHA" ] || fail PRE_SHA
+else
+    RUNTIME_SLOT_OFF="$(meta_get RUNTIME_FIT_SLOT_OFF)"
+    RUNTIME_SIZE="$(meta_get RUNTIME_FIT_SIZE)"
+    PROD_SLOT_OFF="$(meta_get PRODUCTION_SLOT_OFF)"
+    FIP_SLOT_OFF="$(meta_get FIP_SLOT_OFF)"
+    PRE_SLOT_OFF="$(meta_get PRELOADER_SLOT_OFF)"
+    case "$RUNTIME_SLOT_OFF:$PROD_SLOT_OFF:$FIP_SLOT_OFF:$PRE_SLOT_OFF" in
+        *[!0-9a-fx:]*|'') fail META_OFFSET_FIELDS ;;
+    esac
+    span_ok() {
+        off=$1; size=$2
+        case "$off" in 0x*) ;; *) return 1;; esac
+        off_dec=$((off))
+        [ $((off_dec % ERASE_SIZE)) -eq 0 ] || return 1
+        [ "$size" -gt 0 ] || return 1
+        [ $((off_dec + size)) -le "$SLOT_SIZE" ] || return 1
+    }
+    span_ok "$RUNTIME_SLOT_OFF" "$RUNTIME_SIZE" || fail RUNTIME_SPAN
+    span_ok "$(printf '0x%08x' "$META_SLOT_OFF")" "$META_SIZE" || fail META_SPAN
+    span_ok "$PROD_SLOT_OFF" "$PROD_SIZE" || fail PROD_SPAN
+    span_ok "$FIP_SLOT_OFF" "$FIP_SIZE" || fail FIP_SPAN
+    span_ok "$PRE_SLOT_OFF" "$PRE_SIZE" || fail PRE_SPAN
+    read_child "$PROD_SLOT_OFF" "$PROD_SIZE" "$PROD" "$PROD_SHA"
+    read_child "$FIP_SLOT_OFF" "$FIP_SIZE" "$FIP" "$FIP_SHA"
+    read_child "$PRE_SLOT_OFF" "$PRE_SIZE" "$PRE" "$PRE_SHA"
+fi
 [ "$(dd if="$PROD" bs=1 count=4 2>/dev/null | hexdump -v -e '4/1 "%02x"')" = d00dfeed ] || fail PROD_MAGIC
 [ "$(dd if="$FIP" bs=1 count=8 2>/dev/null | hexdump -v -e '8/1 "%02x"')" = 010064aa78563412 ] || fail FIP_MAGIC
 sysupgrade -T "$PROD" >>"$LOG" 2>&1 || fail SYSUPGRADE_TEST
