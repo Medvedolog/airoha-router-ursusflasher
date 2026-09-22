@@ -82,6 +82,30 @@ def _policy(name: str) -> Policy:
         raise RuntimeError(f"unsupported pregnant profile: {name}") from exc
 
 
+def _choose_verified_stock_backup(policy: Policy, supplied: str | Path | None = None) -> tuple[Path, dict]:
+    """Use an existing restore-grade backup; item 4 never captures another full dump."""
+    if supplied is None:
+        raw = input(pb.tr(
+            "Путь к ранее сделанному полному stock backup (каталог с mtd0..mtd16): ",
+            "Path to an existing complete stock backup (directory with mtd0..mtd16): ",
+        )).strip().strip('"')
+        if not raw:
+            raise RuntimeError("existing stock backup path is required for item 4")
+        path = Path(raw).expanduser()
+    else:
+        path = Path(supplied).expanduser()
+    if not path.is_dir():
+        raise RuntimeError(f"stock backup directory not found: {path}")
+    result = pb.verify_stock_restore_backup(path)
+    family = str(result.get("stock_family") or "").strip().lower()
+    if family and family != policy.family:
+        raise RuntimeError(
+            f"stock backup family mismatch: selected {policy.family}, backup reports {family}"
+        )
+    ui.status("READY", f"Existing restore-grade stock backup verified: {path}")
+    return path, result
+
+
 def _payload_root(policy: Policy) -> Path:
     base = ROOT / "payloads" / "vanilla-pregnant" / policy.payload_dir
     if not REPO_MODE:
@@ -285,7 +309,7 @@ def _reopen_verified_stock_root(host: str, policy: Policy):
     return access, telnet
 
 
-def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True) -> int:
+def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True, backup_path: str | Path | None = None) -> int:
     policy = _policy(profile)
     ui.enable()
     files, payload_meta = _load_payload(policy)
@@ -302,18 +326,10 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True) -> int
         access.family = policy.family
         writer = sat._mtd_writer_preflight(telnet)
 
-        # The complete verified backup is the sole source of stock evidence and
-        # candidate construction. Nothing device-specific enters the repository.
-        full_backup = run_dir / "full-stock-backup"
-        pb.backup_tftp(
-            access,
-            access.host,
-            full_backup,
-            expected_family=policy.family,
-            allow_service_provisioning=True,
-        )
-        backup_result = pb.verify_stock_restore_backup(full_backup)
-        ui.status("READY", f"Complete stock backup verified: {full_backup}")
+        # Reuse an operator-selected restore-grade stock backup. Iterative item-4
+        # testing must not spend minutes recapturing mtd0..mtd16 before every
+        # pre-write attempt. The validator remains authoritative for backup integrity.
+        full_backup, backup_result = _choose_verified_stock_backup(policy, backup_path)
 
         bootloader, bootloader_sha, bootloader_path = sat._backup_partition_bytes(
             full_backup, policy.bootloader_mtd, "bootloader", 0x00080000
@@ -422,7 +438,7 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True) -> int
         )
 
         ui.section("VANILLA PREGNANT MIGRATION", style="amber2")
-        ui.status("READY", f"{policy.model}: complete verified stock backup; SLOT1 remains untouched")
+        ui.status("READY", f"{policy.model}: existing verified stock backup selected; SLOT1 remains untouched")
         ui.status("READY", f"SLOT2 candidate SHA256 {slot_meta['candidate_sha256']}")
         ui.status("READY", f"Pinned UnameOne production SHA256 {payload_meta['unameone_sha256']}")
         ui.status("READY", f"writer={writer}; transport={transport}; both frozen before destructive boundary")
@@ -538,9 +554,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="UrsusFlasher full pregnant Vanilla migration")
     parser.add_argument("--host", default=os.environ.get("NOKIA_HOST", "192.168.1.1"))
     parser.add_argument("--profile", choices=tuple(POLICIES), required=True)
+    parser.add_argument("--backup", help="existing restore-grade stock backup directory")
     parser.add_argument("--no-monitor", action="store_true")
     args = parser.parse_args(argv)
-    return run(host=args.host, profile=args.profile, monitor=not args.no_monitor)
+    return run(host=args.host, profile=args.profile, monitor=not args.no_monitor, backup_path=args.backup)
 
 
 if __name__ == "__main__":
