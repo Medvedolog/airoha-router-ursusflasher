@@ -17,12 +17,18 @@ def test_expert_can_skip_full_backup():
         assert "skip_full_backup=skip_backup" in source
         assert "EXPERT backup: Enter" in source
         assert "s — пропустить" in source
-        assert "[y/N]" not in source[source.index("if number == 1:"):source.index("elif number == 2:")]
+        block=source[source.index("if number == 1:"):source.index("elif number == 2:")]
+        assert "[y/N]" not in block
+        assert "EXPERT backup: Enter" in block
 
     assert "def main(*, skip_full_backup: bool = False)" in one_key
     assert "install_ursus_from_stock(stock_host, skip_full_backup=skip_full_backup)" in one_key
     assert "skip_full_backup=skip_full_backup" in install
     assert "full_stock_backup_skipped" in install
+    assert "EXPERT: skip the full restore-grade backup for this run? [y/N]" not in multi
+    helper=multi[multi.index("def _ask_skip_full_backup"):multi.index("def _project_root")]
+    assert "[y/N]" not in helper
+    assert "s — skip" in helper
     assert "EXPERT: skip the full restore-grade backup for this run? [y/N]" not in multi
 
 
