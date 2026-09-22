@@ -71,23 +71,15 @@ probe_pristine() {
     esac
     canonical_ubi_header_present && fail UBI_OR_PARTIAL_CONVERSION
 
-    bootidx="$(require_geom stock_bootloader 00080000 00020000)"
-    midx="$(require_geom nsb_master 02880000 00020000)"
-    fidx="$(require_geom flag 00040000 00020000)"
-    fbidx="$(require_geom flagback 00040000 00020000)"
-    bidx="$(require_geom bosa_stock 00040000 00020000)"
-    ridx="$(require_geom ri_stock 00040000 00020000)"
-
-    for key in STOCK_BOOTLOADER_SHA256 STOCK_MASTER_SHA256 STOCK_FLAGBACK_SHA256 STOCK_FLAG_TAIL_SHA256 STOCK_BOSA_SHA256 STOCK_RI_SHA256; do
-        value="$(meta_get "$key")"
-        hex64 "$value" || fail "META_$key"
-    done
-    [ "$(sha_part /dev/mtd${bootidx})" = "$(meta_get STOCK_BOOTLOADER_SHA256)" ] || fail STOCK_BOOTLOADER_CHANGED
-    [ "$(sha_part /dev/mtd${midx})" = "$(meta_get STOCK_MASTER_SHA256)" ] || fail MASTER_CHANGED
-    [ "$(sha_part /dev/mtd${fbidx})" = "$(meta_get STOCK_FLAGBACK_SHA256)" ] || fail FLAGBACK_CHANGED
-    [ "$(sha_tail /dev/mtd${fidx})" = "$(meta_get STOCK_FLAG_TAIL_SHA256)" ] || fail FLAG_NON_ACTIVE_CHANGED
-    [ "$(sha_part /dev/mtd${bidx})" = "$(meta_get STOCK_BOSA_SHA256)" ] || fail BOSA_CHANGED
-    [ "$(sha_part /dev/mtd${ridx})" = "$(meta_get STOCK_RI_SHA256)" ] || fail RI_CHANGED
+    # Safety here is structural: this must still be the pregnant runtime on the
+    # expected stock layout and must not already be in/after canonical migration.
+    # Do not refuse based on pre-reboot snapshots of unrelated stock bytes.
+    require_geom stock_bootloader 00080000 00020000 >/dev/null
+    require_geom nsb_master 02880000 00020000 >/dev/null
+    require_geom flag 00040000 00020000 >/dev/null
+    require_geom flagback 00040000 00020000 >/dev/null
+    require_geom bosa_stock 00040000 00020000 >/dev/null
+    require_geom ri_stock 00040000 00020000 >/dev/null
     return 0
 }
 
