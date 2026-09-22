@@ -139,7 +139,7 @@ def test_stock_fit_topology_is_derived_not_hardcoded():
     assert "selected_fit_nodes" in src
     assert "expected exactly one in-range HDR2/FIT boot payload" in src
     assert "stock_fdt_magic_ok" in src
-    assert "ntfw_staging_bounds_verified" in src
+    assert "ntfw_staging_bounds_verified" in (SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
 
 def test_md_staging_does_not_require_config_filesystem_or_fit_carrier():
     wrapper=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
