@@ -272,10 +272,28 @@ def test_md_uses_hw_proven_stock_wrapper():
     sfi_source=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
     pregnant=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
     assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_FREE_TAIL_V4" in sfi_source
-    assert "sfw.build_transition_slot(" in sfi_source
+    assert "sfw.build_md_transition_slot(" in sfi_source
+    wrapper=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
+    assert "def build_md_proven_transition_slot(" in wrapper
+    assert "MD_HW_PROVEN_TRANSITION2_LITERAL_FIT_V1" in wrapper
+    assert "def build_md_transition_slot(" in wrapper
+    assert "Node names are not an applicability gate" in wrapper
+    assert "return build_transition_slot(" in wrapper
     assert "stock_tcboot_fdt_byte_identical" in sfi_source
     assert 'files["handoff"]' in pregnant
     assert "pregnant-handoff.linuximg" in pregnant
+
+def test_md_proven_wrapper_matches_hw_transition2_mutation_surface():
+    wrapper=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
+    proven=wrapper[wrapper.index("def build_md_proven_transition_slot"):wrapper.index("def build_md_transition_slot")]
+    assert '"/images/kernel@1/data"' in proven
+    assert '"/images/fdt@1/data"' in proven
+    assert '"/images/filesystem@1/data"' in proven
+    assert '"/images/kernel@1/hash@1/value"' in proven
+    assert 'out[comp_off:comp_off + comp_len] = b"none\\0"' in proven
+    assert "hashlib.sha1(kernel).digest()" in proven
+    assert "unexpected bytes changed outside proven MD TRANSITION2 FIT fields" in proven
+
 
 def test_md_handoff_is_networkless_and_returns_to_stock_ab():
     cfg=(ROOT/"ursusboot"/"configs"/"ursusboot-pregnant-handoff.cfg").read_text(encoding="utf-8")
@@ -313,5 +331,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_runtime_uses_exact_live_tail_span(); test_stage2_discovers_dynamic_manifest_and_offsets(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_runtime_uses_exact_live_tail_span(); test_stage2_discovers_dynamic_manifest_and_offsets(); test_md_uses_hw_proven_stock_wrapper(); test_md_proven_wrapper_matches_hw_transition2_mutation_surface(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
