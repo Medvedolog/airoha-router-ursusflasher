@@ -1,0 +1,542 @@
+From c6a1848cdc1fc05a52177eaf60ef821a7bb483c2 Mon Sep 17 00:00:00 2001
+From: medvedolog <afadopulo@gmail.com>
+Date: Tue, 22 Sep 2026 19:54:20 +0000
+Subject: [PATCH] docs: actualize item 4 for the direct UrsusBoot STOCK->UBI
+ path
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Both documents described the retired pregnant/SLOT2 architecture as
+normative. The implemented item 4 no longer uses a SLOT2 carrier, stock
+bootm, an autonomous Linux stage2 or a Vanilla FIP/BL2 replacement.
+
+Add a status banner to the top of each document and a normative section
+grounded in the current code:
+
+- MD_VANILLA_HANDOFF.md section 21 — the direct path, the single y/N it
+  authorizes, the migration state machine as it exists in cmd/ursusubi.c,
+  the identity/bootloader outcome, the revised destructive boundary and
+  rollback model, and a per-section map of what no longer applies.
+- v5.45_VANILLA_INITRAMFS.md section 19 — the same change as a normative
+  amendment, listing which clauses of the redaction are suspended and
+  which stay in force.
+
+The pregnant/SLOT2 sections are kept rather than deleted: they remain the
+record of the decisions and the hardware facts, and the R&D line still
+backs the negative guards in selftest_item4_direct_ubi.py.
+
+No HW PASS is claimed for the STOCK->UBI transaction; the first run is
+destructive. docs/HW_TEST_ITEM4_RU.md is flagged as still describing the
+old checkpoints.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_018veopeZv649b6RWaYLdp64
+---
+ docs/MD_VANILLA_HANDOFF.md                    | 272 ++++++++++++++++++
+ ...usFlasher_TZ_RU_v5.45_VANILLA_INITRAMFS.md | 198 +++++++++++++
+ 2 files changed, 470 insertions(+)
+
+diff --git a/docs/MD_VANILLA_HANDOFF.md b/docs/MD_VANILLA_HANDOFF.md
+index 5c9042e..12408b6 100644
+--- a/docs/MD_VANILLA_HANDOFF.md
++++ b/docs/MD_VANILLA_HANDOFF.md
+@@ -5,6 +5,26 @@
+ **HEAD перед этой редакцией handoff:** `a9e3036451ec778fb6567232dd0e26622645580b`  
+ **Нормативное ТЗ:** `docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.45_VANILLA_INITRAMFS.md`
+ 
++> [!IMPORTANT]
++> **Статус на 2026-09-22: разделы 1–20 описывают снятый pregnant/SLOT2 путь.**
++>
++> EXPERT item 4 больше не использует SLOT2-носитель, stock `bootm`, автономный
++> pregnant initramfs и замену загрузчика на Vanilla. Текущий HW-кандидат:
++>
++> ```text
++> stock Nokia
++>   -> persistent UrsusBoot в mtd0
++>   -> UrsusBoot Recovery (Reset)
++>   -> firmware upload в RAM
++>   -> ubi-preloader upload в RAM
++>   -> штатный UrsusBoot STOCK->UBI backend
++>   -> OpenWrt UBI; UrsusBoot остаётся Recovery
++> ```
++>
++> Нормативное описание — **раздел 21**. Разделы 1–20 сохранены как история
++> решений и как источник доказанных аппаратных фактов; предъявлять их
++> требования к item 4 нельзя.
++
+ ## 1. Главный архитектурный pivot
+ 
+ Vanilla item 4 больше не должен зависеть от исправления сетевого стека `UrsusBoot TRANSITION2`.
+@@ -921,3 +941,255 @@ CI PASS != HW PASS
+ exact run + exact SHA required for CI PASS
+ XG140 line paused unless operator explicitly reopens it
+ ```
++
++
++---
++
++## 21. Актуализация — 2026-09-22 / item 4 = прямой UrsusBoot STOCK→UBI
++
++Этот раздел нормативен для EXPERT item 4 и имеет приоритет над разделами 1–20.
++
++Код-носитель актуализации в `feature/ursusboot-modular-airoha`:
++
++```text
++88ad256413bd99e506e830d016075847f02fb404  item4: use native UrsusBoot stock-to-UBI migration
++f3f7b796e03424a636912a5fc79f9142e9162ed0  ui: split OpenWrt install from Vanilla bootloader switch
++5f96f79edb469eff9a624b2ca1584b87ed174710  test: add direct UrsusBoot item4 contract QA
++26335e7fcf9fd549feac5d2f709663c78a1a3760  test: avoid matching explanatory pregnant text
++e1d32cfdb467fbf0d1fc2abe6e3e15215662b182  ci: add focused MD direct item4 HW test kit
++4ff3a42bd6a3161d2d156354f651043b4ec57d33  ci: reuse bundle path resolver for direct item4
++```
++
++### 21.1. Почему путь сменился
++
++Pregnant/SLOT2 путь требовал одновременно пяти недоказанных компонентов:
++stock-совместимого FIT-носителя в SLOT2, работающего `bootm`-handoff от tcboot,
++автономного Linux stage2, Linux-реализации `ursusstockslot` и
++трёхсостоянийного pristine-probe. Ни один из них не имеет HW PASS, а последний
++аппаратный цикл (раздел 20) остановился ещё на построении кандидата.
++
++UrsusBoot в mtd0, наоборот, уже доказан на железе как persistent-загрузчик, а
++его собственный STOCK→UBI backend уже существует в C-коде и уже вызывается
++обычной установкой OpenWrt через Recovery. Новый item 4 не строит вторую
++реализацию миграции — он вызывает ту же самую.
++
++Цена решения названа прямо: item 4 больше не доводит аппарат до Vanilla
++загрузчика. Он доводит до OpenWrt, а загрузчиком остаётся UrsusBoot.
++
++### 21.2. Нормативный путь
++
++Точка входа — `ursusflasher/src/ursusboot_pregnant.py::run_expert`. Имя модуля
++осталось историческим; pregnant-механики в нём больше нет.
++
++```text
++stock Nokia XG-040G-MD (только этот профиль)
++  -> one_key.require_bundle_role("OPENWRT_UBI_SYSUPGRADE")
++  -> one_key.require_bundle_role("STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE")
++  -> печать SHA256 обоих артефактов
++  -> ОДНО y/N
++  -> ursusboot_install.run_install(unattended=True, skip_full_backup=False)
++        полный stock backup + geometry + запись mtd0 + readback
++  -> _wait_recovery(host, 90) либо ручной вход по Reset
++  -> жёсткая проверка status().current_layout == "STOCK"
++  -> ursus_web_client.update_firmware(confirm=False, preloader=…, keep_settings=False)
++  -> требуется operation_complete
++  -> журнал [ITEM4_DIRECT_UBI] migration_complete=1 bootloader=URSUSBOOT retained=1
++  -> reboot (best-effort)
++```
++
++Внутри `update_firmware` (`ursusflasher/src/ursus_web_client.py:488`) при
++`current_layout` из `STOCK`/`OPENWRT_STOCK_LAYOUT`:
++
++```text
++upload(preloader, 'preloader')  -> /api/ubi-preloader-begin|chunk  -> VALID
++upload(image,     'firmware')   -> /api/firmware-begin|chunk       -> VALID
++status().image_type             == OPENWRT_UBI_SYSUPGRADE
++status().ubi_migration_available == true
++POST /api/install-ubi
++     X-Ursus-Confirm: INSTALL-UBI
++     X-Ursus-Keep-Settings: 0      (для не-UBI разметки keep всегда 0)
++_poll(bootloader=False)
++```
++
++Обе RAM-загрузки — уже существующие upload-сессии UrsusBoot. Ни одного нового
++транспорта, ни одного нового writer'а в этом пути не появилось.
++
++### 21.3. Одно y/N сохраняется
++
++Контракт раздела 6 остаётся в силе дословно: одно осмысленное `y/N` после
++автоматического preflight, никаких codewords, никаких повторных подтверждений.
++Изменился только список того, что это `y` разрешает:
++
++```text
++запись UrsusBoot в mtd0 + readback
++вход в Recovery
++загрузка production FIT и UBI preloader в RAM
++штатная STOCK->UBI миграция с BL2 LAST
++финальная сверка
++reboot
++```
++
++`confirm=False` в вызове `update_firmware` — это не отключение защиты, а
++отказ от второго подтверждения внутри уже подтверждённой транзакции.
++
++### 21.4. State machine переехала в UrsusBoot
++
++Linux stage2 и его состояния (`BOOTED`/`PREFLIGHT`/`MIGRATION_OK`/
++`PROD_WRITING`/… из раздела 9) в этом пути не существуют. Деструктивную часть
++исполняет U-Boot: `cmd/ursusweb.c:2194` (`POST /api/install-ubi`) и
++`cmd/ursusubi.c`.
++
++Фактические стадии устройства:
++
++```text
++PRECHECK
++BACKUP_BOSA
++BACKUP_RI
++BACKUP_FIP        сохранение текущего UrsusBoot FIP в RAM
++FORMAT_UBI        <- деструктивная граница
++ATTACH_UBI
++CREATE_VOLUMES    семь томов
++WRITE_BOSA
++WRITE_RI
++WRITE_FIP         обратно пишется UrsusBoot FIP, а не Vanilla
++WRITE_FIT
++VERIFY_BOSA
++VERIFY_RI
++VERIFY_FIP
++VERIFY_FIT
++COMMIT_BL2        полный 128 KiB BL2 — последним
++VERIFY_BL2
++COMPLETE | FAILED
++```
++
++Семь томов: `ubootenv`, `ubootenv2`, `bosa`, `ri`, `fip`, `fit`, `rootfs_data`.
++
++Ответ на старт миграции декларирует порядок фиксации явно:
++
++```text
++{"result":"UBI_MIGRATION_STARTED","commit":"BL2_LAST","bl2_layout":"FF800+PRELOADER@800+FFPAD"}
++```
++
++Устройство отказывает с 409, если `ursus_preloader_valid` или
++`ursus_ubi_bl2_candidate_valid()` не выполнены. Требование BL2 LAST из
++разделов 2, 8 и 15 сохранено — но исполняется прошивкой, а не хостом.
++
++Мониторинга по SSH, `/tmp/ursus-install/status.json` и `install.log` в этом
++пути нет вовсе. Прогресс читается из `/api/status` UrsusBoot и по UART.
++
++### 21.5. Идентичность и загрузчик
++
++```text
++bosa, ri            сохраняются в RAM и записываются обратно с readback
++UrsusBoot FIP       сохраняется и записывается обратно
++BL2                 совместимый, фиксируется последним
++Vanilla FIP/BL2     НЕ пишутся
++UrsusBoot           остаётся установленным Recovery-загрузчиком
++```
++
++Переход на чистый Vanilla OpenWrt U-Boot вынесен в отдельную будущую операцию
++и требует отдельной валидации Vanilla FIP/BL2. До неё текущий Recovery —
++известное рабочее состояние (`f3f7b79`).
++
++### 21.6. Граница деструктива и модель отката изменились
++
++Это главное практическое отличие от разделов 10–14, и оно должно быть понято
++до прогона.
++
++```text
++до записи mtd0
++    полный проверенный stock backup — единственная авторитетная копия
++
++после записи mtd0
++    stock tcboot в загрузочной области больше нет
++    НЕ действуют: SLOT1 fallback, счётчик 15 неудачных загрузок,
++                  selector `flag`, ursusstockslot
++    возврат в сток = восстановление mtd0 из проверенного backup
++                     (stock_bootarea_restore.py / UART BootROM),
++                     а не переключение слота
++
++до FORMAT_UBI
++    nsb_master/nsb_slave не тронуты; стоковый Linux на месте
++    восстановление mtd0 возвращает аппарат в сток
++
++после FORMAT_UBI
++    стоковая разметка уничтожена; возврата в сток нет
++```
++
++Трёхсостоянийный контракт `rollback_allowed` (разделы 13–14) описывал
++Linux-утилиту, которой в этом пути нет. Его нельзя предъявлять как выполненное
++или невыполненное требование item 4 — он относится к снятой архитектуре.
++
++Практическое следствие для оператора: проверенный BootROM-путь на конкретном
++аппарате обязателен **до** запуска item 4, а не после.
++
++### 21.7. Что из разделов 1–20 больше не применяется к item 4
++
++| Раздел | Предмет | Статус |
++|---|---|---|
++| 1, 19 | SLOT2 payload, selector, pregnant boot | снято |
++| 2 | топология SLOT1=fallback / SLOT2=installer | снято вместе со SLOT2 |
++| 3 | HW-факты TRANSITION2 | остаётся как история; для item 4 не требуется |
++| 4, 19 | перенос механик MedveFlasher, stage2/autoflash | снято |
++| 5 | `console_ui` contract | **в силе** |
++| 6 | одно осмысленное `y/N`, запрет ceremony | **в силе**, см. 21.3 |
++| 7 | содержимое pregnant initramfs | снято |
++| 8 | stage1 на стоке | заменён на 21.2 |
++| 9 | автономный stage2, `/tmp` telemetry | снято, см. 21.4 |
++| 10–11 | migration state, SSH monitor/recovery plane | снято, см. 21.4 |
++| 12 | Linux `ursusstockslot` | снято, см. 21.6 |
++| 13–14 | трёхсостоянийный no-UART rollback | снято, см. 21.6 |
++| 15 | конечный Vanilla boot chain | отложено в отдельную операцию, см. 21.5 |
++| 16 | persistent UrsusBoot как отдельный продукт | **в силе**, и теперь он — носитель item 4 |
++| 17 | план реализации | заменён на 21.10 |
++| 18 | repo/operator инварианты | **в силе** |
++| 20 | OEM FIT carrier fix, gate policy | fix относится к снятому пути; **gate policy остаётся в силе** |
++
++Pinned production payload (UnameOne Edition 2026-09-16, разделы 19 и 20)
++остаётся источником истины: `OPENWRT_UBI_SYSUPGRADE` в
++`config/FIRMWARE_BUNDLE.json` — тот же UBI sysupgrade, что и раньше, и
++доставляется теперь напрямую, а не как ребёнок внутри ITB.
++
++### 21.8. Область и статус доказательств
++
++```text
++persistent UrsusBoot в mtd0        HW PASS по линии TEST61
++                                   (не для конкретного артефакта текущего кита)
++preloader/BL2 presentation         HW-proven lineage, зафиксирована
++                                   ursus_bl2_image_sha256 в cmd/ursusubi.c
++полная транзакция STOCK->UBI       HW PASS НЕТ; первый прогон деструктивный
++MF / XG-040G-MF                    заблокирован: profile != "xg040-md" -> RuntimeError
++```
++
++CI-поверхность актуализации:
++
++```text
++ursusflasher/tools/selftest_item4_direct_ubi.py   контракт: negative-проверки
++                                                  на initramfs upload и boot_once
++.github/workflows/md-item4-direct-ubi.yml         сборка MD test kit
++```
++
++Negative-проверки в selftest намеренно стерегут снятую архитектуру: если в
++`ursusboot_pregnant.py` снова появится `uw.upload(host, image, "initramfs"` или
++`boot_once(`, QA упадёт. CI PASS остаётся допуском к первому HW-тесту, а не
++HW PASS.
++
++### 21.9. Известное расхождение в документации
++
++`docs/HW_TEST_ITEM4_RU.md` (протокол стендового прогона) написан под
++pregnant/SLOT2 путь: его контрольные точки 2–3 ожидают `SLOT2 selected` и
++загрузку pregnant runtime, а раздел отката ссылается на `ursusstockslot master`.
++Для нового пути он неверен и подлежит переписыванию до прогона.
++
++### 21.10. Следующие шаги
++
++```text
++1. Переписать docs/HW_TEST_ITEM4_RU.md под контрольные точки 21.4/21.6.
++2. Проверить BootROM-путь на конкретном MD аппарате.
++3. HW-прогон MD: запись mtd0 -> Recovery -> STOCK->UBI -> OpenWrt.
++4. Только после MD HW PASS — параметризация MF без копирования MD-констант.
++5. Отдельная операция замены UrsusBoot на Vanilla — после отдельной
++   валидации Vanilla FIP/BL2, не раньше.
++6. Pregnant/SLOT2 код и его QA не удалять: они остаются R&D-линией и
++   источником negative-проверок.
++```
+diff --git a/docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.45_VANILLA_INITRAMFS.md b/docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.45_VANILLA_INITRAMFS.md
+index d71424d..3f27b9e 100644
+--- a/docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.45_VANILLA_INITRAMFS.md
++++ b/docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.45_VANILLA_INITRAMFS.md
+@@ -6,6 +6,18 @@
+ **Базовый HEAD до этой редакции:** `48d1bc3e8a5e34a5b012acab4bca2df00a92a7b2`  
+ **Статус:** authoritative delta для Vanilla item 4. В части Vanilla transition/install path эта редакция имеет приоритет над v5.39 и v5.44. Определение Vanilla из v5.41 сохраняется. Persistent UrsusBoot, MF persistent и XG140 native/persistent требования не изменяются.
+ 
++> [!IMPORTANT]
++> **Статус на 2026-09-22: разделы 1–18 частично приостановлены.**
++>
++> EXPERT item 4 реализован не через SLOT2/pregnant initramfs, а напрямую:
++> persistent UrsusBoot в mtd0 → Recovery → штатный STOCK→UBI backend → OpenWrt.
++> UrsusBoot остаётся Recovery; Vanilla FIP/BL2 этим путём не пишутся.
++>
++> Нормативная поправка — **раздел 19**. Он имеет приоритет над разделами 1–4,
++> 6–14 и 16 этой редакции. Разделы 5, 15, 17 и 18 сохраняются без изменений.
++> Полное операционное описание нового пути — `docs/MD_VANILLA_HANDOFF.md`,
++> раздел 21.
++
+ ## 1. Архитектурное решение
+ 
+ Для режима **Vanilla OpenWrt** переходной UrsusBoot больше не является обязательной install-средой.
+@@ -533,3 +545,189 @@ Production child является единым source-of-truth для соотв
+ Build implementation должна использовать proven MedveFlasher-style FIT/newc injection либо эквивалентно доказанный механизм. OpenWrt ImageBuilder `make image` не считается источником требуемого initramfs ITB, поскольку текущий CI эксперимент не получил такой artifact.
+ 
+ Первый успешный CI полного builder не является HW PASS. CI PASS объявляется только после проверки exact run exact SHA; hardware status присваивается отдельно по UART/board evidence.
++
++
++---
++
++## 19. Поправка 2026-09-22 — item 4 исполняется прямым UrsusBoot STOCK→UBI
++
++Эта поправка нормативна для EXPERT item 4 и имеет приоритет над разделами
++1–4, 6–14 и 16 настоящей редакции.
++
++### 19.1. Смена install environment
++
++Раздел 1 объявлял install-средой Linux initramfs, загруженный стоковым tcboot
++из SLOT2. Это решение отменяется. Install-средой является **persistent
++UrsusBoot в mtd0** — уже доказанный на железе загрузчик, чей STOCK→UBI backend
++существует в прошивке и вызывается обычной установкой OpenWrt через Recovery.
++
++Нормативный путь:
++
++```text
++Nokia stock
++  -> verified full backup
++  -> одно meaningful y/N
++  -> запись persistent UrsusBoot в mtd0 + readback
++  -> UrsusBoot Recovery по Reset
++  -> RAM upload: production OpenWrt UBI sysupgrade
++  -> RAM upload: проверенный UBI transition preloader / 128 KiB BL2 candidate
++  -> штатный UrsusBoot STOCK->OPENWRT_UBI backend
++  -> OpenWrt UBI
++```
++
++Запрещено в этом пути:
++
++```text
++SLOT2-носитель и запись selector
++stock bootm handoff
++pregnant/autonomous Linux initramfs installer
++запись Vanilla FIP / Vanilla BL2
++```
++
++Конечное состояние item 4: **OpenWrt UBI с UrsusBoot в качестве Recovery**.
++Определение Vanilla из v5.41 не меняется, но достижение Vanilla boot chain
++(раздел 15) выносится в отдельную операцию с собственной валидацией Vanilla
++FIP/BL2 и не входит в scope item 4.
++
++### 19.2. Приостановленные требования
++
++| Раздел | Предмет | Статус |
++|---|---|---|
++| 1 | путь через SLOT2/initramfs | заменён на 19.1 |
++| 2 | обоснование переноса в Linux initramfs | историческое |
++| 3 | pregnant initramfs contract | приостановлен |
++| 4 | перенос механик MedveFlasher | приостановлен |
++| 5 | минимум gates, одно `y/N` | **в силе**, см. 19.3 |
++| 6 | stage 1 на стоке | заменён на 19.1 |
++| 7 | автономный stage2, `/tmp` telemetry | приостановлен, см. 19.4 |
++| 8 | migration state на virgin stock | приостановлен, см. 19.5 |
++| 9 | SSH contract | приостановлен: SSH в пути отсутствует |
++| 10 | Linux `ursusstockslot` | приостановлен, см. 19.5 |
++| 11–12 | трёхсостоянийный rollback и escape hatch | приостановлены, см. 19.5 |
++| 13 | final Vanilla transaction | заменён на 19.4 |
++| 14 | hardware acceptance | заменён на 19.6 |
++| 15 | конечный Vanilla payload policy | **в силе** для отдельной операции |
++| 16 | план реализации | заменён на 19.7 |
++| 17 | repository/operator rules | **в силе** |
++| 18 | pinned production payload | **в силе** |
++
++Приостановленные разделы не удаляются: pregnant/SLOT2 линия сохраняется как
++R&D и как источник negative-проверок в QA.
++
++### 19.3. Одно `y/N` сохраняется дословно
++
++Требование раздела 5 не меняется: одно осмысленное `y/N` после полного
++автоматического preflight, никаких codewords, никаких повторных подтверждений
++между стадиями. Меняется только перечень разрешаемого:
++
++```text
++запись UrsusBoot в mtd0 + readback
++вход в Recovery
++RAM upload production FIT и UBI preloader
++STOCK->UBI миграция с BL2 LAST
++финальная сверка
++reboot
++```
++
++Второе подтверждение внутри уже подтверждённой транзакции запрещено; отсюда
++`confirm=False` при вызове миграции с хоста.
++
++### 19.4. Транзакция исполняется прошивкой
++
++Host не является исполнителем деструктивной части и не отправляет команду на
++каждую стадию. После `POST /api/install-ubi` с `X-Ursus-Confirm: INSTALL-UBI`
++транзакцию ведёт UrsusBoot.
++
++Нормативные стадии устройства:
++
++```text
++PRECHECK
++BACKUP_BOSA / BACKUP_RI / BACKUP_FIP
++FORMAT_UBI          <- деструктивная граница
++ATTACH_UBI
++CREATE_VOLUMES      ubootenv, ubootenv2, bosa, ri, fip, fit, rootfs_data
++WRITE_BOSA / WRITE_RI / WRITE_FIP / WRITE_FIT
++VERIFY_BOSA / VERIFY_RI / VERIFY_FIP / VERIFY_FIT
++COMMIT_BL2          полный 128 KiB BL2 — последним
++VERIFY_BL2
++COMPLETE | FAILED
++```
++
++Обязательные инварианты, сохранённые из разделов 8 и 13:
++
++```text
++идентичность (bosa, ri) сохраняется и проверяется readback
++каждая запись имеет соответствующую verify-стадию
++BL2 фиксируется последним
++после начала записи запрещены automatic backend switching и blind retry
++устройство обязано отказать (409), если preloader или 128 KiB BL2 candidate
++    не прошли валидацию
++```
++
++Отличие от раздела 13: в том же `fip`-томе восстанавливается **UrsusBoot FIP**,
++а не Vanilla. Это следствие 19.1, а не послабление контракта.
++
++Состояния `/tmp/ursus-install/status.json` и `install.log` в этом пути не
++существуют. Прогресс наблюдается через `/api/status` UrsusBoot и по UART.
++
++### 19.5. Модель отката пересмотрена
++
++Разделы 10–12 описывали Linux-утилиту `ursusstockslot` и трёхсостоянийный
++pristine-probe. В новом пути ни утилиты, ни selector-переключения нет, потому
++что после записи mtd0 стокового tcboot в загрузочной области больше нет.
++
++Нормативная модель:
++
++```text
++до записи mtd0
++    полный проверенный stock backup — единственная авторитетная копия;
++    его наличие и проверка на ПК обязательны до единственного y/N
++
++после записи mtd0
++    SLOT1 fallback, счётчик 15 неудачных загрузок, selector `flag`
++    и ursusstockslot более не являются путями возврата
++    возврат в сток = восстановление mtd0 из проверенного backup
++                     (host-путь либо UART/Airoha BootROM)
++
++до FORMAT_UBI
++    nsb_master/nsb_slave не тронуты; восстановление mtd0 возвращает в сток
++
++после FORMAT_UBI
++    стоковая разметка уничтожена; автоматического возврата в сток нет
++```
++
++Отсюда жёсткое операторское требование: BootROM-путь на конкретном аппарате
++проверяется **до** запуска item 4.
++
++### 19.6. Hardware acceptance для нового пути
++
++```text
++stock access и полный проверенный backup           PASS
++запись UrsusBoot в mtd0 + readback                 PASS
++вход в UrsusBoot Recovery по Reset                 PASS
++status(): current_layout == STOCK                  PASS
++RAM upload preloader -> VALID                      PASS
++RAM upload production FIT -> VALID                 PASS
++status(): ubi_migration_available == true          PASS
++STOCK->UBI: все verify-стадии                      PASS
++COMMIT_BL2 строго после WRITE/VERIFY FIT           PASS
++идентичность (MAC, bosa, ri) совпадает с исходной  PASS
++загрузка OpenWrt после reboot                      PASS
++переживает reboot и полное снятие питания          PASS
++UrsusBoot Recovery доступен после миграции         PASS
++```
++
++Отдельно фиксируется: полная транзакция STOCK→UBI на этом аппарате **не имеет
++HW PASS**; первый прогон деструктивный. CI PASS остаётся допуском к прогону,
++а не его результатом.
++
++### 19.7. Порядок работ
++
++```text
++1. Актуализировать стендовый протокол под контрольные точки 19.4/19.5.
++2. Проверить BootROM-путь на конкретном MD аппарате.
++3. Провести первый HW-прогон MD.
++4. Только после MD HW PASS параметризовать MF; MD-константы не копировать.
++5. Замену UrsusBoot на Vanilla вести отдельной операцией по разделу 15.
++6. Pregnant/SLOT2 линию сохранить как R&D и источник QA negative-проверок.
++```
+-- 
+2.43.0
+
