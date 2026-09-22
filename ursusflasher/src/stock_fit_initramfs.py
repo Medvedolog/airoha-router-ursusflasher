@@ -244,8 +244,8 @@ def _build_md_proven_pregnant_slot(
 
     tcboot sees the original Nokia FIP/HDR2/FIT topology and original active FDT.
     Only the active kernel payload plus existing compression/hash metadata are changed.
-    The stock active filesystem data span is a carrier only; hardware logs prove
-    tcboot does not load it before starting the handoff kernel.
+    Pregnant runtime bytes are embedded inside the tcboot-loaded FIT memory;
+    only the handoff Linux Image bytes and active FDT are protected from staging.
     """
     nt_off, nt_size = sfw.fip_nt_fw(stock_slot, slot_size=slot_size)
     props, fit_meta = sfw.stock_fit_contract(stock_slot, nt_off, nt_size)
@@ -259,8 +259,23 @@ def _build_md_proven_pregnant_slot(
         ("preloader", PREGNANT_PRELOADER_OFF, PREGNANT_PRELOADER_WINDOW),
     ]
     nt_end = nt_off + nt_size
+    if len(runtime_fit) > PREGNANT_RUNTIME_WINDOW:
+        raise RuntimeError("pregnant runtime exceeds reserved MD runtime window")
+    runtime_ram_offset = PREGNANT_RUNTIME_OFF - fit_off
+    if runtime_ram_offset < 0 or runtime_ram_offset + len(runtime_fit) > int(fit_meta["total_size"]):
+        raise RuntimeError("pregnant runtime is outside tcboot-loaded stock FIT memory")
+    patched_handoff = _patch_md_handoff(
+        handoff_linux,
+        runtime_fit_off=runtime_ram_offset,
+        runtime_fit_size=len(runtime_fit),
+    )
+
+    # The runtime is intentionally embedded in bytes already loaded by tcboot.
+    # It may occupy unused/padded bytes of the active kernel carrier, but it
+    # must never overwrite the executable Linux Image itself or the active FDT.
+    kernel_off = int(fit_meta["kernel_data_offset"])
     protected = [
-        ("active-kernel", int(fit_meta["kernel_data_offset"]), int(fit_meta["kernel_data_size"])),
+        ("handoff-linux-image", kernel_off, len(patched_handoff)),
     ]
     if fit_meta.get("fdt_data_offset") is not None:
         protected.append(
@@ -284,16 +299,6 @@ def _build_md_proven_pregnant_slot(
             if _pregnant_overlap(off_a, size_a, off_b, size_b):
                 raise RuntimeError(f"MD pregnant carrier regions overlap: {name_a}/{name_b}")
 
-    if len(runtime_fit) > PREGNANT_RUNTIME_WINDOW:
-        raise RuntimeError("pregnant runtime exceeds reserved MD runtime window")
-    runtime_ram_offset = PREGNANT_RUNTIME_OFF - fit_off
-    if runtime_ram_offset < 0 or runtime_ram_offset + len(runtime_fit) > int(fit_meta["total_size"]):
-        raise RuntimeError("pregnant runtime is outside tcboot-loaded stock FIT memory")
-    patched_handoff = _patch_md_handoff(
-        handoff_linux,
-        runtime_fit_off=runtime_ram_offset,
-        runtime_fit_size=len(runtime_fit),
-    )
     base, wrapper = sfw.build_transition_slot(
         stock_slot,
         patched_handoff,
@@ -349,16 +354,39 @@ def _build_md_proven_pregnant_slot(
         vanilla_preloader + b"\0" * (PREGNANT_PRELOADER_WINDOW - len(vanilla_preloader))
     )
 
+    # Runtime bytes may intentionally occupy the padding tail of the active
+    # kernel data property. Refresh any existing supported kernel digest fields
+    # against the final on-flash kernel span so tcboot never sees a stale hash.
+    kernel_size = int(fit_meta["kernel_data_size"])
+    final_kernel = bytes(out[kernel_off:kernel_off + kernel_size])
+    refreshed_hash_ranges = []
+    for field in fit_meta.get("kernel_hash_fields") or []:
+        hash_off = int(field["value_offset"])
+        hash_len = int(field["value_size"])
+        algo = str(field["algorithm"])
+        digest = hashlib.sha1(final_kernel).digest() if algo == "sha1" else hashlib.sha256(final_kernel).digest()
+        if len(digest) != hash_len:
+            raise RuntimeError(f"resolved final kernel hash length mismatch: {algo}/{hash_len}")
+        out[hash_off:hash_off + hash_len] = digest
+        refreshed_hash_ranges.append((hash_off, hash_off + hash_len))
+
     # After the proven kernel wrapper, only the declared staging windows may
     # differ. They are raw bytes inside stock NT-FW, not required to be a FIT
     # image node. Active kernel/FDT are protected above.
+    allowed_ranges = [(begin, begin + size) for _name, begin, size in reserved] + refreshed_hash_ranges
+    allowed_ranges.sort()
     cursor = 0
-    for _name, begin, size in sorted(reserved, key=lambda row: row[1]):
+    for begin, end in allowed_ranges:
+        if begin < cursor:
+            # Overlap is acceptable between a declared staging window and a
+            # kernel hash field only if the hash refresh is the final writer.
+            cursor = max(cursor, end)
+            continue
         if bytes(out[cursor:begin]) != base[cursor:begin]:
-            raise RuntimeError("unexpected MD pregnant byte change outside declared staging windows")
-        cursor = begin + size
+            raise RuntimeError("unexpected MD pregnant byte change outside declared staging/hash windows")
+        cursor = end
     if bytes(out[cursor:]) != base[cursor:]:
-        raise RuntimeError("unexpected MD pregnant byte change after declared staging windows")
+        raise RuntimeError("unexpected MD pregnant byte change after declared staging/hash windows")
 
     if fit_meta.get("fdt_data_offset") is not None:
         fdt_off = int(fit_meta["fdt_data_offset"])
@@ -390,7 +418,8 @@ def _build_md_proven_pregnant_slot(
         "stock_tcboot_fdt_byte_identical": True,
         "stock_fit_topology_preserved": True,
         "ntfw_staging_bounds_verified": True,
-        "active_kernel_fdt_protected": True,
+        "handoff_linux_fdt_protected": True,
+        "final_kernel_hashes_refreshed": True,
         "handoff_linux_image_size": len(patched_handoff),
         "destructive_stage2_embedded": True,
         "stock_evidence_embedded": True,
