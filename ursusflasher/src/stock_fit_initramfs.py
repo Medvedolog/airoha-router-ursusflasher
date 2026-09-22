@@ -262,8 +262,16 @@ def _build_md_proven_pregnant_slot(
     if len(runtime_fit) > PREGNANT_RUNTIME_WINDOW:
         raise RuntimeError("pregnant runtime exceeds reserved MD runtime window")
     runtime_ram_offset = PREGNANT_RUNTIME_OFF - fit_off
-    if runtime_ram_offset < 0 or runtime_ram_offset + len(runtime_fit) > int(fit_meta["total_size"]):
-        raise RuntimeError("pregnant runtime is outside tcboot-loaded stock FIT memory")
+    # tcboot/FIP loads the complete NT-FW payload into the stock staging buffer
+    # at 0x81800000. FIT totalsize describes only the FDT/FIT container inside
+    # that loaded payload and must not be used as the RAM-availability limit.
+    loaded_nt_payload_size = nt_size - (fit_off - nt_off)
+    if runtime_ram_offset < 0 or runtime_ram_offset + len(runtime_fit) > loaded_nt_payload_size:
+        raise RuntimeError(
+            "pregnant runtime is outside tcboot-loaded stock NT-FW payload: "
+            f"runtime_off={runtime_ram_offset:#x} size={len(runtime_fit):#x} "
+            f"loaded={loaded_nt_payload_size:#x}"
+        )
     patched_handoff = _patch_md_handoff(
         handoff_linux,
         runtime_fit_off=runtime_ram_offset,
@@ -396,6 +404,7 @@ def _build_md_proven_pregnant_slot(
         "runtime_size": len(runtime_fit),
         "runtime_sha256": sha256_bytes(runtime_fit),
         "runtime_ram_source_offset": runtime_ram_offset,
+        "runtime_ram_loaded_payload_size": loaded_nt_payload_size,
         "runtime_ram_destination": "0x92000000",
         "manifest_offset": PREGNANT_META_OFF,
         "manifest_size": len(manifest),
