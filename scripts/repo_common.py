@@ -80,8 +80,12 @@ def write_manifest(root: Path) -> None:
     manifest.write_text('\n'.join(rows) + '\n', encoding='utf-8', newline='\n')
 
 
-def _copy_payload_allowlist(dest: Path) -> None:
+def _copy_payload_allowlist(dest: Path, *, target: str = 'all') -> None:
+    if target not in ('all', 'md'):
+        raise ValueError(f'unsupported release target: {target}')
     for rel in RELEASE_PAYLOADS:
+        if target == 'md' and not rel.startswith('payloads/md/'):
+            continue
         src = ROOT / rel
         if not src.is_file():
             raise FileNotFoundError(f'required release payload missing: {rel}')
@@ -97,7 +101,7 @@ def _runtime_ignore(directory: str, names: list[str]) -> set[str]:
     return ignored
 
 
-def export_tree(dest: Path) -> Path:
+def export_tree(dest: Path, *, target: str = 'all') -> Path:
     if dest.exists():
         shutil.rmtree(dest)
     dest.mkdir(parents=True)
@@ -116,7 +120,7 @@ def export_tree(dest: Path) -> Path:
         shutil.copy2(p, dest / 'data' / p.name)
     shutil.copy2(ROOT / 'VERSION', dest / 'data' / 'VERSION')
 
-    _copy_payload_allowlist(dest)
+    _copy_payload_allowlist(dest, target=target)
 
     # Firmware is canonical and intentionally limited to the eight UnameOne
     # MD/MF images committed under fw/.
