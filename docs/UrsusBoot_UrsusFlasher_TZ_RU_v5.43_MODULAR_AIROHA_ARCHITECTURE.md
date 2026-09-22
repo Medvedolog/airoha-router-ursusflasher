@@ -319,3 +319,75 @@ model-specific validation/tests
 7. recovery/readback after an interrupted non-boot-area operation.
 
 До этого XG140 profile остаётся engineering/pre-HW-acceptance.
+
+---
+
+## 11. Delta 2026-09-22 — Vanilla pregnant migration, fallback и политика safety-gates
+
+Эта delta дополняет модульную архитектуру требованиями, выявленными при реализации EXPERT item 4 `Stock Nokia -> Vanilla OpenWrt`.
+
+### 11.1. Целевая цепочка Vanilla item 4
+
+Для MD используется промежуточная RAM-only цепочка без постоянного UrsusBoot в конечной системе:
+
+```text
+stock tcboot
+ -> stock-compatible SLOT2
+ -> preserved Nokia FIP/HDR2/FIT envelope
+ -> kernel@1 ARM64 handoff
+ -> RAM-only pregnant UrsusBoot
+ -> bootm OpenWrt pregnant initramfs
+ -> autonomous stage2
+ -> canonical OpenWrt UBI layout
+ -> pinned production OpenWrt
+ -> Vanilla FIP
+ -> BL2/preloader LAST
+```
+
+Persistent UrsusBoot и WebFailsafe являются отдельным продуктом и не должны оставаться в финальной Vanilla boot-chain.
+
+### 11.2. Stock A/B rollback должен сохраняться до физически последней безопасной границы
+
+До первой destructive операции: MASTER/SLOT1 не изменяется; stock tcboot остаётся boot authority; переключается только selector `active -> SLOT2`; `flagback` не переписывается; при transient `bootm` failure выполняется `reset` обратно в tcboot.
+
+Stage2 обязан держать `DESTRUCTIVE=0` и переключать `DESTRUCTIVE=1` только непосредственно перед первым `ubiformat`. До этой границы preflight failure должен автоматически возвращаться через stock tcboot. После начала разрушения stock layout автоматический rollback запрещён.
+
+### 11.3. Stock-compatible wrapper: диапазоны и preservation вместо формы одного dump
+
+Реальный Fudan MD показал `FIT totalsize = 0x70d018` при `NT-FW payload = 0x2058127`. Требование `FIT totalsize == весь NT-FW payload` не является валидным Nokia contract и запрещено как mandatory gate.
+
+Допустимая OEM упаковка может содержать external/trailing data за пределами FIT metadata tree. Wrapper обязан поддерживать inline `/images/*/data`, `data-position`, а также `data-offset + data-size`, если фактические ranges находятся внутри выбранного NT-FW entry.
+
+Для MD handoff разрешено менять только `kernel@1` payload, compression и hash. Все остальные байты stock SLOT2, включая HDR2, FDT, filesystem, external carrier payload и данные за разрешёнными spans, должны сохраняться byte-for-byte.
+
+### 11.4. Политика preflight/gates
+
+> Gate существует только тогда, когда он доказывает safety, applicability или однозначность записи. Частное совпадение с одним известным dump не является основанием для gate.
+
+Допустимые mandatory gates: board/profile/family identity, если от неё зависит target; MTD/UBI geometry и writable bounds; требуемый boot envelope/parser contract; candidate capacity; critical identity/calibration evidence, если операция переносит эти данные; отсутствие изменений вне разрешённых spans; destructive-state ambiguity; post-write readback/compare.
+
+Не должны становиться mandatory gates без отдельного safety rationale: точный размер container при допустимых trailing/external data; cosmetic/version markers при наличии более сильной structural identity; конкретное значение поля, которое операция безопасно заменяет; exact byte shape одного stock sample; историческая implementation detail, не влияющая на target range или rollback.
+
+Если проверка не меняет решение «можно ли безопасно писать этот range этим payload», она должна быть diagnostic/telemetry, а не blocker.
+
+### 11.5. Operator ceremony
+
+Для полной destructive transaction остаётся ровно одно meaningful `[y/N]` после automatic preflight summary. Запрещены codewords, повторные подтверждения, отдельные подтверждения каждого writer и подтверждение rollback, если rollback является частью уже авторизованной fail-safe state machine.
+
+Safety достигается автоматическими checks, preservation invariants и readback, а не дополнительной operator ceremony.
+
+### 11.6. CI и HW acceptance
+
+Текущий code checkpoint: `42efabbeb433621c94c2c79f1a1a146a9668065e`.
+
+Exact workflow `Vanilla pregnant MD+MF build`, run `35625391866` — `SUCCESS`; artifact `10652380364`; digest `sha256:413d77e9fd4038e2e9474802386b70098db95e637f9ece8d8842083f5d9d74ec`.
+
+Это только **CI PASS**. Hardware acceptance требует минимум: реальный stock wrapper build на Fudan/SkyHigh; SLOT2 write/readback; selector active-only write/readback; tcboot acceptance stock envelope; ARM64 handoff; pregnant initramfs boot; pre-destructive failure rollback test; destructive migration до canonical UBI; pinned production verification; Vanilla FIP + BL2 LAST; production boot + durable confirmation.
+
+До этого item 4 не объявляется HW PASS.
+
+### 11.7. XG140 boundary
+
+XG140-specific automatic workflows остаются manual-only/paused до прямой команды оператора. Изменения Vanilla MD/MF не должны автоматически будить XG140 acceptance jobs.
+
+Common Airoha/multimodel QA может существовать отдельно, но его failure/success не подменяет profile-specific item-4 acceptance.
