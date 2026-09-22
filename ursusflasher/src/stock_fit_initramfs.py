@@ -333,7 +333,7 @@ def _build_md_proven_pregnant_slot(
             if _pregnant_overlap(off_a, size_a, off_b, size_b):
                 raise RuntimeError(f"MD pregnant carrier regions overlap: {name_a}/{name_b}")
 
-    base, wrapper = sfw.build_transition_slot(
+    base, wrapper = sfw.build_md_transition_slot(
         stock_slot,
         patched_handoff,
         slot_size=slot_size,
