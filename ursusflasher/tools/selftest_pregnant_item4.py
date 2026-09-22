@@ -197,10 +197,20 @@ def test_md_staging_does_not_require_config_filesystem_or_fit_carrier():
     assert '("handoff-linux-image", kernel_off, len(patched_handoff))' in md
     assert '("active-fdt", int(fit_meta["fdt_data_offset"])' in md
     assert "runtime_fit_off=runtime_ram_offset" in md
-    assert 'runtime_ram_offset + len(runtime_fit) > int(fit_meta["total_size"])' in md
+    assert "loaded_nt_payload_size = nt_size - (fit_off - nt_off)" in md
+    assert "runtime_ram_offset + len(runtime_fit) > loaded_nt_payload_size" in md
+    assert 'runtime_ram_offset + len(runtime_fit) > int(fit_meta["total_size"])' not in md
     assert "final_kernel = bytes(out[kernel_off:kernel_off + kernel_size])" in md
     assert "final kernel hash length mismatch" in md
     assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_NTFW_STAGING_V2" in md
+
+
+def test_runtime_ram_bound_uses_ntfw_not_fit_totalsize():
+    src=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
+    md=src[src.index("def _build_md_proven_pregnant_slot"):src.index("def build_pregnant_slot")]
+    assert "FIT totalsize describes only the FDT/FIT container" in md
+    assert "loaded_nt_payload_size = nt_size - (fit_off - nt_off)" in md
+    assert "fit_meta[\"total_size\"]" not in md[md.index("runtime_ram_offset ="):md.index("patched_handoff =")]
 
 
 def test_runtime_overlap_policy_matches_handoff_design():
@@ -258,5 +268,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_overlap_policy_matches_handoff_design(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
