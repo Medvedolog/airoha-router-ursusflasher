@@ -81,6 +81,38 @@ def test_md_pregnant_carrier_accepts_external_image_data():
     assert 'props["/images/fdt@1/data"]' not in src
 
 
+def test_stock_kernel_hash_algo_is_optional():
+    import struct
+    blob=bytearray(b"\0"*128)
+    props={
+        "/images/kernel@1/hash@7/value": (16,20),
+    }
+    blob[16:36]=b"x"*20
+    fields=sfw.kernel_hash_fields(bytes(blob),props)
+    assert fields==[{
+        "node":"hash@7",
+        "algorithm":"sha1",
+        "value_offset":16,
+        "value_size":20,
+        "algo_present":False,
+    }]
+
+    props256={
+        "/images/kernel@1/hash@2/algo": (40,7),
+        "/images/kernel@1/hash@2/value": (64,32),
+    }
+    blob[40:47]=b"sha256\0"
+    blob[64:96]=b"y"*32
+    fields=sfw.kernel_hash_fields(bytes(blob),props256)
+    assert fields[0]["algorithm"]=="sha256"
+    assert fields[0]["node"]=="hash@2"
+
+    src=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
+    contract=src[src.index("def stock_fit_contract"):src.index("def build_transition_slot")]
+    assert '"/images/kernel@1/hash@1/algo": b"sha1\\0"' not in contract
+    assert 'props["/images/kernel@1/hash@1/value"]' not in src
+
+
 def test_md_uses_hw_proven_stock_wrapper():
     sfi_source=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
     pregnant=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
@@ -126,5 +158,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
