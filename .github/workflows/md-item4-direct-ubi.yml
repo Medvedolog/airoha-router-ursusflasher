@@ -60,7 +60,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf /tmp/item4-public /tmp/item4-check
-          python3 scripts/build_public_release.py --out-dir /tmp/item4-public
+          python3 scripts/build_public_release.py --target md --out-dir /tmp/item4-public
 
           ZIP="$(find /tmp/item4-public -maxdepth 1 -type f -name '*.zip' -print -quit)"
           test -n "$ZIP" && test -s "$ZIP"
