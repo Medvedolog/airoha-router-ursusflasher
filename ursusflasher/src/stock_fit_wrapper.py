@@ -163,6 +163,66 @@ def image_data_range(
     return int(off), int(size)
 
 
+def kernel_hash_fields(slot: bytes, props: dict[str, tuple[int, int]]) -> list[dict]:
+    """Resolve kernel hash value fields without hard-coding a node name.
+
+    Stock FITs are allowed to omit hash nodes entirely, use hash@N names other
+    than hash@1, or omit the optional algo property.  If a value is present,
+    its algorithm must be determinable from an explicit supported algo or from
+    the canonical digest length.  Only the value bytes are rewritten.
+    """
+    prefix = "/images/kernel@1/"
+    nodes: dict[str, dict[str, str]] = {}
+    for key in props:
+        if not key.startswith(prefix):
+            continue
+        rest = key[len(prefix):]
+        parts = rest.split("/", 1)
+        if len(parts) != 2 or not parts[0].startswith("hash"):
+            continue
+        node, name = parts
+        if name in ("algo", "value"):
+            nodes.setdefault(node, {})[name] = key
+
+    out: list[dict] = []
+    for node, fields in sorted(nodes.items()):
+        value_key = fields.get("value")
+        if not value_key:
+            continue
+        value_off, value_len = props[value_key]
+        algo = None
+        algo_key = fields.get("algo")
+        if algo_key:
+            raw = prop(slot, props, algo_key).rstrip(b"\0")
+            if raw == b"sha1":
+                algo = "sha1"
+            elif raw == b"sha256":
+                algo = "sha256"
+            else:
+                raise RuntimeError(f"unsupported stock FIT kernel hash algorithm in {node}: {raw!r}")
+        elif value_len == 20:
+            algo = "sha1"
+        elif value_len == 32:
+            algo = "sha256"
+        else:
+            raise RuntimeError(
+                f"cannot infer stock FIT kernel hash algorithm in {node} from digest length {value_len}"
+            )
+        expected_len = 20 if algo == "sha1" else 32
+        if value_len != expected_len:
+            raise RuntimeError(
+                f"stock FIT kernel hash length mismatch in {node}: {value_len} for {algo}"
+            )
+        out.append({
+            "node": node,
+            "algorithm": algo,
+            "value_offset": int(value_off),
+            "value_size": int(value_len),
+            "algo_present": bool(algo_key),
+        })
+    return out
+
+
 def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[dict[str, tuple[int, int]], dict]:
     fit_off = nt_off + 0x100
     props, meta = fit_props(stock_slot, fit_off, nt_size)
@@ -170,7 +230,6 @@ def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[di
         "/images/kernel@1/type": b"kernel\0",
         "/images/kernel@1/arch": b"arm64\0",
         "/images/kernel@1/os": b"linux\0",
-        "/images/kernel@1/hash@1/algo": b"sha1\0",
         "/configurations/default": b"conf@1\0",
         "/configurations/conf@1/kernel": b"kernel@1\0",
         "/configurations/conf@1/fdt": b"fdt@1\0",
@@ -228,6 +287,7 @@ def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[di
         "kernel_load": load,
         "kernel_entry": entry,
         "stock_kernel_compression": stock_compression.rstrip(b"\0").decode("ascii"),
+        "kernel_hash_fields": kernel_hash_fields(stock_slot, props),
     })
     return props, meta
 
@@ -250,10 +310,20 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
     if comp_len != 5:
         raise RuntimeError("stock kernel compression property length is unexpected")
     out[comp_off:comp_off + comp_len] = b"none\0"
-    hash_off, hash_len = props["/images/kernel@1/hash@1/value"]
-    if hash_len != 20:
-        raise RuntimeError("stock kernel SHA1 property length is unexpected")
-    out[hash_off:hash_off + hash_len] = hashlib.sha1(kernel).digest()
+    hash_fields = list(fit_meta.get("kernel_hash_fields") or [])
+    for field in hash_fields:
+        hash_off = int(field["value_offset"])
+        hash_len = int(field["value_size"])
+        algo = str(field["algorithm"])
+        if algo == "sha1":
+            digest = hashlib.sha1(kernel).digest()
+        elif algo == "sha256":
+            digest = hashlib.sha256(kernel).digest()
+        else:
+            raise RuntimeError(f"unsupported resolved kernel hash algorithm: {algo}")
+        if len(digest) != hash_len:
+            raise RuntimeError(f"resolved kernel hash length mismatch: {algo}/{hash_len}")
+        out[hash_off:hash_off + hash_len] = digest
 
     if bytes(out[:nt_off + 0x100]) != stock_slot[:nt_off + 0x100]:
         raise RuntimeError("stock FIP/HDR2 preservation invariant failed")
@@ -265,11 +335,15 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
         size = fit_meta[size_key]
         if bytes(out[off:off + size]) != stock_slot[off:off + size]:
             raise RuntimeError(f"stock FIT preservation invariant failed for {label}")
-    allowed = sorted([
+    allowed = [
         (kernel_off, kernel_off + kernel_size),
         (comp_off, comp_off + comp_len),
-        (hash_off, hash_off + hash_len),
-    ])
+    ]
+    allowed.extend(
+        (int(field["value_offset"]), int(field["value_offset"]) + int(field["value_size"]))
+        for field in hash_fields
+    )
+    allowed = sorted(allowed)
     cursor = 0
     for begin, end in allowed:
         if bytes(out[cursor:begin]) != stock_slot[cursor:begin]:
@@ -297,7 +371,19 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
         "fdt_data_size": fit_meta["fdt_data_size"],
         "stock_sha256": sha256_bytes(stock_slot),
         "candidate_sha256": sha256_bytes(bytes(out)),
-        "kernel_sha1": hashlib.sha1(kernel).hexdigest(),
+        "kernel_hashes": [
+            {
+                "node": field["node"],
+                "algorithm": field["algorithm"],
+                "digest": (
+                    hashlib.sha1(kernel).hexdigest()
+                    if field["algorithm"] == "sha1"
+                    else hashlib.sha256(kernel).hexdigest()
+                ),
+                "algo_present": field["algo_present"],
+            }
+            for field in hash_fields
+        ],
         "outer_fip_hdr2_byte_identical": True,
         "stock_fdt_byte_identical": True,
         "stock_filesystem_byte_identical": True,
