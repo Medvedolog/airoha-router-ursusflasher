@@ -101,19 +101,21 @@ jobs:
 
       - name: Verify and stage
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           OUT="out-${{ matrix.family }}"
           mkdir -p "$OUT"
-          BL2="$(find openwrt/staging_dir -type f -name '${{ matrix.bl2 }}' -print | head -n1)"
+          BL2="openwrt/staging_dir/target-aarch64_cortex-a53_musl/image/${{ matrix.bl2 }}"
           test -s "$BL2"
-          UBDIR="$(find openwrt/build_dir -type d -path '*uboot-airoha*' -name 'u-boot-*' -print | head -n1)"
-          test -n "$UBDIR"
-          BIN="$(find "$UBDIR" -type f -name u-boot.bin -print | head -n1)"
-          LZMA="$(find "$UBDIR" -type f -name u-boot.lzma -print | head -n1)"
-          test -s "$BIN"
+          # OpenWrt builds U-Boot in build_dir/.../uboot-airoha-<variant>/uboot-airoha-<version>
+          # (PKG_NAME-PKG_VERSION); locate it through the u-boot.lzma the package produces.
+          LZMA="$(find openwrt/build_dir -type f -path '*/uboot-airoha-*/*' -name u-boot.lzma -print -quit)"
           test -s "$LZMA"
-          strings "$BIN" | grep -F 'U-Boot 2026.07' | head -n1
-          grep -R -F 'FM25G02B' "$UBDIR" | head -n1
+          UBDIR="$(dirname "$LZMA")"
+          BIN="$UBDIR/u-boot.bin"
+          test -s "$BIN"
+          # No `| head` under pipefail: an early-closing reader can SIGPIPE the writer.
+          grep -aFq 'U-Boot 2026.07' "$BIN"
+          grep -Fq 'FM25G02B' "$UBDIR/drivers/mtd/nand/spi/fmsh.c"
           cp "$BL2" "$OUT/openwrt-vanilla-${{ matrix.family }}-fast-ubi-bl2.bin"
           cp "$BIN" "$OUT/openwrt-vanilla-${{ matrix.family }}-fudan-u-boot.bin"
           cp "$LZMA" "$OUT/openwrt-vanilla-${{ matrix.family }}-fudan-u-boot.lzma"
