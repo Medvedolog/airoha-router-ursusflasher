@@ -1,0 +1,137 @@
+From 083c14faf832cb2de3d7dc8368dc8fb1c8f6a1e5 Mon Sep 17 00:00:00 2001
+From: Zhi You <yuzhii0718@outlook.com>
+Date: Sat, 12 Sep 2026 12:43:59 +0800
+Subject: [PATCH] plat: nand: speed up UBI scan via byte-granular SPI-NAND reads
+
+Backport of Yuzhii0718/atf-airoha commit
+083c14faf832cb2de3d7dc8368dc8fb1c8f6a1e5.
+
+--- a/plat/ecnt/common/drivers/flash/spi_nand_flash.c
++++ b/plat/ecnt/common/drivers/flash/spi_nand_flash.c
+@@ -2422,6 +2422,179 @@ int nandflash_read(unsigned long from, unsigned long len, u32 *retlen, unsigned
+ 		return -1;
+ 	}	
+ }
++
++static int spi_nand_cache_read(u32 page, u32 offset, u32 len, u8 *buf)
++{
++	struct SPI_NAND_FLASH_INFO_T *ptr_dev_info_t;
++
++	ptr_dev_info_t = _SPI_NAND_GET_DEVICE_INFO_PTR;
++	_current_page_num = UNKNOW_PAGE;
++	_SPI_NAND_ENABLE_MANUAL_MODE();
++
++	if (spi_nand_load_page_into_cache(page) != SPI_NAND_FLASH_RTN_NO_ERROR) {
++		_SPI_NAND_PRINTF("spi_nand_cache_read: unreadable page 0x%x\n", page);
++		return -1;
++	}
++
++	if (ptr_dev_info_t->feature & SPI_NAND_FLASH_PLANE_SELECT_HAVE)
++		_plane_select_bit = (page >> 6) & 0x1;
++
++	if (spi_nand_protocol_read_from_cache(offset, len, buf,
++			ptr_dev_info_t->read_mode,
++			ptr_dev_info_t->dummy_mode) != SPI_NAND_FLASH_RTN_NO_ERROR)
++		return -1;
++
++	return 0;
++}
++
++int nandflash_read_range(unsigned long from, unsigned long len,
++			 unsigned char *buf)
++{
++	struct SPI_NAND_FLASH_INFO_T *ptr_dev_info_t;
++	unsigned long addr, remain;
++	u32 page_size, chunk;
++
++	if (!len)
++		return 0;
++	if (isSpiNandAndCtrlECC)
++		return -1;
++
++	ptr_dev_info_t = _SPI_NAND_GET_DEVICE_INFO_PTR;
++	page_size = ptr_dev_info_t->page_size;
++	if (_spi_dma_mode == SPI_DMA_MODE_ENABLE && len >= page_size)
++		return -1;
++
++	for (addr = from, remain = len; remain > 0; ) {
++		chunk = page_size - (addr % page_size);
++		if (chunk > remain)
++			chunk = remain;
++		if (spi_nand_cache_read(addr / page_size, addr % page_size,
++					chunk, &buf[len - remain]))
++			return -1;
++		addr += chunk;
++		remain -= chunk;
++	}
++	return 0;
++}
++
++int nandflash_read_oob(unsigned long from, unsigned long len,
++		       unsigned char *buf)
++{
++	struct SPI_NAND_FLASH_INFO_T *ptr_dev_info_t;
++	u32 page_size, oob_size;
++
++	if (!len)
++		return 0;
++	if (isSpiNandAndCtrlECC)
++		return -1;
++
++	ptr_dev_info_t = _SPI_NAND_GET_DEVICE_INFO_PTR;
++	page_size = ptr_dev_info_t->page_size;
++	oob_size = ptr_dev_info_t->oob_size;
++	if (len > oob_size)
++		return -1;
++
++	return spi_nand_cache_read(from / page_size, page_size, len, buf);
++}
+ #endif
+ 
+--- a/plat/ecnt/common/drivers/flash/spi_nand_flash.h
++++ b/plat/ecnt/common/drivers/flash/spi_nand_flash.h
+@@ -109,6 +109,8 @@ struct SPI_NAND_FLASH_INFO_T {
+ int nandflash_init(int rom_base);
+ int nandflash_read(unsigned long from, unsigned long len, uint32_t *retlen, unsigned char *buf, SPI_NAND_FLASH_RTN_T *status);
++int nandflash_read_range(unsigned long from, unsigned long len, unsigned char *buf);
++int nandflash_read_oob(unsigned long from, unsigned long len, unsigned char *buf);
+ 
+ #endif
+--- a/plat/ecnt/en7523/bl2_boot_nand_ubi.c
++++ b/plat/ecnt/en7523/bl2_boot_nand_ubi.c
+@@ -32,6 +32,8 @@
+ #define BAD_BLOCK_RAW (0)
+ extern int nandflash_init(int rom_base);
+ extern int nandflash_read(unsigned long from, unsigned long len, u32 *retlen, unsigned char *buf, SPI_NAND_FLASH_RTN_T *status);
++extern int nandflash_read_range(unsigned long from, unsigned long len, unsigned char *buf);
++extern int nandflash_read_oob(unsigned long from, unsigned long len, unsigned char *buf);
+ extern int nandflash_write(unsigned long to, unsigned long len, u32 *retlen, unsigned char *buf);
+ extern int nandflash_erase(unsigned long offset, unsigned long len);
+ extern int en7512_nand_check_block_bad(u32 offset, u32 bmt_block);
+@@ -41,13 +43,25 @@ uint32_t nand_size;
+ static int nand_ubispl_is_bad_block(uint32_t pnum)
+ {
++	unsigned char bbm;
+ 	int ret;
+ 
+-	ret = en7512_nand_check_block_bad(pnum * block_size, BAD_BLOCK_RAW);
+-	if (ret)
+-		return -EIO;
++	ret = nandflash_read_oob((unsigned long)pnum * block_size, 1, &bbm);
++	if (ret)
++		return en7512_nand_check_block_bad(pnum * block_size,
++						   BAD_BLOCK_RAW) ? -EIO : 0;
+ 
+-	return 0;
++	return (bbm != 0xff) ? -EIO : 0;
+ }
+@@ -60,6 +74,9 @@ static int nand_ubispl_read(uint32_t pnum, unsigned long offset,
+ 
+ 	addr = (uint32_t)pnum * block_size + offset;
+ 
++	if (!nandflash_read_range(addr, len, dst))
++		return 0;
++
+ 	ret = nandflash_read(addr, len, &len_read, dst, &status);
+ 	if (ret) {
+ 		ERROR("nand_read(%" PRIu32 ") failed with %d. %zu bytes read\n",
