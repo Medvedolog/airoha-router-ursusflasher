@@ -185,7 +185,8 @@ def test_stock_kernel_hash_algo_is_optional():
 
 def test_stock_fit_topology_is_derived_not_hardcoded():
     src=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
-    contract=src[src.index("def selected_fit_nodes"):src.index("def build_transition_slot")]
+    generic=src[src.index("def selected_fit_nodes"):src.index("def build_md_proven_transition_slot")]
+    initramfs=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
     for forbidden in (
         '"/images/kernel@1/type"',
         '"/configurations/default": b"conf@1\\0"',
@@ -195,11 +196,14 @@ def test_stock_fit_topology_is_derived_not_hardcoded():
         'stock filesystem@1 is not SquashFS',
         'd6d0eea7fcead54b97829934f234b6e4',
     ):
-        assert forbidden not in contract and forbidden not in (SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
+        assert forbidden not in generic and forbidden not in initramfs
+    proven=src[src.index("def build_md_proven_transition_slot"):src.index("def build_md_transition_slot")]
+    assert '"/images/kernel@1/type"' in proven
+    assert '"/configurations/default": b"conf@1\\0"' in proven
     assert "selected_fit_nodes" in src
     assert "expected exactly one in-range HDR2/FIT boot payload" in src
     assert "stock_fdt_magic_ok" in src
-    assert "ntfw_staging_bounds_verified" in (SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
+    assert "ntfw_staging_bounds_verified" in initramfs
 
 def test_md_staging_does_not_require_config_filesystem_or_fit_carrier():
     wrapper=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
