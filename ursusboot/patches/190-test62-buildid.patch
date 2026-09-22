@@ -1,0 +1,16 @@
+--- a/.scmversion
++++ b/.scmversion
+@@ -1 +1 @@
+--UrsusBoot-0.1.0-alpha5-UBIUX1-TEST61
++-UrsusBoot-0.1.0-alpha5-UBIUX1-TEST62
+--- a/include/ursus_version.h
++++ b/include/ursus_version.h
+@@ -3,7 +3,7 @@
+ #define __URSUS_VERSION_H
+ 
+ #define URSUS_PRODUCT_NAME "UrsusBoot"
+-#define URSUS_VERSION "0.1.0-alpha5-UBIUX1-TEST61"
++#define URSUS_VERSION "0.1.0-alpha5-UBIUX1-TEST62"
+ #define URSUS_PRODUCT_VERSION URSUS_PRODUCT_NAME " " URSUS_VERSION
+ 
+ #endif
