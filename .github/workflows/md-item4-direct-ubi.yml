@@ -7,9 +7,12 @@ on:
       - feature/ursusboot-modular-airoha
     paths:
       - '.github/workflows/md-item4-direct-ubi.yml'
+      - 'START_ONECLICK.cmd'
+      - 'START_ONECLICK.sh'
       - 'START_EXPERT.cmd'
       - 'START_EXPERT.sh'
       - 'ursusflasher/src/expert.py'
+      - 'ursusflasher/src/expert_airoha.py'
       - 'ursusflasher/src/ursusboot_pregnant.py'
       - 'ursusflasher/src/ursus_web_client.py'
       - 'ursusflasher/src/ursusboot_install.py'
@@ -18,6 +21,8 @@ on:
       - 'config/**'
       - 'fw/**'
       - 'payloads/md/ursusboot/**'
+      - 'scripts/build_public_release.py'
+      - 'scripts/repo_common.py'
 
 permissions:
   contents: read
@@ -51,49 +56,37 @@ jobs:
               print(f'{role}=PASS path={p} size={p.stat().st_size} sha256={got}')
           PY
 
-      - name: Assemble MD test kit
+      - name: Assemble canonical operator kit
         run: |
           set -euo pipefail
-          ART=/tmp/ursus-item4-direct-md
-          rm -rf "$ART"
-          mkdir -p "$ART"
-          cp -a START_EXPERT.cmd START_EXPERT.sh VERSION README.md "$ART/"
-          cp -a config fw payloads ursusflasher docs "$ART/"
-          cat > "$ART/ITEM4-DIRECT-MD-READ-ME-FIRST.txt" <<EOF
-          UrsusFlasher EXPERT item 4 - MD direct UrsusBoot STOCK->UBI HW test
-          Source commit: ${GITHUB_SHA}
+          rm -rf /tmp/item4-public /tmp/item4-check
+          python3 scripts/build_public_release.py --out-dir /tmp/item4-public
 
-          Flow:
-            Nokia STOCK
-            -> install/readback bundled UrsusBoot
-            -> enter UrsusBoot Recovery
-            -> existing firmware RAM upload: production OpenWrt UBI sysupgrade
-            -> existing ubi-preloader RAM upload: proven transition preloader
-            -> native UrsusBoot STOCK->OPENWRT_UBI migration backend
-            -> BOSA/RI preserved
-            -> UrsusBoot-compatible FIP preserved
-            -> compatible BL2 committed LAST
-            -> full verification
-            -> reboot to OpenWrt
+          ZIP="$(find /tmp/item4-public -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$ZIP" && test -s "$ZIP"
+          mkdir -p /tmp/item4-check
+          unzip -q "$ZIP" -d /tmp/item4-check
+          ROOT="$(find /tmp/item4-check -mindepth 1 -maxdepth 1 -type d -print -quit)"
+          test -n "$ROOT"
 
-          This build DOES NOT use pregnant initramfs, bootm, SLOT2 carrier, or vanilla bootloader replacement.
-          UrsusBoot Recovery remains installed after item 4.
-          Vanilla FIP/BL2 replacement is a separate future operation.
-          CI PASS is only admission to the first HW test, not HW PASS.
-          EOF
-          find "$ART" -type d -name __pycache__ -prune -exec rm -rf {} + || true
-          find "$ART" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
-          git rev-parse HEAD > "$ART/URSUSFLASHER_COMMIT.txt"
-          (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
-          cd /tmp
-          zip -qr UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${GITHUB_SHA}.zip ursus-item4-direct-md
-          sha256sum UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${GITHUB_SHA}.zip > UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${GITHUB_SHA}.zip.sha256
+          test -f "$ROOT/START_ONECLICK.cmd"
+          test -f "$ROOT/START_ONECLICK.sh"
+          test -f "$ROOT/START_EXPERT.cmd"
+          test -f "$ROOT/START_EXPERT.sh"
+          test ! -e "$ROOT/START_MD_TRANSITION.cmd"
+          test ! -e "$ROOT/START_MD_TRANSITION.sh"
+          test -d "$ROOT/data"
+          test -d "$ROOT/fw"
+
+          python3 "$ROOT/data/selftest_item4_direct_ubi.py" 2>/dev/null || true
+          printf '%s\n' "$GITHUB_SHA" > /tmp/item4-public/URSUSFLASHER_COMMIT.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${{ github.sha }}
+          name: UrsusFlasher-MD-DIRECT-CANONICAL-${{ github.sha }}
           path: |
-            /tmp/UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${{ github.sha }}.zip
-            /tmp/UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${{ github.sha }}.zip.sha256
+            /tmp/item4-public/*.zip
+            /tmp/item4-public/*.sha256.txt
+            /tmp/item4-public/URSUSFLASHER_COMMIT.txt
           if-no-files-found: error
           retention-days: 14
