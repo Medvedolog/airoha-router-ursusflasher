@@ -40,9 +40,13 @@ DATA = HERE if REPO_MODE else (KIT / "data")
 RUNTIME_PAYLOADS = (_REPO_ROOT / "payloads") if REPO_MODE else (DATA / "payloads")
 MD_URSUSBOOT_PAYLOADS = RUNTIME_PAYLOADS / "md" / "ursusboot"
 BOOTROM_BACKUP_PAYLOADS = RUNTIME_PAYLOADS / "md" / "bootrom-backup"
-BACKUP_RECOVERY_PRELOADER = MD_URSUSBOOT_PAYLOADS / "openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin"
-BACKUP_RECOVERY_FIP = BOOTROM_BACKUP_PAYLOADS / "openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip"
-BACKUP_RECOVERY_INITRAMFS = BOOTROM_BACKUP_PAYLOADS / "nokia-xg040gmd-stock-recovery-initramfs.itb"
+# The proven RC preloader (pinned SHA below), not payloads/md/ursusboot/*-ubi-preloader.bin:
+# the kit replaces that one with the UrsusBoot release (fast-scan) STOCK->UBI preloader.
+BACKUP_RECOVERY_PRELOADER = DATA / "recovery" / "openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin"
+# The kit ships these bytes once, under data/recovery (same files, pinned by SHA256).
+_BOOTROM_BACKUP_DIR = BOOTROM_BACKUP_PAYLOADS if (BOOTROM_BACKUP_PAYLOADS / "openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip").is_file() else DATA / "recovery"
+BACKUP_RECOVERY_FIP = _BOOTROM_BACKUP_DIR / "openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip"
+BACKUP_RECOVERY_INITRAMFS = _BOOTROM_BACKUP_DIR / "nokia-xg040gmd-stock-recovery-initramfs.itb"
 # Ursus production/LAB runtime deliberately has zero third-party Python dependencies.
 # Rich was used only by the old MedveFlasher banner; keep tiny stdlib-only stubs so the
 # hardware-tested transport/backend code can be ported without vendoring Rich.

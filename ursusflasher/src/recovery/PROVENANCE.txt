@@ -1,0 +1,24 @@
+BootROM/UART recovery resources used by EXPERT item 6 (Nokia stock restore),
+MD UART bootrom backup and the MF RAM recovery chain (proven_backend
+RECOVERY_* / MF_RECOVERY_* and stock_restore._verify_stock_restore_runtime).
+Every file is pinned by size and SHA256 in proven_backend.py.
+
+Imported from Medvedolog/nokia-router-medveflasher:
+  binaries        342cac4cb99a924f3d83eb8e4b5259490377704e (1.0.0-rc35)
+    recovery-clients-bin/nokia-tftp, recovery-clients-bin/nokia-scp
+      <- data/recovery/recovery-clients-bin/
+    mf/openwrt-airoha-an7583-airoha_an7583-evb-preloader.bin
+      <- data/payloads/nokia-xg-040g-mf-an7583-uart-preloader.bin
+    mf/openwrt-airoha-an7583-airoha_an7583-evb-bl31-uboot.fip
+      <- data/payloads/nokia-xg-040g-mf-an7583-uart-recovery-safe-bl31-uboot.fip
+    mf/nokia-xg040gmf-stock-recovery-initramfs.itb
+      <- data/payloads/nokia-xg-040g-mf-an7583-stock-recovery-initramfs.itb
+    ../backup-agent.sh, ../diagnostics/mf-stock-audit.sh, ../diagnostics/mf_audit_parse.py
+      <- data/backup-agent.sh, data/diagnostics/
+  metadata        0cc051f (1.0.0-rc24) data/recovery/mf/OPENWRT_SNAPSHOT.json
+                  (bundled_stock_recovery updated to the rc35 MF initramfs above)
+
+Same bytes as this repository's payloads/md/ (MD):
+  openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin   <- payloads/md/ursusboot/
+  openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip, nokia-xg040gmd-stock-recovery-initramfs.itb
+                                                             <- payloads/md/bootrom-backup/

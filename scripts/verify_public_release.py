@@ -44,8 +44,9 @@ def main() -> None:
         '/data/one_key.py', '/data/expert.py', '/data/proven_backend.py',
         '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-ram-installer.fip',
         '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-bl2.bin',
-        '/data/payloads/md/bootrom-backup/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip',
-        '/data/payloads/md/bootrom-backup/nokia-xg040gmd-stock-recovery-initramfs.itb',
+        '/data/recovery/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip',
+        '/data/recovery/nokia-xg040gmd-stock-recovery-initramfs.itb',
+        '/data/recovery/mf/nokia-xg040gmf-stock-recovery-initramfs.itb',
         '/fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin',
         '/fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb',
         '/fw/openwrt-airoha-an7583-nokia_xg-040g-mf-squashfs-sysupgrade.bin',
@@ -105,6 +106,16 @@ def main() -> None:
         subprocess.run(
             [sys.executable, str(root / 'data' / 'ursusboot_install.py'), '--selftest'],
             cwd=root, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+
+        # EXPERT item 6 (Nokia stock restore) / UART recovery resources, MD and MF.
+        subprocess.run(
+            [sys.executable, '-c',
+             'import proven_backend as pb; pb._LANG = "en"; import stock_restore as sr; '
+             'sr._verify_stock_restore_runtime(); '
+             '[sr._recovery_initramfs(f) for f in ("md", "mf")]; pb.backup_recovery_profile_md(); '
+             '[p.is_file() or sys.exit(f"missing {p}") for p in (pb.BACKUP_AGENT, pb.STOCK_AUDIT_SCRIPT, pb.STOCK_AUDIT_PARSER)]'.replace('sys.exit', '__import__("sys").exit')],
+            cwd=root / 'data', check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
 
     print(f'PUBLIC_RELEASE_QA=PASS files={checked} ursusboot={rel["version"]}@{rel["commit"]}')

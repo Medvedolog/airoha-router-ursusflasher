@@ -13,9 +13,7 @@ RELEASE_PAYLOADS = (
     'payloads/md/ursusboot/openwrt-6.18.44-mtd-rw.ko',
     'payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin',
     'payloads/md/stock/nokia-xg-040g-md-stock-mtd0.bin',
-    # UART bootrom full-flash backup (proven_backend.backup_recovery_profile_md)
-    'payloads/md/bootrom-backup/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip',
-    'payloads/md/bootrom-backup/nokia-xg040gmd-stock-recovery-initramfs.itb',
+    # UART bootrom backup FIP/initramfs ship once, in data/recovery (ursusflasher/src/recovery).
     'payloads/md/ursusboot/ursus-mtd-raw',
     'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-bl2.bin',
     'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-ram-installer.fip',
