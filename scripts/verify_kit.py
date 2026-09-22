@@ -156,6 +156,57 @@ def verify_host(root: Path, rel: dict) -> None:
     for needle in ('verify_stock_restore_backup', 'skip_full_backup=reuse_backup'):
         check(needle in route, "backup reuse", needle)
     verify_poll(importlib.import_module("ursus_web_client"))
+    verify_item4_mf(root, rel)
+
+
+def verify_item4_mf(root: Path, rel: dict) -> None:
+    """Functional: EXPERT item 4 on XG-040G-MF drives the kit's MF release end to end
+    (stubbed device) and stops before migration on a non-persistent UrsusBoot."""
+    importlib.import_module("proven_backend")._LANG = "en"  # no interactive language prompt
+    up = importlib.import_module("ursusboot_pregnant")
+    mri = importlib.import_module("mf_runtime_install")
+    check(up.SUPPORTED_PROFILES == {"xg040-md": "md", "xg040-mf": "mf"}, "item 4 enabled for MD and MF")
+    mf = rel["boards"]["mf"]["files"]
+    calls: dict = {}
+    answers = iter(["", "y"])  # backup: new full backup; confirm: yes
+
+    def run_install(**kw):
+        calls["install"] = kw
+        return 0
+
+    def update_firmware(host, image, **kw):
+        calls["update"] = (Path(image).resolve(), Path(kw["preloader"]).resolve(), kw)
+        return {"operation_complete": True}
+
+    def status(mode_persistent):
+        return {"product": "UrsusBoot", "version": rel["version"], "current_layout": "STOCK",
+                "persistent_write_enabled": mode_persistent, "ram_read_only": not mode_persistent}
+
+    saved = (up.ui.prompt, mri.run_install, up.uw.update_firmware, up._wait_recovery, up.uw.reboot)
+    try:
+        up.ui.prompt = lambda *_a, **_k: next(answers)
+        mri.run_install = run_install
+        up.uw.update_firmware = update_firmware
+        up.uw.reboot = lambda *_a, **_k: None
+        up._wait_recovery = lambda *_a, **_k: status(True)
+        rc = up.run_expert(host="192.0.2.1", profile="xg040-mf")
+        check(rc == 0 and calls["install"]["route"] == "stock" and calls["install"]["skip_full_backup"] is False,
+              "MF item 4 installs the MF runtime from Nokia STOCK with a full backup")
+        image, preloader, kw = calls["update"]
+        check(image == (root / "fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb").resolve()
+              and preloader == (root / mf["ubi_preloader"]["path"]).resolve() and kw["keep_settings"] is False,
+              "MF item 4 migrates with the kit MF UBI image + MF release preloader", preloader.name)
+        answers = iter(["", "y"])
+        up.ui.prompt = lambda *_a, **_k: next(answers)
+        up._wait_recovery = lambda *_a, **_k: status(False)
+        calls.pop("update", None)
+        try:
+            up.run_expert(host="192.0.2.1", profile="xg040-mf")
+        except RuntimeError:
+            pass
+        check("update" not in calls, "MF item 4 refuses to migrate on a RAM-only UrsusBoot")
+    finally:
+        up.ui.prompt, mri.run_install, up.uw.update_firmware, up._wait_recovery, up.uw.reboot = saved
 
 
 def verify_poll(uw) -> None:

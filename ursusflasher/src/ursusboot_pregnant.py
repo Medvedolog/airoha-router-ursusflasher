@@ -11,6 +11,10 @@ import ursus_web_client as uw
 import ursusboot_install as boot_install
 
 
+MODEL = {"md": "Nokia XG-040G-MD", "mf": "Nokia XG-040G-MF"}
+SUPPORTED_PROFILES = {"xg040-md": "md", "xg040-mf": "mf"}
+
+
 def _wait_recovery(host: str, seconds: int = 90) -> dict | None:
     deadline = time.time() + seconds
     while time.time() < deadline:
@@ -50,7 +54,7 @@ def _manual_recovery(host: str) -> dict:
             ))
 
 
-def _select_backup_policy() -> tuple[bool, Path | None]:
+def _select_backup_policy(family: str = "md") -> tuple[bool, Path | None]:
     candidates = []
     try:
         candidates = sorted(
@@ -86,27 +90,31 @@ def _select_backup_policy() -> tuple[bool, Path | None]:
         raise RuntimeError(pb.tr(f"Каталог backup не найден: {path}", f"Backup directory not found: {path}"))
 
     validation = pb.verify_stock_restore_backup(path)
-    family = str(validation.get("stock_restore", {}).get("device_family") or "").lower()
-    if family != "md":
+    found = str(validation.get("stock_restore", {}).get("device_family") or "").lower()
+    model = MODEL[family]
+    if found != family:
         raise RuntimeError(pb.tr(
-            f"Выбранный backup относится к {family or 'unknown'}, нужен Nokia XG-040G-MD.",
-            f"The selected backup belongs to {family or 'unknown'}; Nokia XG-040G-MD is required.",
+            f"Выбранный backup относится к {found or 'unknown'}, нужен {model}.",
+            f"The selected backup belongs to {found or 'unknown'}; {model} is required.",
         ))
     all_flash_sha = str(validation.get("stock_restore", {}).get("all_flash_sha256") or "")
     ui.status("PASS", pb.tr(
         f"Существующий stock backup прошёл restore-validator: {path} · all_flash {all_flash_sha}",
         f"Existing stock backup passed the restore validator: {path} · all_flash {all_flash_sha}",
     ))
-    pb._write_session_only(f"[ITEM4_DIRECT_UBI] existing_full_backup={path} validator=PASS family=md all_flash_sha256={all_flash_sha}")
+    pb._write_session_only(f"[ITEM4_DIRECT_UBI] existing_full_backup={path} validator=PASS family={family} all_flash_sha256={all_flash_sha}")
     return True, path
 
 
 def run_expert(*, host: str, profile: str) -> int:
-    if profile != "xg040-md":
+    family = SUPPORTED_PROFILES.get(profile)
+    if family is None:
         raise RuntimeError(
-            "Direct UrsusBoot stock->UBI orchestration is currently enabled only for "
-            "hardware-proven Nokia XG-040G-MD."
+            "Direct UrsusBoot stock->UBI orchestration is enabled only for "
+            "Nokia XG-040G-MD and XG-040G-MF."
         )
+    if family == "mf":
+        return _run_expert_mf(host)
 
     production = one_key.require_bundle_role("OPENWRT_UBI_SYSUPGRADE")
     preloader = one_key.require_bundle_role("STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE")
@@ -124,7 +132,7 @@ def run_expert(*, host: str, profile: str) -> int:
         "Item 4 uses the native UrsusBoot STOCK->UBI migration backend. No pregnant initramfs or bootm is used. "
         "After OpenWrt installation, UrsusBoot remains the working Recovery bootloader. Switching to the Vanilla OpenWrt U-Boot is a separate operation.",
     ))
-    reuse_backup, _backup_path = _select_backup_policy()
+    reuse_backup, _backup_path = _select_backup_policy("md")
 
     answer = ui.prompt(pb.tr(
         "Preflight payload пройден. Установить UrsusBoot, затем перевести Nokia STOCK в OpenWrt UBI? [y/N]: ",
@@ -182,6 +190,96 @@ def run_expert(*, host: str, profile: str) -> int:
         "Until then, the current Recovery remains the known-good state.",
     ))
 
+    try:
+        uw.reboot(host)
+    except Exception:
+        pass
+    return 0
+
+
+def _run_expert_mf(host: str) -> int:
+    """Item 4 for XG-040G-MF: same sequence as MD, with the MF persistent runtime.
+
+    Nokia STOCK -> device-derived MF UrsusBoot FIP (mf_runtime_install, the ONE-CLICK
+    MF installer) -> UrsusBoot Recovery -> native STOCK->UBI migration with the MF
+    preloader UrsusBoot was built for -> COMPLETE. UrsusBoot Recovery is retained.
+    """
+    import mf_runtime_install
+    import one_key_multi
+
+    production = one_key_multi.require_role("mf", "OPENWRT_UBI_SYSUPGRADE")
+    preloader = one_key_multi.require_role("mf", "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE")
+    bl33 = mf_runtime_install.require_bl33()
+
+    ui.section(pb.tr(
+        "УСТАНОВИТЬ ЧИСТЫЙ OPENWRT С URSUSBOOT RECOVERY",
+        "INSTALL CLEAN OPENWRT WITH URSUSBOOT RECOVERY",
+    ), style="amber2")
+    ui.status("READY", "Nokia XG-040G-MF / AN7583")
+    ui.status("READY", f"UrsusBoot MF runtime: {one_key_multi.MF_TARGET} · BL33 SHA256 {pb.sha_file(bl33)}")
+    ui.status("READY", f"OpenWrt: {production.name} · SHA256 {pb.sha_file(production)}")
+    ui.status("READY", f"UBI transition preloader: {preloader.name} · SHA256 {pb.sha_file(preloader)}")
+    ui.note(pb.tr(
+        "Item 4 (MF): FIP собирается из mtd0 этого устройства (native ранние компоненты и factory identity сохраняются), "
+        "затем штатный UrsusBoot STOCK→UBI migration backend. После установки OpenWrt UrsusBoot остаётся Recovery-загрузчиком.",
+        "Item 4 (MF): the FIP is derived from this device's mtd0 (native early components and factory identity are preserved), "
+        "then the native UrsusBoot STOCK->UBI migration backend. After OpenWrt installation UrsusBoot remains the Recovery bootloader.",
+    ))
+    reuse_backup, _backup_path = _select_backup_policy("mf")
+
+    answer = ui.prompt(pb.tr(
+        "Preflight payload пройден. Установить UrsusBoot, затем перевести Nokia STOCK в OpenWrt UBI? [y/N]: ",
+        "Payload preflight passed. Install UrsusBoot, then migrate Nokia STOCK to OpenWrt UBI? [y/N]: ",
+    )).strip().lower()
+    if answer not in ("y", "yes", "д", "да"):
+        ui.status("STOP", pb.tr("Операция отменена до записи.", "Operation cancelled before any write."))
+        return 0
+
+    rc = mf_runtime_install.run_install(
+        host=host,
+        route="stock",
+        unattended=True,
+        skip_full_backup=reuse_backup,
+        recovery_after=True,
+    )
+    if rc:
+        raise RuntimeError(f"MF UrsusBoot installation failed rc={rc}")
+
+    st = _wait_recovery(host, 90)
+    if st is None:
+        st = _manual_recovery(host)
+    if one_key_multi.mf_runtime_mode(st) != "PERSISTENT_RUNTIME":
+        raise RuntimeError(pb.tr(
+            "После записи запущен не persistent MF UrsusBoot (RAM-only/legacy). Миграция не начата.",
+            "The running MF UrsusBoot is not the persistent runtime (RAM-only/legacy). Migration was not started.",
+        ))
+    version = str(st.get("version") or "")
+    if str(st.get("current_layout") or "") != "STOCK":
+        raise RuntimeError(f"expected STOCK layout in UrsusBoot Recovery, got {st.get('current_layout')!r}")
+    ui.status("PASS", pb.tr(
+        f"UrsusBoot Recovery (MF, persistent) найден: {version or 'version unknown'}.",
+        f"UrsusBoot Recovery (MF, persistent) detected: {version or 'version unknown'}.",
+    ))
+
+    ui.status("ACTION", pb.tr(
+        "Передаю production FIT и проверенный UBI transition preloader в существующие RAM upload-сессии.",
+        "Uploading the production FIT and validated UBI transition preloader through the existing RAM upload sessions.",
+    ))
+    result = uw.update_firmware(
+        host,
+        production,
+        confirm=False,
+        preloader=preloader,
+        keep_settings=False,
+    )
+    if not result.get("operation_complete"):
+        raise RuntimeError(f"UrsusBoot migration did not reach COMPLETE: {result}")
+
+    pb._write_session_only("[ITEM4_DIRECT_UBI] family=mf migration_complete=1 bootloader=URSUSBOOT retained=1")
+    ui.status("PASS", pb.tr(
+        "OpenWrt UBI записан и проверен. UrsusBoot Recovery сохранён.",
+        "OpenWrt UBI was written and verified. UrsusBoot Recovery is retained.",
+    ))
     try:
         uw.reboot(host)
     except Exception:

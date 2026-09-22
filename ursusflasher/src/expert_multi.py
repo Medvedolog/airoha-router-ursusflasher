@@ -318,8 +318,8 @@ def main() -> int:
 
         if number == 4:
             profile = base._transition_profile(state)
-            if profile != "xg040-md":
-                base.ui.status(tr("СТОП", "STOP"), tr("Новый временный UrsusBoot → autonomous pregnant путь сейчас открыт только для подтверждённой Nokia stock XG-040G-MD.", "The new temporary UrsusBoot → autonomous pregnant path is currently enabled only for confirmed Nokia stock XG-040G-MD."))
+            if profile not in ursusboot_pregnant.SUPPORTED_PROFILES:
+                base.ui.status(tr("СТОП", "STOP"), tr("Путь UrsusBoot → STOCK→UBI (item 4) открыт только для подтверждённых Nokia stock XG-040G-MD и XG-040G-MF.", "The UrsusBoot → STOCK->UBI path (item 4) is enabled only for confirmed Nokia stock XG-040G-MD and XG-040G-MF."))
                 base.ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
             base.network_guidance.show(host)

@@ -489,8 +489,8 @@ def _transition_profile(state: ds.DeviceState) -> str | None:
 
 def _show_transition_action(state: ds.DeviceState) -> None:
     profile = _transition_profile(state)
-    enabled = profile == "xg040-md"
-    reason = "" if enabled else tr("сейчас доступно только для подтверждённой Nokia stock XG-040G-MD", "currently available only for confirmed Nokia stock XG-040G-MD")
+    enabled = profile in ursusboot_pregnant.SUPPORTED_PROFILES
+    reason = "" if enabled else tr("доступно только для подтверждённой Nokia stock XG-040G-MD / XG-040G-MF", "available only for confirmed Nokia stock XG-040G-MD / XG-040G-MF")
     ui.menu_item(
         4,
         tr("Stock Nokia → OpenWrt UBI с UrsusBoot Recovery", "Stock Nokia → OpenWrt UBI with UrsusBoot Recovery"),
@@ -579,8 +579,8 @@ def main() -> int:
 
         if number == 4:
             profile = _transition_profile(state)
-            if profile != "xg040-md":
-                ui.status(tr("СТОП", "STOP"), tr("Прямой UrsusBoot STOCK→UBI путь сейчас открыт только для подтверждённой Nokia stock XG-040G-MD.", "The direct UrsusBoot STOCK→UBI path is currently enabled only for confirmed Nokia stock XG-040G-MD."))
+            if profile not in ursusboot_pregnant.SUPPORTED_PROFILES:
+                ui.status(tr("СТОП", "STOP"), tr("Прямой UrsusBoot STOCK→UBI путь открыт только для подтверждённых Nokia stock XG-040G-MD и XG-040G-MF.", "The direct UrsusBoot STOCK->UBI path is enabled only for confirmed Nokia stock XG-040G-MD and XG-040G-MF."))
                 ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
             network_guidance.show(host)
