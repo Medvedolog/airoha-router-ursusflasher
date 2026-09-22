@@ -15,7 +15,9 @@ def test_expert_can_skip_full_backup():
 
     for source in (expert, multi):
         assert "skip_full_backup=skip_backup" in source
-        assert "пропустить полный backup mtd0..mtd16" in source
+        assert "EXPERT backup: Enter" in source
+        assert "s — пропустить" in source
+        assert "[y/N]" not in source[source.index("if number == 1:"):source.index("elif number == 2:")]
 
     assert "def main(*, skip_full_backup: bool = False)" in one_key
     assert "install_ursus_from_stock(stock_host, skip_full_backup=skip_full_backup)" in one_key
