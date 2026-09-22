@@ -88,7 +88,7 @@ def test_stock_kernel_hash_algo_is_optional():
         "/images/kernel@1/hash@7/value": (16,20),
     }
     blob[16:36]=b"x"*20
-    fields=sfw.kernel_hash_fields(bytes(blob),props)
+    fields=sfw.kernel_hash_fields(bytes(blob),props,"kernel-any")
     assert fields==[{
         "node":"hash@7",
         "algorithm":"sha1",
@@ -103,7 +103,7 @@ def test_stock_kernel_hash_algo_is_optional():
     }
     blob[40:47]=b"sha256\0"
     blob[64:96]=b"y"*32
-    fields=sfw.kernel_hash_fields(bytes(blob),props256)
+    fields=sfw.kernel_hash_fields(bytes(blob),props256,"kernel-any")
     assert fields[0]["algorithm"]=="sha256"
     assert fields[0]["node"]=="hash@2"
 
@@ -112,6 +112,24 @@ def test_stock_kernel_hash_algo_is_optional():
     assert '"/images/kernel@1/hash@1/algo": b"sha1\\0"' not in contract
     assert 'props["/images/kernel@1/hash@1/value"]' not in src
 
+
+def test_stock_fit_topology_is_derived_not_hardcoded():
+    src=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
+    contract=src[src.index("def selected_fit_nodes"):src.index("def build_transition_slot")]
+    for forbidden in (
+        '"/images/kernel@1/type"',
+        '"/configurations/default": b"conf@1\\0"',
+        '"/configurations/conf@1/kernel"',
+        'load != 0x80088000',
+        'entry != 0x80088000',
+        'stock filesystem@1 is not SquashFS',
+        'd6d0eea7fcead54b97829934f234b6e4',
+    ):
+        assert forbidden not in contract and forbidden not in (SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
+    assert "selected_fit_nodes" in src
+    assert "expected exactly one in-range HDR2/FIT boot payload" in src
+    assert "stock_fdt_magic_ok" in src
+    assert "stock_filesystem_squashfs_magic" in src
 
 def test_md_uses_hw_proven_stock_wrapper():
     sfi_source=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
@@ -158,5 +176,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
