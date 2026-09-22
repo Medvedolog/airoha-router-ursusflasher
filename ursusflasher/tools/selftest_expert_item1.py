@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+SRC = ROOT / "ursusflasher" / "src"
+
+
+def test_expert_can_skip_full_backup():
+    expert = (SRC / "expert.py").read_text(encoding="utf-8")
+    multi = (SRC / "expert_multi.py").read_text(encoding="utf-8")
+    one_key = (SRC / "one_key.py").read_text(encoding="utf-8")
+    install = (SRC / "ursusboot_install.py").read_text(encoding="utf-8")
+
+    for source in (expert, multi):
+        assert "skip_full_backup=skip_backup" in source
+        assert "пропустить полный backup mtd0..mtd16" in source
+
+    assert "def main(*, skip_full_backup: bool = False)" in one_key
+    assert "install_ursus_from_stock(stock_host, skip_full_backup=skip_full_backup)" in one_key
+    assert "skip_full_backup=skip_full_backup" in install
+    assert "full_stock_backup_skipped" in install
+
+
+def test_item1_live_stock_gates_are_structural_not_sample_sha():
+    source = (SRC / "ursusboot_install.py").read_text(encoding="utf-8")
+    build = source[source.index("def build_candidate("):source.index("def open_root(")]
+
+    assert "live BootROM prefix 0x0..0x7ff differs from the proven Nokia prefix" not in build
+    assert "live persistent BL2 differs from proven Nokia BL2" not in build
+    assert "live mtd0 has no Airoha FIP at physical 0x800" in build
+    assert "env_crc_info(live)" in build
+    assert "hybrid FIP overlaps stock boot environment" in build
+    assert "exactly one Trusted Boot Firmware BL2 entry" in build
+    assert "BootROM prefix preservation invariant failed" in build
+    assert "stock boot environment preservation invariant failed" in build
+
+    stock = source[source.index("def run_install("):source.index("def _materialize_mtd0_backup(")]
+    assert "mtd0_write_preflight(telnet)" in stock
+    assert "capture_live_mtd0(telnet, access, before_path)" in stock
+    assert 'answer = ui.prompt("Начать запись mtd0? [y/N]: ")' in stock
+    assert "after_sha = remote_mtd0_sha(telnet)" in stock
+    assert "READBACK_MISMATCH" in stock
+
+
+test_expert_can_skip_full_backup()
+test_item1_live_stock_gates_are_structural_not_sample_sha()
+print("selftest_expert_item1: PASS")
