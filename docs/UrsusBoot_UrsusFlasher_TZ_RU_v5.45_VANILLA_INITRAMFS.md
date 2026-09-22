@@ -6,6 +6,8 @@
 **Базовый HEAD до этой редакции:** `48d1bc3e8a5e34a5b012acab4bca2df00a92a7b2`  
 **Статус:** authoritative delta для Vanilla item 4. В части Vanilla transition/install path эта редакция имеет приоритет над v5.39 и v5.44. Определение Vanilla из v5.41 сохраняется. Persistent UrsusBoot, MF persistent и XG140 native/persistent требования не изменяются.
 
+> **CURRENT OVERRIDE — 2026-09-23:** для persistent UrsusBoot source/build authority переносится в `Medvedolog/airoha-ursusboot`. TEST63 обязан собираться из его исходников на exact pinned commit. UrsusFlasher остаётся host/orchestrator/kit builder и потребляет pinned TEST63 artifacts/provenance. Нормативные детали — §19. При конфликте по ownership/build provenance §19 имеет приоритет над более ранними разделами.
+
 ## 1. Архитектурное решение
 
 Для режима **Vanilla OpenWrt** переходной UrsusBoot больше не является обязательной install-средой.
@@ -533,3 +535,178 @@ Production child является единым source-of-truth для соотв
 Build implementation должна использовать proven MedveFlasher-style FIT/newc injection либо эквивалентно доказанный механизм. OpenWrt ImageBuilder `make image` не считается источником требуемого initramfs ITB, поскольку текущий CI эксперимент не получил такой artifact.
 
 Первый успешный CI полного builder не является HW PASS. CI PASS объявляется только после проверки exact run exact SHA; hardware status присваивается отдельно по UART/board evidence.
+## 19. Source ownership и TEST63 — standalone `airoha-ursusboot` становится main line
+
+### 19.1. Нормативное решение
+
+Для TEST63 и последующих persistent UrsusBoot сборок главным репозиторием является:
+
+`Medvedolog/airoha-ursusboot`.
+
+Нормативная цепочка:
+
+```text
+airoha-ursusboot exact commit
+  -> MD/MF UrsusBoot source + board/profile policy
+  -> family fast BL2/preloader provenance
+  -> TEST63 BL33 built against that exact preloader
+  -> family FIP/install/recovery artifacts + SHA/provenance
+
+airoha-router-ursusflasher exact commit
+  -> exact pin to the airoha-ursusboot commit/artifacts above
+  -> operator flow / backup / transport / diagnostics / readback
+  -> production OpenWrt payloads
+  -> canonical ONECLICK/EXPERT kit
+```
+
+Запрещается иметь две независимые main-line реализации UrsusBoot, одну в standalone и вторую внутри UrsusFlasher. Код/фиксы, относящиеся к самому bootloader, переносятся в standalone source tree и становятся частью TEST63 там. UrsusFlasher не должен собирать TEST63 из собственной устаревающей копии исходников или из локального patch stack поверх исторического tarball.
+
+Host-only fixes UrsusFlasher, включая устойчивый polling `/api/status`/fallback diagnostics, остаются в UrsusFlasher и не переносятся в firmware repository без firmware-side причины.
+
+### 19.2. Зафиксированное состояние `airoha-ursusboot` перед TEST63
+
+На момент принятия решения проверен `main`:
+
+`9427623e1974407f1eac12f147a077f848195843`.
+
+Текущий standalone repository уже self-contained для U-Boot source/config/templates/donor inputs, но его build/CI surface пока неполон для TEST63:
+
+| Профиль | Текущее состояние standalone build |
+|---|---|
+| `xg040-md` / AN7581 | Полный persistent path: `u-boot.TEST61.full.config`, stock boot-area template, MD reference FIP; `build.sh` выдаёт raw BL33, LZMA, current-BL33 FIP, 512 KiB install image и SHA256SUMS. |
+| `xg040-mf` / AN7583 | Реальный MF source/config/template присутствуют, но используется `an7583_nokia_xg-040g-mf_MF2_RAM_defconfig`, а `reference_fip=null`; generic `build.sh` имеет raw-build path, но не полный persistent FIP/install contract. |
+| `xg140-md` | `config/template/reference_fip=null`; intentionally not buildable и не входит в TEST63 без отдельного решения. |
+
+Дополнительные факты, обязательные для планирования TEST63:
+
+- Fudan/FMSH support для `FM25G01B/FM25G02B` уже присутствует в standalone U-Boot source и должен быть сохранён.
+- `cmd/ursusubi.c` в standalone baseline содержит старые MD preloader/128-KiB-BL2 hashes. Новый fast preloader без build-time pin/generation будет корректно отвергнут firmware preflight.
+- fast NAND/UBI scan относится к ATF/BL2, а не к BL33. В текущем standalone repository нет complete fast-BL2 build path; он должен стать first-class TEST63 provenance/build input в standalone линии.
+- `board-profiles.json` уже содержит fragments и `board_policy_header`, но текущий top-level `build.sh` в основном работает через full config/template/reference FIP/runtime role. Перед TEST63 декларативный profile contract и реально используемый build pipeline должны быть приведены к одному состоянию.
+
+### 19.3. Текущий CI standalone недостаточен для TEST63 BUILD PASS
+
+Текущий `.github/workflows/qa.yml` запускает только:
+
+```text
+bash ./scripts/qa.sh
+```
+
+Этот QA проверяет structural/source invariants, но **не cross-compile** целевые MD/MF binaries и **не build** ATF/BL2. Поэтому:
+
+```text
+QA PASS != BUILD PASS != HW PASS
+```
+
+Для TEST63 standalone CI обязан получить отдельный target build layer.
+
+Минимальные требования к CI:
+
+1. QA остаётся отдельным job/evidence layer.
+2. MD и MF строятся из одного exact standalone commit.
+3. Toolchain/OpenWrt/ATF provenance полностью pinned и записывается в artifact metadata.
+4. Fast-scan BL2 patch применяется внутри реального prepare/compile path и его присутствие доказывается после compile.
+5. Raw BL2 оборачивается в board-correct UBI preloader representation.
+6. Перед компиляцией TEST63 вычисляются SHA256 packaged preloader и полного 128 KiB BL2 candidate; именно они pin/generate-ятся в соответствующий family runtime.
+7. Готовый BL33 проверяется на наличие новых hashes и отсутствие superseded hashes.
+8. Готовый BL33 проверяется на TEST63 identity, board/family identity и Fudan/FM25G01B/FM25G02B support там, где это часть поддерживаемой hardware line.
+9. Current BL33 byte-for-byte проверяется внутри repacked FIP/runtime artifact.
+10. FIP/boot-area boundary checks обязательны.
+11. MD/MF artifacts, SHA256 и machine-readable provenance публикуются CI.
+12. CI никогда не ставит HW PASS самостоятельно.
+
+### 19.4. TEST63 build order
+
+Для каждой семьи build order обязателен и не может быть переставлен так, чтобы BL33 собирался до неизвестного ему preloader:
+
+```text
+family profile
+ -> pinned ATF/OpenWrt/toolchain inputs
+ -> build patched fast BL2
+ -> verify patch survived actual Build/Prepare + compile
+ -> wrap BL2 as UBI preloader FIP/container
+ -> compute preloader SHA256
+ -> construct complete 128 KiB BL2 candidate and compute SHA256
+ -> pin/generate both digests into UrsusBoot source/config for this family
+ -> build TEST63 BL33 from airoha-ursusboot source
+ -> binary contract checks
+ -> LZMA1EXT/no-EOPM
+ -> board-correct donor FIP repack
+ -> install/recovery artifacts
+ -> SHA256/provenance
+```
+
+Fast BL2 + TEST63 BL33 являются одной совместимой парой. Packaging пары, где TEST63 не принимает shipped preloader по своим compiled-in digests, является build failure до любого hardware test.
+
+### 19.5. MF обязан стать first-class standalone target
+
+Common TEST63 kit не должен зависеть от того, что MF runtime/recovery собирается как внешнее дополнение в UrsusFlasher CI.
+
+До pinning TEST63 в UrsusFlasher standalone repository должен иметь для MF:
+
+- persistent-capable profile/config;
+- board-correct donor/reference FIP lineage;
+- RAM/UART recovery lineage, если она входит в supported recovery contract;
+- family fast BL2/preloader build;
+- exact preloader/BL2 digest pin in MF TEST63;
+- artifact/provenance output, сопоставимый по уровню доказательства с MD.
+
+Проверенные MF donor/recovery inputs из MedveFlasher-era разработки должны быть перенесены/зафиксированы в standalone с provenance так, чтобы обычная TEST63 release build не зависела от live checkout MedveFlasher или UrsusFlasher. Это следует действующей standalone policy: normal build не должен получать bootloader source/templates/donors из другого проекта молча во время сборки.
+
+MD и MF остаются разными hardware/container profiles; требование parity означает общий ownership/build/evidence contract, а не одинаковые bytes или offsets.
+
+### 19.6. UrsusFlasher pin contract
+
+UrsusFlasher может собрать canonical operator kit только после successful standalone target build exact TEST63 commit.
+
+Pin должен однозначно задавать:
+
+- repository `Medvedolog/airoha-ursusboot`;
+- full commit SHA;
+- exact MD artifact/provenance;
+- exact MF artifact/provenance;
+- hashes всех UrsusBoot/preloader/recovery payloads;
+- при необходимости exact standalone CI run/artifact identity.
+
+Floating inputs запрещены:
+
+```text
+main
+latest
+latest successful
+branch tip
+newest artifact
+```
+
+не являются допустимым release/test pin.
+
+При сборке kit UrsusFlasher обязан доказать, что MD и MF payloads относятся к одному pinned standalone commit и совпадают по hash/provenance. Если artifact отсутствует, SHA не совпадает или family/runtime identity не соответствует pin — kit build должен завершиться fail-closed.
+
+### 19.7. Граница с Vanilla
+
+`airoha-ursusboot` становится main line для **UrsusBoot**, а не для final Vanilla U-Boot по определению.
+
+Vanilla OpenWrt boot chain остаётся отдельным продуктом без persistent Ursus Web/API functionality. UrsusFlasher может упаковывать в одном operator kit:
+
+- pinned standalone TEST63 recovery/install payloads;
+- отдельно собранные Vanilla/OpenWrt production payloads;
+
+но их source provenance и acceptance evidence не смешиваются.
+
+### 19.8. Immediate sequence
+
+```text
+1. Принять standalone airoha-ursusboot как единственный future source-of-truth для UrsusBoot.
+2. Перенести туда proven TEST62-era firmware changes, нужные TEST63, без сохранения UrsusFlasher как второй firmware source tree.
+3. Перенести fast-BL2 build/provenance и exact preloader hash pinning в standalone TEST63 pipeline.
+4. Свести declared board-profile contract с реально вызываемыми build steps.
+5. Завершить MF persistent/recovery lineage внутри standalone.
+6. Добавить standalone CI target builds MD+MF поверх существующего QA.
+7. Собрать TEST63 из одного exact standalone commit и получить per-family artifacts/provenance.
+8. В UrsusFlasher добавить exact commit/artifact pin на этот TEST63 build.
+9. Собрать canonical ONECLICK/EXPERT kit и прогнать kit verifier.
+10. Следующий meaningful hardware acceptance делать с Nokia STOCK с нуля; BUILD/CI PASS не выдавать за HW PASS.
+```
+
+Этот раздел изменяет ownership/build provenance persistent UrsusBoot и имеет приоритет над прежними формулировками, где его future main-line source предполагался внутри `airoha-router-ursusflasher`. Safety/readback/identity/one-y-N и HW-evidence требования настоящего ТЗ сохраняются.
+
