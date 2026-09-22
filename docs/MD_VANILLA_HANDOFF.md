@@ -663,3 +663,261 @@ Do **not** recreate the old MedveFlasher condition where recovery image and prod
 11. First full hardware run is still HW TEST; CI success must not be described as HW success.
 
 TRANSITION2 U-Boot network/switch investigation remains frozen for Vanilla unless explicitly reopened by the operator.
+
+
+---
+
+## 20. Session update — 2026-09-22 / first real Fudan attempt + OEM FIT carrier fix
+
+### Live development state before this documentation update
+
+The code-bearing HEAD that produced the current FULL test kit is:
+
+`42efabbeb433621c94c2c79f1a1a146a9668065e` — `test: cover OEM FIT trailing payload layout`.
+
+Its two relevant corrective commits are:
+
+```text
+22499840065a067ca0eec02186b16ad2e115bea0
+  fix: accept stock FIT with NT-FW trailing payload
+
+42efabbeb433621c94c2c79f1a1a146a9668065e
+  test: cover OEM FIT trailing payload layout
+```
+
+Exact CI for this code:
+
+```text
+workflow: Vanilla pregnant MD+MF build
+run:      35625391866
+head SHA: 42efabbeb433621c94c2c79f1a1a146a9668065e
+result:   SUCCESS
+artifact: 10652380364
+name:     UrsusFlasher-VANILLA-PREGNANT-FULL-42efabbeb433621c94c2c79f1a1a146a9668065e
+digest:   sha256:413d77e9fd4038e2e9474802386b70098db95e637f9ece8d8842083f5d9d74ec
+```
+
+This is **CI PASS only**. The full Vanilla migration is still awaiting a successful hardware run through destructive migration and final production boot.
+
+The separate generic `Airoha multimodel public test` on the same SHA failed. It is not the item-4 acceptance workflow and must not be reported as item-4 HW/CI failure. XG140-specific automatic workflows remain paused/manual-only.
+
+### What happened on the first real Fudan MD run
+
+The operator ran EXPERT item 4 on stock Nokia XG-040G-MD/Fudan using the previous FULL kit `190022d...`.
+
+Observed sequence:
+
+```text
+stock Web/Telnet/root access PASS
+full mtd0..mtd16 backup PASS
+restore-validator PASS
+no NAND write started
+candidate construction FAIL
+```
+
+Failure:
+
+```text
+stock FIT/NT-FW size mismatch:
+fit=0x70d018
+nt_payload=0x2058127
+```
+
+This failure happened after the complete backup and before `sat._write_partition()`; therefore:
+
+```text
+mtd15 was NOT written
+mtd8 selector was NOT written
+SLOT1 remained active
+device remained stock/pristine
+```
+
+### Root cause
+
+`stock_fit_wrapper.fit_props()` required:
+
+```text
+FIT totalsize == NT-FW payload size
+```
+
+That condition is not a tcboot safety invariant. It was an overfit to one observed OEM packing shape.
+
+Real stock may legally contain:
+
+```text
+HDR2
+  -> FIT metadata/tree
+  -> external image data / carrier payload
+  -> remaining NT-FW payload
+```
+
+Therefore `FIT totalsize < NT-FW payload` is valid when all referenced image ranges remain inside the NT-FW entry.
+
+The old equality check was a **false gate** and must not be resurrected.
+
+### Correct wrapper contract
+
+For MD stock-compatible handoff, the contract is now:
+
+```text
+FIP entry range valid
+HDR2 present
+FIT header/tree structurally valid
+FIT entirely inside NT-FW
+required stock topology present:
+  conf@1
+  kernel@1
+  fdt@1
+  filesystem@1
+kernel load/entry = expected MD values
+kernel/fdt/filesystem data ranges inside NT-FW
+data may be:
+  inline data
+  data-position
+  data-offset
+only allowed changes:
+  kernel@1 payload
+  kernel compression
+  kernel hash
+all other bytes preserved byte-for-byte
+candidate full-partition readback after write
+```
+
+The wrapper now records `fit_trailing_payload_size` instead of rejecting it.
+
+### Gate policy
+
+Do **not** add a preflight merely because one known stock dump has a particular byte shape.
+
+A gate is justified only if failure of the checked condition would make the pending operation unsafe or ambiguous, e.g.:
+
+```text
+wrong board/family/profile
+wrong physical MTD geometry
+target range outside the selected partition
+missing/invalid boot envelope required by tcboot
+identity/critical calibration evidence missing where the operation needs it
+payload does not fit its proven writable span
+unexpected modification outside explicitly writable spans
+writer/readback mismatch
+destructive-state ambiguity
+```
+
+Not acceptable as mandatory gates without an independent safety reason:
+
+```text
+FIT must occupy all remaining carrier bytes
+a field must equal one sample dump even though the code replaces/ignores it safely
+a cosmetic/version/string marker must exist when stronger structural identity exists
+a historical layout habit that is not required by the reader/writer
+```
+
+Prefer range validation + preservation + readback over exact-shape assertions.
+
+### Current item-4 architecture
+
+MD path:
+
+```text
+stock tcboot
+ -> selected stock SLOT2
+ -> preserved Nokia FIP/HDR2/FIT topology
+ -> kernel@1 ARM64 Linux Image handoff
+ -> RAM-only pregnant UrsusBoot
+ -> bootm pregnant runtime at 0x92000000
+ -> OpenWrt initramfs
+ -> autonomous stage2
+ -> canonical UBI
+ -> pinned UnameOne production FIT
+ -> bosa/ri identity restoration
+ -> Vanilla FIP
+ -> BL2/preloader LAST
+ -> final readback
+ -> production OpenWrt
+```
+
+Pregnant UrsusBoot keeps LWIP compiled only because the inherited TEST61 command set links `ursusweb.o`; runtime Web/network is not entered. Dispatcher immediately runs `bootm 0x92000000`. If `bootm` returns/fails it executes `reset` to hand control back to stock tcboot A/B retry.
+
+### No-UART rollback window
+
+Until the first `ubiformat`:
+
+```text
+mtd14 / MASTER remains untouched
+stock tcboot remains boot authority
+selector active=1 points at pregnant SLOT2
+failed transient handoff resets into tcboot
+tcboot retry counter may eventually return to SLOT1
+```
+
+For a completely non-booting SLOT2, the documented emergency operator fallback is to let tcboot consume the stock retry counter by repeated boot attempts (approximately 6 s powered per attempt, up to the stock count of 15) and return to MASTER/SLOT1.
+
+This is only valid before destructive migration starts.
+
+At stage2:
+
+```text
+DESTRUCTIVE=0
+preflight failure -> sync -> reboot -f -> stock tcboot
+DESTRUCTIVE=1 immediately before first ubiformat
+after that -> no automatic stock rollback loop
+```
+
+The exact tcboot counter decrement behavior remains hardware evidence, not a CI claim.
+
+### Emergency/operator documentation added
+
+README commit:
+
+`16b0e26ad6f2458ba646206636258e03a71e3848` — `docs: add flashing emergency recovery playbook`.
+
+It documents:
+
+- how to enter persistent UrsusBoot Recovery with Reset;
+- distinction between Reset-after-power and Reset-held-before-power/Airoha BootROM;
+- pre-destructive SLOT2 retry/fallback without UART;
+- one-shot initramfs boot from UrsusBoot Web without writing flash;
+- SSH diagnostics from RAM OpenWrt;
+- stock selector inspection/switching via root Telnet helper;
+- UART/BootROM recovery boundaries.
+
+### Immediate next hardware test
+
+Use only the FULL artifact built from `42efabb...` or later.
+
+Expected first hardware checkpoint:
+
+```text
+1. stock access PASS
+2. complete stock backup restore-validator PASS
+3. stock wrapper accepts the real OEM FIT carrier
+4. item4 reaches the single y/N preflight summary
+5. after y:
+   mtd15 write + full SHA readback PASS
+   mtd8 active-only selector write + full readback PASS
+6. reboot
+7. UART proves:
+   stock tcboot selects SLOT2
+   conf@1/kernel@1/fdt@1 accepted
+   ARM64 handoff starts pregnant UrsusBoot
+   pregnant bootm starts OpenWrt initramfs
+8. stage2 preflight
+9. only after this evidence allow observation of destructive UBI migration
+10. final production OpenWrt + BOOT_CONFIRMED
+```
+
+If anything fails before the first `ubiformat`, preserve UART/logs and treat stock fallback as the expected safety path. Do not add a new arbitrary gate merely to reject the new observation; first decide whether the observation actually violates a safety invariant.
+
+### Current repo rules remain
+
+```text
+branch = feature/ursusboot-modular-airoha
+main untouched
+no merge
+no tag/release without explicit operator command
+no backups/credentials/serial/GPON/device identity in git
+one meaningful y/N after automatic preflight
+CI PASS != HW PASS
+exact run + exact SHA required for CI PASS
+XG140 line paused unless operator explicitly reopens it
+```
