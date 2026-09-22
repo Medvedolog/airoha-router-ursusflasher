@@ -43,7 +43,14 @@ EXPECTED_HYBRID_FIP_SIZE = 0x7B000
 MANIFEST_PATH = (ROOT / 'config' / 'MANIFEST.json') if REPO_MODE else (ROOT / 'data' / 'MANIFEST.json')
 _URSUS_ROOT_META = json.loads(MANIFEST_PATH.read_text(encoding='utf-8'))['ursusboot']
 _URSUS_META = _URSUS_ROOT_META['alpha5_test61_candidate']
-if ITEM4_TEMP_MANIFEST.is_file():
+import ursusboot_release  # noqa: E402
+if ursusboot_release.board("md"):
+    PAYLOAD = ursusboot_release.path("md", "update_fip")
+    EXPECTED_HYBRID_FIP_SIZE = PAYLOAD.stat().st_size if PAYLOAD.is_file() else 0
+    EXPECTED_HYBRID_FIP_SHA256 = ursusboot_release.sha256("md", "update_fip")
+    EXPECTED_U_BOOT_SHA256 = ursusboot_release.sha256("md", "u_boot_bin")
+    TARGET_URSUS = ursusboot_release.version("md", "")
+elif ITEM4_TEMP_MANIFEST.is_file():
     _TEMP = json.loads(ITEM4_TEMP_MANIFEST.read_text(encoding="utf-8"))
     if int(_TEMP.get("schema", 0)) != 1 or _TEMP.get("role") != "TEMPORARY_ITEM4_URSUSBOOT":
         raise RuntimeError("invalid ITEM4_TEMP_URSUSBOOT descriptor")
@@ -1372,7 +1379,7 @@ def selftest() -> int:
     candidate, meta = build_candidate(live, hybrid)
     if candidate[:FIP_PHYS_OFF] != live[:FIP_PHYS_OFF] or candidate[STOCK_BOOT_ENV_OFF:] != live[STOCK_BOOT_ENV_OFF:]:
         raise RuntimeError("candidate preservation selftest failed")
-    uboot = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-u-boot.bin"
+    uboot = ursusboot_release.path("md", "u_boot_bin") or (PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-u-boot.bin")
     if sha_file(uboot) != EXPECTED_U_BOOT_SHA256:
         raise RuntimeError("UrsusBoot u-boot hash mismatch")
     reserves=control_fdt_memreserves(uboot.read_bytes())

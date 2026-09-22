@@ -19,8 +19,8 @@ RELEASE_PAYLOADS = (
     'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-update.fip',
     'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip',
     # MF / AN7583 stock restore image. The MF runtime, UART recovery pair and
-    # STOCK->UBI BL2 are CI-built and added by scripts/apply_mf_test62_overlay.py
-    # (build_public_release.py --mf-test62-dir), like MD TEST62.
+    # STOCK->UBI BL2 are CI-built and added by scripts/apply_ursusboot_release.py
+    # (build_public_release.py --ursusboot-md/--ursusboot-mf).
     'payloads/mf/stock/nokia-xg-040g-mf-stock-mtd0.bin',
 )
 

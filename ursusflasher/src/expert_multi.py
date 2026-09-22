@@ -83,7 +83,7 @@ def _mf_backup_candidate() -> Path:
     fip = candidate_boot[mf_persistent.FIP_PHYS_OFF:mf_persistent.FIP_PHYS_OFF + report.candidate_fip_end]
     outdir = root / "work" / "private" / "mf-runtime-install"
     outdir.mkdir(parents=True, exist_ok=True)
-    out = outdir / time.strftime("mf-device-derived-TEST62-%Y%m%d-%H%M%S.fip")
+    out = outdir / time.strftime(f"mf-device-derived-{one_key_multi.MF_TARGET}-%Y%m%d-%H%M%S.fip")
     out.write_bytes(fip)
     base.ui.rule(tr("КАНДИДАТ URSUSBOOT", "URSUSBOOT CANDIDATE"), style="amber2")
     base.ui.status("TARGET", f"Nokia XG-040G-MF / Airoha AN7583 / UrsusBoot {one_key_multi.MF_TARGET}")
@@ -203,8 +203,8 @@ def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApp
     if number == 5:
         if family == "mf":
             return (
-                "MF: BootROM/USB-UART → UrsusBoot TEST62 в RAM → при наличии mtd0 backup можно сразу починить persistent UrsusBoot.",
-                "MF: BootROM/USB-UART -> UrsusBoot TEST62 in RAM -> with an mtd0 backup the persistent UrsusBoot can be repaired immediately.",
+                f"MF: BootROM/USB-UART → UrsusBoot {one_key_multi.MF_TARGET} в RAM → при наличии mtd0 backup можно сразу починить persistent UrsusBoot.",
+                f"MF: BootROM/USB-UART -> UrsusBoot {one_key_multi.MF_TARGET} in RAM -> with an mtd0 backup the persistent UrsusBoot can be repaired immediately.",
             )
         if family == "md":
             return (

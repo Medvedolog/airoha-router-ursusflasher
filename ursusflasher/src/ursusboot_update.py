@@ -20,7 +20,12 @@ REPO_MODE = (_REPO_ROOT / 'fw').is_dir() and (_REPO_ROOT / 'payloads').is_dir() 
 ROOT = _REPO_ROOT if REPO_MODE else HERE.parent
 PAYLOAD_DIR = (ROOT / 'payloads' / 'md' / 'ursusboot') if REPO_MODE else (HERE / 'payloads' / 'md' / 'ursusboot')
 EMERGENCY_PAYLOAD = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-update.fip'
-PRODUCTION_PAYLOAD = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip'
+import ursusboot_release  # noqa: E402
+
+# Bundled UrsusBoot release (airoha-ursusboot at a pinned commit) when present;
+# otherwise the historical TEST61 safety-regression FIP described by MANIFEST.json.
+PRODUCTION_PAYLOAD = ursusboot_release.path('md', 'update_fip') or (PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip')
+PRODUCTION_VERSION = ursusboot_release.version('md', '0.1.0-alpha5-UBIUX1-TEST61')
 PAYLOAD = EMERGENCY_PAYLOAD  # compatibility alias for BootROM/emergency alpha3 paths
 RAM_INSTALLER = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-ram-installer.fip'
 BL2_IMAGE = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-bl2.bin'
@@ -83,6 +88,12 @@ def _ursus_meta() -> dict:
     return json.loads(path.read_text(encoding='utf-8'))['ursusboot']
 
 def _production_meta() -> dict:
+    if ursusboot_release.board('md'):
+        return {
+            'version': PRODUCTION_VERSION,
+            'fip_sha256': ursusboot_release.sha256('md', 'update_fip'),
+            'raw_bl33_sha256': ursusboot_release.sha256('md', 'u_boot_bin'),
+        }
     meta = _ursus_meta()
     candidate = meta.get('alpha5_test61_candidate') or {}
     if candidate.get('version') != '0.1.0-alpha5-UBIUX1-TEST61':
@@ -1287,7 +1298,7 @@ def load_fip_xmodem(sp: RecoverySerial, log, *, require_native: bool = True) -> 
     print(f'Передаю production UrsusBoot FIP через XMODEM в RAM 0x{LOADADDR:08x}; FIP={size} bytes / 0x{size:x}.')
     _uboot_wait_quiet(sp, log, quiet=0.15, timeout=1.0); sp.reset_input()
     _uboot_send_line(sp, f'loadx 0x{LOADADDR:x}'); time.sleep(0.35)
-    xmodem_send(sp, PRODUCTION_PAYLOAD, 'safety-regression UrsusBoot alpha5-UBIUX1-TEST61 FIP', log)
+    xmodem_send(sp, PRODUCTION_PAYLOAD, f'UrsusBoot {PRODUCTION_VERSION} FIP', log)
     _uboot_read_until_prompt(sp, log, 45, 'loadx production UrsusBoot FIP')
     print('[OK] Production FIP передан в RAM. Валидация выполняется самим ursusupdate write перед записью.')
 
