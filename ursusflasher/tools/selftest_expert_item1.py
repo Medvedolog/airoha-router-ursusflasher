@@ -43,6 +43,8 @@ def test_item1_live_stock_gates_are_structural_not_sample_sha():
 
     stock = source[source.index("def run_install("):source.index("def _materialize_mtd0_backup(")]
     assert "mtd0_write_preflight(telnet)" in stock
+    assert "proc.get(0) != MTD0_EXPECTED" not in source
+    assert "tuple(got[:2]) != tuple(MTD0_EXPECTED[:2])" in source
     assert "capture_live_mtd0(telnet, access, before_path)" in stock
     assert 'answer = ui.prompt("Начать запись mtd0? [y/N]: ")' in stock
     assert "after_sha = remote_mtd0_sha(telnet)" in stock
