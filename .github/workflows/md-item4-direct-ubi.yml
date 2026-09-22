@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       test62_run_id:
-        description: 'Run ID of "MD AN7581 TEST62 + fast BL2" to embed (empty = pinned build #5)'
+        description: 'Run ID of "MD AN7581 TEST62 + fast BL2" to embed (empty = the run for this exact commit)'
         required: false
         default: ''
   push:
@@ -39,7 +39,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # Waits for the same-commit TEST62 + fast BL2 build (~40-60 min).
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,17 +70,26 @@ jobs:
         id: test62
         env:
           GH_TOKEN: ${{ github.token }}
-          # Exact TEST62 + fast BL2 build #5 (head 9b85007). Override only via dispatch input.
-          PIN: ${{ github.event.inputs.test62_run_id || '35779344707' }}
+          PIN: ${{ github.event.inputs.test62_run_id }}
         run: |
           set -euo pipefail
-          RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PIN")"
-          test -n "$RUN" && test "$RUN" != null
+          if [ -n "${PIN:-}" ]; then
+            RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PIN")"
+          else
+            # Only the TEST62 build of this very commit is acceptable.
+            for i in $(seq 1 110); do
+              RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/md-test62-build.yml/runs?head_sha=$GITHUB_SHA&per_page=1" --jq '.workflow_runs[0] // empty')"
+              if [ -n "$RUN" ] && [ "$(jq -r .status <<<"$RUN")" = completed ]; then break; fi
+              echo "waiting for TEST62 build of $GITHUB_SHA (poll $i)"
+              sleep 180
+            done
+          fi
+          test -n "$RUN"
           ID="$(jq -r .id <<<"$RUN")"; NUM="$(jq -r .run_number <<<"$RUN")"
           SHA="$(jq -r .head_sha <<<"$RUN")"; CONC="$(jq -r .conclusion <<<"$RUN")"
+          echo "TEST62 run id=$ID number=#$NUM head_sha=$SHA conclusion=$CONC"
           test "$(jq -r .path <<<"$RUN")" = .github/workflows/md-test62-build.yml
           test "$CONC" = success
-          echo "TEST62 run id=$ID number=#$NUM head_sha=$SHA conclusion=$CONC"
           { echo "id=$ID"; echo "number=$NUM"; echo "sha=$SHA"; } >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@v4

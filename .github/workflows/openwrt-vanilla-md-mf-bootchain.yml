@@ -5,8 +5,10 @@ on:
   push:
     branches:
       - feature/ursusboot-modular-airoha
+      - claude/lucid-gauss-t0il1g
     paths:
       - '.github/workflows/openwrt-vanilla-md-mf-bootchain.yml'
+      - 'scripts/hook_atf_fastpath_patch.py'
       - 'openwrt/patches/24025.patch'
       - 'openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch'
 
@@ -74,31 +76,27 @@ jobs:
           make -j"$(nproc)" tools/install V=s || make -j1 tools/install V=s
           make -j"$(nproc)" toolchain/install V=s || make -j1 toolchain/install V=s
 
-      - name: Prepare and patch Airoha ATF
-        working-directory: openwrt
-        run: |
-          set -euo pipefail
-          make package/boot/arm-trusted-firmware-airoha/clean
-          make package/boot/arm-trusted-firmware-airoha/prepare V=s
-          PATCH="$GITHUB_WORKSPACE/kit/openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch"
-          applied=0
-          while IFS= read -r d; do
-            if [ -f "$d/plat/ecnt/en7523/bl2_boot_nand_ubi.c" ]; then
-              patch -d "$d" -p1 --dry-run < "$PATCH"
-              patch -d "$d" -p1 < "$PATCH"
-              grep -Fq 'nandflash_read_range' "$d/plat/ecnt/en7523/bl2_boot_nand_ubi.c"
-              grep -Fq 'nandflash_read_oob' "$d/plat/ecnt/common/drivers/flash/spi_nand_flash.c"
-              applied=1
-            fi
-          done < <(find build_dir -type d -name 'trusted-firmware-a*' -o -type d -name 'arm-trusted-firmware*')
-          test "$applied" = 1
-          echo "ATF_FASTPATH_PATCH=PASS upstream=${ATF_FASTPATH_COMMIT}"
-
       - name: Build patched BL2 and Vanilla U-Boot
         working-directory: openwrt
         run: |
-          set -o pipefail
+          set -euo pipefail
+          # The patch is hooked into Build/Prepare: patching build_dir after
+          # `prepare` is lost when `compile` re-extracts atf-airoha.
+          python3 ../kit/scripts/hook_atf_fastpath_patch.py --openwrt . \
+            --patch "$GITHUB_WORKSPACE/kit/openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch"
+          make package/boot/arm-trusted-firmware-airoha/clean
           make -j"$(nproc)" package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee ../atf-${{ matrix.family }}.log || make -j1 package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee -a ../atf-${{ matrix.family }}.log
+          BL2DIR="$(find build_dir -maxdepth 2 -type d -name 'trusted-firmware-a-${{ matrix.target }}-bl2' -print -quit)"
+          test -n "$BL2DIR"
+          SRC="$(find "$BL2DIR" -path '*/plat/ecnt/en7523/bl2_boot_nand_ubi.c' -print -quit)"
+          test -n "$SRC"
+          grep -Fq 'nandflash_read_range' "$SRC"
+          grep -Fq 'nandflash_read_oob' "$(dirname "$SRC")/../common/drivers/flash/spi_nand_flash.c"
+          grep -Fq 'patching file plat/ecnt/en7523/bl2_boot_nand_ubi.c' ../atf-${{ matrix.family }}.log
+          BL2="staging_dir/target-aarch64_cortex-a53_musl/image/${{ matrix.bl2 }}"
+          test -s "$BL2"
+          test "$BL2" -nt "$SRC"
+          echo "ATF_FASTPATH_PATCH=PASS upstream=${ATF_FASTPATH_COMMIT} bl2=$BL2 sha256=$(sha256sum "$BL2" | cut -d' ' -f1)"
           make -j"$(nproc)" package/boot/uboot-airoha/compile V=s 2>&1 | tee ../uboot-${{ matrix.family }}.log || make -j1 package/boot/uboot-airoha/compile V=s 2>&1 | tee -a ../uboot-${{ matrix.family }}.log
 
       - name: Verify and stage

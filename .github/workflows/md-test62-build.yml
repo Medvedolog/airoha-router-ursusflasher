@@ -5,8 +5,10 @@ on:
   push:
     branches:
       - feature/ursusboot-modular-airoha
+      - claude/lucid-gauss-t0il1g
     paths:
       - '.github/workflows/md-test62-build.yml'
+      - 'scripts/hook_atf_fastpath_patch.py'
       - 'ursusboot/scripts/build_alpha5_test62.sh'
       - 'ursusboot/patches/190-test62-buildid.patch'
       - 'ursusboot/patches/180-test61-safetyreg1.patch'
@@ -71,42 +73,56 @@ jobs:
           make -j"$(nproc)" tools/install V=s || make -j1 tools/install V=s
           make -j"$(nproc)" toolchain/install V=s || make -j1 toolchain/install V=s
 
-      - name: Prepare and patch TEST62 BL2
+      - name: Build TEST62 fast BL2 (patch hooked into Build/Prepare)
         working-directory: openwrt
         run: |
           set -euo pipefail
+          # Patching build_dir after `prepare` is lost when `compile` re-runs
+          # Build/Prepare (run #5 re-extracted atf-airoha and built an unpatched
+          # BL2). The hook patches every extraction and fails if it does not apply.
+          python3 ../kit/scripts/hook_atf_fastpath_patch.py --openwrt . \
+            --patch "$GITHUB_WORKSPACE/kit/openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch"
           make package/boot/arm-trusted-firmware-airoha/clean
-          make package/boot/arm-trusted-firmware-airoha/prepare V=s
-          PATCH="$GITHUB_WORKSPACE/kit/openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch"
-          applied=0
-          while IFS= read -r d; do
-            [ -f "$d/plat/ecnt/en7523/bl2_boot_nand_ubi.c" ] || continue
-            patch -d "$d" -p1 --dry-run < "$PATCH"
-            patch -d "$d" -p1 < "$PATCH"
-            grep -Fq 'nandflash_read_range' "$d/plat/ecnt/en7523/bl2_boot_nand_ubi.c"
-            grep -Fq 'nandflash_read_oob' "$d/plat/ecnt/common/drivers/flash/spi_nand_flash.c"
-            applied=1
-          done < <(find build_dir -type d \( -name 'trusted-firmware-a*' -o -name 'arm-trusted-firmware*' \))
-          test "$applied" = 1
-          make -j"$(nproc)" package/boot/arm-trusted-firmware-airoha/compile V=s || make -j1 package/boot/arm-trusted-firmware-airoha/compile V=s
+          make -j"$(nproc)" package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee ../atf-md.log \
+            || make -j1 package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee -a ../atf-md.log
+
+          # Prove that the tree which was compiled last is the patched one.
+          BL2DIR="$(find build_dir -maxdepth 2 -type d -name 'trusted-firmware-a-an7581-bl2' -print -quit)"
+          test -n "$BL2DIR"
+          SRC="$(find "$BL2DIR" -path '*/plat/ecnt/en7523/bl2_boot_nand_ubi.c' -print -quit)"
+          test -n "$SRC"
+          grep -Fq 'nandflash_read_range' "$SRC"
+          grep -Fq 'nandflash_read_oob' "$(dirname "$SRC")/../common/drivers/flash/spi_nand_flash.c"
+          grep -Fq 'patching file plat/ecnt/en7523/bl2_boot_nand_ubi.c' ../atf-md.log
+          BL2="staging_dir/target-aarch64_cortex-a53_musl/image/an7581-bl2.bin"
+          test -s "$BL2"
+          test "$BL2" -nt "$SRC"
+          ATF_SRC="$(sed -n 's/^[[:space:]]*SOURCE_VERSION:=//p' package/boot/arm-trusted-firmware-airoha/Makefile | head -n1)"
+          echo "ATF_SOURCE_VERSION=$ATF_SRC" | tee ../atf-source.txt
+          echo "ATF_FASTPATH_PATCH=PASS bl2=$BL2 sha256=$(sha256sum "$BL2" | cut -d' ' -f1)"
 
       - name: Assemble TEST62 artifact
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           OUT=out-test62
           mkdir -p "$OUT"
           cp -a kit/work/alpha5-test62-rebuild/out/. "$OUT/"
-          BL2="$(find openwrt/staging_dir -type f -name an7581-bl2.bin -print | head -n1)"
+          BL2=openwrt/staging_dir/target-aarch64_cortex-a53_musl/image/an7581-bl2.bin
           test -s "$BL2"
           cp "$BL2" "$OUT/openwrt-airoha-an7581-nokia-xg040md-TEST62-fast-ubi-preloader.bin"
-          grep -aFq 'TEST62' "$OUT/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST62-update.fip"
+          # BL33 inside the FIP is LZMA-compressed: check identity on raw u-boot.bin.
+          grep -aFq '0.1.0-alpha5-UBIUX1-TEST62' "$OUT/u-boot.bin"
+          test -s "$OUT/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST62-update.fip"
           sha256sum "$OUT"/*.bin "$OUT"/*.fip "$OUT"/*.lzma | sort > "$OUT/SHA256SUMS.TEST62"
           cat >> "$OUT/TEST62-BUILD_INFO.txt" <<EOF
           ATF_FASTPATH_COMMIT=${ATF_FASTPATH_COMMIT}
+          $(cat atf-source.txt)
+          ATF_FASTPATH_PATCH_SHA256=$(sha256sum kit/openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch | cut -d' ' -f1)
           ATF_FASTPATH_BL2=PASS
           LARGE_INITRAMFS_LMB_FIX=NOT_INCLUDED_IN_THIS_COMMIT
           HW_STATUS=HW_PENDING
           EOF
+          cat "$OUT/TEST62-BUILD_INFO.txt"
 
       - uses: actions/upload-artifact@v4
         with:

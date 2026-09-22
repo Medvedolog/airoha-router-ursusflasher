@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import importlib
 import json
+import struct
 import sys
 import tempfile
 import zipfile
@@ -39,6 +40,22 @@ def sha256(path: Path) -> str:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+NT_FW_UUID = bytes.fromhex("d6d0eea7fcead54b97829934f234b6e4")
+
+
+def fip_entry(fip: bytes, uuid: bytes) -> bytes:
+    pos = 16
+    while pos + 40 <= len(fip):
+        u = fip[pos:pos + 16]
+        off, size, _flags = struct.unpack_from("<QQQ", fip, pos + 16)
+        if u == bytes(16):
+            break
+        if u == uuid:
+            return fip[off:off + size]
+        pos += 40
+    raise SystemExit(f"FAIL FIP entry {uuid.hex()} not found")
 
 
 def check(cond: bool, label: str, detail: str = "") -> None:
@@ -78,7 +95,14 @@ def verify_test62(root: Path, art: Path) -> None:
     fip = ub / FIP_NAME
     check(fip.is_file(), "TEST62 FIP present", fip.name)
     check(sha256(fip) == sha256(art / FIP_NAME), "TEST62 FIP == artifact", sha256(fip))
-    check(b"TEST62" in fip.read_bytes(), "TEST62 string inside FIP")
+    # BL33 in the FIP is LZMA-compressed: identify TEST62 on the raw BL33 and
+    # prove the FIP's NT_FW entry carries exactly that build's u-boot.lzma.
+    check(TEST62_VERSION.encode() in (art / "u-boot.bin").read_bytes(),
+          "artifact u-boot.bin identifies TEST62")
+    nt = fip_entry(fip.read_bytes(), NT_FW_UUID)
+    lz = (art / "u-boot.lzma").read_bytes()
+    check(nt[:len(lz)] == lz and not nt[len(lz):].strip(b"\x00\xff"), "FIP NT_FW == artifact u-boot.lzma",
+          f"{len(lz)} bytes")
     old = sorted(p.name for p in ub.glob("*TEST61*"))
     check(not old, "no TEST61 FIP left", ",".join(old) or "none")
 
