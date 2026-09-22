@@ -25,6 +25,7 @@ import stock_slot_uart
 import uart_bootarea_restore
 import ursus_web_client as uw
 import ursusboot_install
+import ursusboot_pregnant
 import ursusboot_update
 
 base.one_key = one_key_multi
@@ -317,12 +318,12 @@ def main() -> int:
 
         if number == 4:
             profile = base._transition_profile(state)
-            if profile not in ("xg040-md", "xg040-mf"):
-                base.ui.status(tr("СТОП", "STOP"), tr("Vanilla pregnant migration доступна только из подтверждённой Nokia stock MD/MF.", "Vanilla pregnant migration is available only from confirmed Nokia stock MD/MF."))
+            if profile != "xg040-md":
+                base.ui.status(tr("СТОП", "STOP"), tr("Новый временный UrsusBoot → autonomous pregnant путь сейчас открыт только для подтверждённой Nokia stock XG-040G-MD.", "The new temporary UrsusBoot → autonomous pregnant path is currently enabled only for confirmed Nokia stock XG-040G-MD."))
                 base.ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
             base.network_guidance.show(host)
-            base.run_action(lambda: stock_ab_pregnant.run_expert(host=host, profile=profile), write_may_happen=True)
+            base.run_action(lambda: ursusboot_pregnant.run_expert(host=host, profile=profile), write_may_happen=True)
             continue
 
         if number == 13:
