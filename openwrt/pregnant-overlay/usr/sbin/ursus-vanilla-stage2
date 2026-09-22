@@ -9,10 +9,13 @@ META=$WORK/pregnant.env
 LOG=$WORK/install.log
 STATUS=$WORK/status.json
 LOCK=$WORK/stage2.lock
-META_SLOT_OFF=$((0x00f00000)); META_SIZE=$((0x00020000))
-PROD_SLOT_OFF=$((0x01000000)); PROD_WINDOW=$((0x00c00000))
-FIP_SLOT_OFF=$((0x01c00000)); FIP_WINDOW=$((0x00200000))
-PRE_SLOT_OFF=$((0x01e00000)); PRE_WINDOW=$((0x00100000))
+SLOT_SIZE=$((0x02880000))
+ERASE_SIZE=$((0x00020000))
+META_SIZE=$ERASE_SIZE
+META_SLOT_OFF=
+PROD_SLOT_OFF=
+FIP_SLOT_OFF=
+PRE_SLOT_OFF=
 UBI_DEV=
 FAMILY=unknown
 DESTRUCTIVE=0
@@ -99,14 +102,32 @@ fail() {
 
 read_meta() {
     sidx="$(require_geom nsb_slave 02880000 00020000)"
-    dd if="/dev/mtd${sidx}" bs=131072 skip=$((META_SLOT_OFF / 131072)) count=1 2>/dev/null | tr '\000' '\n' > "$META"
-    [ "$(head -n1 "$META")" = URSUS_PREGNANT_V1 ] || fail META_MAGIC
-    [ "$(meta_get META_SLOT_OFF)" = 0x00f00000 ] || fail META_OFFSET
-    declared="$(meta_get META_SHA256)"
-    hex64 "$declared" || fail META_SHA_FIELD
-    body=$WORK/pregnant.body
-    sed -n '1,/^META_SHA256=/p' "$META" | sed '$d' > "$body"
-    [ "$(sha256sum "$body" | awk '{print $1}')" = "$declared" ] || fail META_SHA
+    block=0
+    blocks=$((SLOT_SIZE / ERASE_SIZE))
+    found=
+    while [ "$block" -lt "$blocks" ]; do
+        tmp=$WORK/meta.$block
+        dd if="/dev/mtd${sidx}" bs="$ERASE_SIZE" skip="$block" count=1 2>/dev/null | tr '\000' '\n' > "$tmp"
+        if [ "$(head -n1 "$tmp")" = URSUS_PREGNANT_V1 ]; then
+            candidate_off=$((block * ERASE_SIZE))
+            declared="$(sed -n 's/^META_SHA256=//p' "$tmp" | head -n1)"
+            self_off="$(sed -n 's/^META_SLOT_OFF=//p' "$tmp" | head -n1)"
+            body=$WORK/pregnant.body
+            sed -n '1,/^META_SHA256=/p' "$tmp" | sed '$d' > "$body"
+            if hex64 "$declared" &&
+               [ "$self_off" = "$(printf '0x%08x' "$candidate_off")" ] &&
+               [ "$(sha256sum "$body" | awk '{print $1}')" = "$declared" ]; then
+                cp "$tmp" "$META"
+                META_SLOT_OFF=$candidate_off
+                found=1
+                rm -f "$tmp"
+                break
+            fi
+        fi
+        rm -f "$tmp"
+        block=$((block + 1))
+    done
+    [ -n "$found" ] || fail META_NOT_FOUND
 }
 read_child() {
     offset=$1; size=$2; output=$3; expected=$4
@@ -181,17 +202,34 @@ for command in awk cat cp dd grep head hexdump mknod mtd sed sha256sum sync tr u
     command -v "$command" >/dev/null 2>&1 || fail "TOOL_$command"
 done
 
-[ "$(meta_get PRODUCTION_SLOT_OFF)" = 0x01000000 ] || fail PROD_OFFSET
-[ "$(meta_get FIP_SLOT_OFF)" = 0x01c00000 ] || fail FIP_OFFSET
-[ "$(meta_get PRELOADER_SLOT_OFF)" = 0x01e00000 ] || fail PRE_OFFSET
+RUNTIME_SLOT_OFF="$(meta_get RUNTIME_FIT_SLOT_OFF)"
+RUNTIME_SIZE="$(meta_get RUNTIME_FIT_SIZE)"
+PROD_SLOT_OFF="$(meta_get PRODUCTION_SLOT_OFF)"
+FIP_SLOT_OFF="$(meta_get FIP_SLOT_OFF)"
+PRE_SLOT_OFF="$(meta_get PRELOADER_SLOT_OFF)"
 PROD_SIZE="$(meta_get PRODUCTION_SIZE)"; PROD_SHA="$(meta_get PRODUCTION_SHA256)"
 FIP_SIZE="$(meta_get FIP_SIZE)"; FIP_SHA="$(meta_get FIP_SHA256)"
 PRE_SIZE="$(meta_get PRELOADER_SIZE)"; PRE_SHA="$(meta_get PRELOADER_SHA256)"
-case "$PROD_SIZE:$FIP_SIZE:$PRE_SIZE" in *[!0-9:]*|'') fail META_SIZE_FIELDS;; esac
+
+case "$RUNTIME_SLOT_OFF:$PROD_SLOT_OFF:$FIP_SLOT_OFF:$PRE_SLOT_OFF" in
+    *[!0-9a-fx:]*|'') fail META_OFFSET_FIELDS ;;
+esac
+case "$RUNTIME_SIZE:$PROD_SIZE:$FIP_SIZE:$PRE_SIZE" in *[!0-9:]*|'') fail META_SIZE_FIELDS;; esac
 hex64 "$PROD_SHA" && hex64 "$FIP_SHA" && hex64 "$PRE_SHA" || fail META_SHA_FIELDS
-[ "$PROD_SIZE" -gt 0 ] && [ "$PROD_SIZE" -le "$PROD_WINDOW" ] || fail PROD_TOO_LARGE
-[ "$FIP_SIZE" -gt 0 ] && [ "$FIP_SIZE" -le 1048576 ] || fail FIP_TOO_LARGE
-[ "$PRE_SIZE" -gt 0 ] && [ "$PRE_SIZE" -le 129024 ] || fail PRE_TOO_LARGE
+
+span_ok() {
+    off=$1; size=$2
+    case "$off" in 0x*) ;; *) return 1;; esac
+    off_dec=$((off))
+    [ $((off_dec % ERASE_SIZE)) -eq 0 ] || return 1
+    [ "$size" -gt 0 ] || return 1
+    [ $((off_dec + size)) -le "$SLOT_SIZE" ] || return 1
+}
+span_ok "$RUNTIME_SLOT_OFF" "$RUNTIME_SIZE" || fail RUNTIME_SPAN
+span_ok "$(printf '0x%08x' "$META_SLOT_OFF")" "$META_SIZE" || fail META_SPAN
+span_ok "$PROD_SLOT_OFF" "$PROD_SIZE" || fail PROD_SPAN
+span_ok "$FIP_SLOT_OFF" "$FIP_SIZE" || fail FIP_SPAN
+span_ok "$PRE_SLOT_OFF" "$PRE_SIZE" || fail PRE_SPAN
 
 PROD=$WORK/production.itb; FIP=$WORK/vanilla.fip; PRE=$WORK/preloader.bin
 read_child "$PROD_SLOT_OFF" "$PROD_SIZE" "$PROD" "$PROD_SHA"
