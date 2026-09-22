@@ -194,6 +194,49 @@ def test_stock_kernel_hash_algo_is_optional():
     assert 'props["/images/kernel@1/hash@1/value"]' in proven
 
 
+def test_kernel_hash_refresh_is_fail_closed_and_crc32_big_endian():
+    import struct
+    import zlib
+
+    payload = b"fudan-kernel-padded-span"
+    crc = sfw.kernel_digest("crc32", payload)
+    expected = struct.pack(">I", zlib.crc32(payload) & 0xFFFFFFFF)
+    assert crc == expected
+    if expected != expected[::-1]:
+        assert crc != expected[::-1], "FIT crc32 must be stored big-endian"
+
+    props = {
+        "/images/kernel@1/hash-1/value": (16, 4),
+        "/images/kernel@1/hash-1/algo": (24, 6),
+        "/images/kernel@1/hash-2/value": (32, 20),
+        "/images/kernel@1/hash-2/algo": (56, 5),
+    }
+    assert sfw.kernel_hash_nodes(props, "kernel@1") == {"hash-1", "hash-2"}
+
+    sfw.assert_no_stale_kernel_hashes(props, "kernel@1", {"hash-1", "hash-2"})
+    try:
+        sfw.assert_no_stale_kernel_hashes(props, "kernel@1", {"hash-2"})
+    except RuntimeError as exc:
+        assert "stale kernel digests" in str(exc)
+        assert "hash-1" in str(exc)
+    else:
+        raise AssertionError("stale crc32 hash node was silently accepted")
+
+    try:
+        sfw.assert_no_stale_kernel_hashes(props, "kernel@1", {"hash-1"})
+    except RuntimeError as exc:
+        assert "hash-2" in str(exc)
+    else:
+        raise AssertionError("stale secondary kernel hash node was silently accepted")
+
+    src=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
+    proven=src[src.index("def build_md_proven_transition_slot"):src.index("def build_md_transition_slot")]
+    generic=src[src.index("def build_transition_slot"):]
+    assert 'assert_no_stale_kernel_hashes(props, "kernel@1", {"hash@1"})' in proven
+    assert "assert_no_stale_kernel_hashes(" in generic
+    assert "kernel_digest(algo, kernel)" in generic
+
+
 def test_stock_fit_topology_is_derived_not_hardcoded():
     src=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
     generic=src[src.index("def selected_fit_nodes"):src.index("def build_md_proven_transition_slot")]
@@ -349,5 +392,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_runtime_uses_exact_live_tail_span(); test_stage2_discovers_dynamic_manifest_and_offsets(); test_md_uses_hw_proven_stock_wrapper(); test_md_proven_wrapper_matches_hw_transition2_mutation_surface(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_kernel_hash_refresh_is_fail_closed_and_crc32_big_endian(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_runtime_uses_exact_live_tail_span(); test_stage2_discovers_dynamic_manifest_and_offsets(); test_md_uses_hw_proven_stock_wrapper(); test_md_proven_wrapper_matches_hw_transition2_mutation_surface(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
