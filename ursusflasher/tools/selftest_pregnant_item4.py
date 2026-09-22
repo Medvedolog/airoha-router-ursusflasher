@@ -32,6 +32,7 @@ def test_item4_reuses_existing_verified_backup():
     run=source[source.index("def run("):source.index("def run_expert(")]
     helper=source[source.index("def _choose_verified_stock_backup"):source.index("def _payload_root")]
     assert "pb.backup_tftp(" not in run
+    assert 'run_dir / "full-stock-backup"' not in run
     assert "_choose_verified_stock_backup(policy, backup_path)" in run
     assert "pb.verify_stock_restore_backup(path)" in helper
     assert "existing stock backup path is required for item 4" in helper
