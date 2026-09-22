@@ -411,5 +411,64 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_postwrite_readback_reconnect_does_not_require_web(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_kernel_hash_refresh_is_fail_closed_and_crc32_big_endian(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_md_ntfw_tail_is_not_treated_as_free_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_runtime_uses_exact_live_tail_span(); test_stage2_discovers_dynamic_manifest_and_offsets(); test_md_uses_hw_proven_stock_wrapper(); test_md_proven_wrapper_matches_hw_transition2_mutation_surface(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+
+def test_recovery_loader_item4_route():
+    expert=(SRC/"expert.py").read_text(encoding="utf-8")
+    multi=(SRC/"expert_multi.py").read_text(encoding="utf-8")
+    route=(SRC/"ursusboot_pregnant.py").read_text(encoding="utf-8")
+    web=(SRC/"ursus_web_client.py").read_text(encoding="utf-8")
+    for shipped in (expert, multi):
+        assert "ursusboot_pregnant.run_expert(host=host, profile=profile)" in shipped
+        assert "stock_ab_pregnant.run_expert(host=host, profile=profile)" not in shipped
+    assert 'route="stock"' in route
+    assert 'skip_full_backup=False' in route
+    assert 'uw.upload(host, image, "initramfs"' in route
+    assert "uw.boot_once(host)" in route
+    assert "pregnant._monitor(host, policy, meta)" in route
+    assert "stock_ab_transition" not in route
+    assert "nsb_slave" not in route
+    assert "'POST', '/api/expert/boot-once'" in web
+
+
+def test_autonomous_fit_contract():
+    builder=(ROOT/"ursusflasher"/"tools"/"build_pregnant_runtime.py").read_text(encoding="utf-8")
+    payload=(ROOT/"ursusflasher"/"tools"/"build_vanilla_pregnant_payloads.py").read_text(encoding="utf-8")
+    stage2=(ROOT/"openwrt"/"pregnant-overlay"/"usr"/"sbin"/"ursus-vanilla-stage2").read_text()
+    assert "def add_external_installer_ramdisk(" in builder
+    assert '"type", b"ramdisk\\0"' in builder
+    assert '"ramdisk", b"ursus-installer-ramdisk\\0"' in builder
+    assert "pregnant-autonomous.itb" in payload
+    assert "kernel_load_unchanged" in builder
+    assert "URSUS_PREGNANT_RAMDISK_V1" in stage2
+    assert "/installer/production.itb" in stage2
+    assert "/installer/vanilla.fip" in stage2
+    assert "/installer/preloader.bin" in stage2
+    assert "PAYLOAD_MODE=EMBEDDED_RAMDISK" in stage2
+    order=[
+        stage2.index('ubiupdatevol "/dev/${UBI_DEV}_5" "$PROD"'),
+        stage2.index('ubiupdatevol "/dev/${UBI_DEV}_2" "$WORK/bosa.bin"'),
+        stage2.index('ubiupdatevol "/dev/${UBI_DEV}_4" "$FIP"'),
+        stage2.index('mtd write "$WORK/bl2.bin" bl2'),
+        stage2.index("persist_state PROD_VERIFIED"),
+    ]
+    assert order == sorted(order), order
+    boundary=stage2.index("DESTRUCTIVE=1")
+    assert boundary < stage2.index('ubiformat -y "/dev/mtd${UBI_IDX}"')
+    assert "temporary UrsusBoot Recovery" in stage2
+
+
+def test_item4_ui_contract():
+    expert=(SRC/"expert.py").read_text(encoding="utf-8")
+    assert "Установить чистый OpenWrt через временный UrsusBoot Recovery" in expert
+    assert "UrsusBoot в финале удаляется" in expert
+    assert 'enabled = profile == "xg040-md"' in expert
+
+
+test_recovery_loader_item4_route()
+test_autonomous_fit_contract()
+test_item4_ui_contract()
+test_no_stock_snapshot_hash_gates()
+test_md_ntfw_tail_is_not_treated_as_free_carrier()
+test_pinned_unameone_manifest()
+test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
