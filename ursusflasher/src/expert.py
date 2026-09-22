@@ -540,7 +540,8 @@ def main() -> int:
 
     root = HERE.parent
     version = ui.package_version(root)
-    host = os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
+    default_host = os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
+    host = network_guidance.choose_router_host(default_host)
     while True:
         state = ds.probe_device_state(host)
         app = ds.action_applicability(state)
@@ -581,7 +582,7 @@ def main() -> int:
                 ui.status(tr("СТОП", "STOP"), tr("Vanilla pregnant migration доступна только из подтверждённой Nokia stock MD/MF.", "Vanilla pregnant migration is available only from confirmed Nokia stock MD/MF."))
                 ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
-            network_guidance.show()
+            network_guidance.show(host)
             run_action(lambda: stock_ab_pregnant.run_expert(host=host, profile=profile), write_may_happen=True)
             continue
 
@@ -599,9 +600,9 @@ def main() -> int:
                     "EXPERT backup: Enter — full mtd0..mtd16; s — skip it and keep only the mandatory live mtd0 capture: ",
                 )).strip().lower()
                 skip_backup = choice in ("s", "skip", "п", "пропустить")
-            run_action(lambda: one_key.main(skip_full_backup=skip_backup), write_may_happen=True)
+            run_action(lambda: one_key.main(skip_full_backup=skip_backup, router_host=host), write_may_happen=True)
         elif number == 2:
-            network_guidance.show()
+            network_guidance.show(host)
             fresh_state = _interactive_diagnostic_state(ds.probe_device_state(host))
             fresh_action = ds.action_applicability(fresh_state)[2]
             if not fresh_action.enabled:
@@ -614,7 +615,7 @@ def main() -> int:
                 print("  " + tr("Среда выполнения: ", "Execution root: ") + terms.human(fresh_state.execution_environment, "execution_environment"))
             run_action(lambda: run_bootloader_install_or_update(host, fresh_state), write_may_happen=True)
         elif number == 3:
-            network_guidance.show()
+            network_guidance.show(host)
             fresh_state = ds.probe_device_state(host)
             fresh_action = ds.action_applicability(fresh_state)[3]
             if not fresh_action.enabled:
@@ -622,11 +623,11 @@ def main() -> int:
                 ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu...")); continue
             run_action(lambda: run_custom_openwrt(host, fresh_state, fresh_action), write_may_happen=True)
         elif number == 5:
-            network_guidance.show()
+            network_guidance.show(host)
             if confirm_uart_recovery("Airoha BootROM запустит среду восстановления из оперативной памяти; механизм записи остаётся прежним до отдельной переработки транзакционной модели.", "Airoha BootROM will start recovery from RAM; the destructive backend remains unchanged until the transaction refactor."):
                 run_action(ursusboot_update.uart_bootrom_recover, write_may_happen=True)
         elif number == 6:
-            network_guidance.show(); run_action(lambda: stock_restore.restore_nokia(_interactive_diagnostic_state(state)), write_may_happen=True)
+            network_guidance.show(host); run_action(lambda: stock_restore.restore_nokia(_interactive_diagnostic_state(state)), write_may_happen=True)
         elif number == 7:
             run_action(lambda: full_backup_readonly(_interactive_diagnostic_state(state)))
         elif number == 8:
