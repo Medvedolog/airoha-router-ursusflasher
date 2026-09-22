@@ -70,6 +70,13 @@ def test_stock_wrapper_accepts_fit_smaller_than_nt_payload():
     assert (off,size)==(0x1800,0x300)
 
 
+def test_md_pregnant_carrier_accepts_external_filesystem_data():
+    src=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
+    assert 'sfw.image_data_range(' in src
+    assert 'props["/images/filesystem@1/data"]' not in src
+    assert '"filesystem@1"' in src
+
+
 def test_md_uses_hw_proven_stock_wrapper():
     sfi_source=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
     pregnant=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
@@ -115,5 +122,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_filesystem_data(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
