@@ -1086,3 +1086,185 @@ UrsusFlasher may package both UrsusBoot recovery/install artifacts and separate 
 
 This section supersedes older handoff statements only where they imply that UrsusBoot firmware source/build ownership remains inside `airoha-router-ursusflasher`. Existing operator-safety, backup/readback, one meaningful `y/N`, identity-preservation and CI-vs-HW rules remain in force.
 
+
+
+## 22. Session update — UrsusFlasher Airoha modular orchestration
+
+### Решение
+
+После выделения `Medvedolog/airoha-ursusboot` как firmware source-of-truth модульность должна быть доведена и на стороне UrsusFlasher, но на другом уровне.
+
+```text
+airoha-ursusboot
+  -> firmware/source/build modularity
+
+airoha-router-ursusflasher
+  -> profile/capability/backend orchestration modularity
+```
+
+UrsusFlasher остаётся единым host tool. Новый Airoha router не должен порождать отдельную копию menu, backup, diagnostics, payload selection и write orchestration.
+
+Нормативные требования находятся в ТЗ §20.
+
+### Что уже является хорошим фундаментом
+
+На текущей ветке уже существуют:
+
+```text
+config/BOARD_PROFILES.json
+ursusflasher/src/board_profiles.py
+config/FIRMWARE_BUNDLES.json
+config/FIRMWARE_CAPABILITIES.json
+ursusflasher/src/device_state.py
+one_key_multi
+expert_multi.py
+```
+
+`BOARD_PROFILES.json` уже содержит identity tokens, SoC, flash geometry, network properties, write policy и evidence для MD/MF/XG140. `board_profiles.py` уже выполняет fail-closed profile matching и write authorization.
+
+Это не нужно заменять новой параллельной системой. Следующий modular refactor должен развивать именно этот слой.
+
+### Что пока остаётся transitional debt
+
+High-level orchestration всё ещё знает о конкретных family names. Например `expert_multi.py` имеет прямые ветвления `family == "md"` / `family == "mf"`, а XG140 имеет несколько board-named orchestration modules.
+
+Такой код не объявляется немедленно неправильным или требующим big-bang rewrite: часть его уже HW-sensitive. Но при добавлении новой платы нельзя продолжать копировать этот pattern.
+
+Целевой dispatch:
+
+```text
+device evidence
+ -> canonical profile ID
+ -> operation key
+ -> capability/write-policy
+ -> backend key
+ -> semantic payload role
+ -> automatic preflight
+ -> one destructive y/N
+ -> backend
+ -> readback/evidence
+```
+
+### Canonical profile IDs
+
+Нужно постепенно нормализовать IDs между двумя проектами:
+
+```text
+xg040-md
+xg040-mf
+xg140-md
+```
+
+Legacy keys `md` / `mf`, OpenWrt board names, compatible strings и marketing aliases остаются detection/compatibility aliases, но не должны быть главным внутренним dispatch contract.
+
+Поле `ursusboot_profile` в UrsusFlasher уже даёт точку связи с standalone firmware profile; TEST63 exact pin/verifier должен использовать эту связь.
+
+### Operation/backend direction
+
+Общие пользовательские операции должны стать стабильными keys, например:
+
+```text
+backup
+validate_backup
+install_ursusboot
+recover_ursusboot
+install_openwrt
+stock_to_ubi
+restore_stock
+restore_factory_bootarea
+switch_stock_slot
+diagnostics
+```
+
+Profile выбирает backend для операции.
+
+Board-specific Python допустим и нужен там, где реально различаются BootROM transport, selector, FIP/container, raw writer, device-derived candidate, UBI topology или identity preservation. Но этот код должен быть backend implementation, а не новой копией общего EXPERT/ONECLICK workflow.
+
+### Payload selection
+
+После TEST63 нельзя выбирать bootloader payload по filename convention или "MD/MF if".
+
+Нормативный lookup:
+
+```text
+canonical profile
+ + semantic payload role
+ + exact airoha-ursusboot repository SHA
+ + artifact provenance
+ -> exact file SHA256/size
+```
+
+Cross-family fallback запрещён даже при одинаковом SoC.
+
+### Current TEST63 interaction
+
+Сначала закончить standalone TEST63 line:
+
+```text
+airoha-ursusboot exact commit
+ -> MD/MF fast BL2
+ -> matching pinned TEST63
+ -> per-family artifacts/provenance
+ -> standalone BUILD PASS
+```
+
+После этого в UrsusFlasher:
+
+```text
+1. pin exact standalone SHA;
+2. consume MD/MF artifacts by canonical profile;
+3. verify profile/provenance/hash pairing;
+4. build canonical operator kit;
+5. then begin incremental backend-dispatch refactor.
+```
+
+Не задерживать первый TEST63 hardware acceptance ради полного архитектурного rewrite UrsusFlasher. Refactor делается постепенно, с сохранением уже доказанных writers/readbacks.
+
+### Rule for future Airoha ports
+
+Новая Airoha board должна добавляться преимущественно через:
+
+```text
+profile identity
+geometry/layout
+operation map
+backend selection
+payload roles/provenance
+safety/readback policy
+evidence state
+```
+
+Если новая board требует новую физическую механику — добавить новый backend. Если механика уже существует — переиспользовать его через profile mapping.
+
+Не создавать `newboard_backup.py`, `newboard_menu.py`, `newboard_diagnostics.py`, `newboard_install.py` только из-за нового model name.
+
+### Safety boundary
+
+Profile modularity не означает автоматическое разрешение destructive operations.
+
+Каждая write-capable operation остаётся fail-closed до явных:
+
+```text
+identity match
+geometry contract
+backend selection
+payload/provenance match
+required backup/preflight
+readback contract
+evidence state
+```
+
+Совпадение Airoha SoC не переносит автоматически offsets, FIP lineage, selector semantics или HW PASS соседней платы.
+
+Существующие invariants остаются без изменений:
+
+```text
+one meaningful y/N
+automatic preflight
+BL2 LAST where required
+full readback
+identity preservation
+CI PASS != HW PASS
+main untouched
+no merge/tag/release without explicit operator command
+```
