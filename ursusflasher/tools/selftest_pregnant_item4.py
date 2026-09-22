@@ -200,13 +200,15 @@ def test_md_staging_does_not_require_config_filesystem_or_fit_carrier():
     assert "loaded_nt_payload_size = nt_size - (fit_off - nt_off)" in md
     assert "runtime_ram_offset + len(runtime_fit) > loaded_nt_payload_size" in md
     assert 'runtime_ram_offset + len(runtime_fit) > int(fit_meta["total_size"])' not in md
-    assert 'runtime_off = (active_end + 0x1FFFF) & ~0x1FFFF' in md
-    assert 'runtime_capacity = PREGNANT_META_OFF - runtime_off' in md
-    assert '("runtime", runtime_off, len(runtime_fit))' in md
+    assert 'for image in fit_meta.get("image_ranges") or []:' in md
+    assert 'occupied_end = max(end for _begin, end in occupied)' in md
+    assert 'cursor = (occupied_end + 0x1FFFF) & ~0x1FFFF' in md
+    assert 'runtime_region = alloc("runtime", len(runtime_fit))' in md
+    assert 'meta_region = alloc("manifest", PREGNANT_META_SIZE)' in md
     assert 'out[runtime_off:runtime_off + len(runtime_fit)] = runtime_fit' in md
     assert "final_kernel = bytes(out[kernel_off:kernel_off + kernel_size])" not in md
     assert "final kernel hash length mismatch" not in md
-    assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_DYNAMIC_TAIL_V3" in md
+    assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_FREE_TAIL_V4" in md
 
 
 def test_runtime_ram_bound_uses_ntfw_not_fit_totalsize():
@@ -220,8 +222,9 @@ def test_runtime_ram_bound_uses_ntfw_not_fit_totalsize():
 def test_runtime_overlap_policy_matches_handoff_design():
     src=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
     md=src[src.index("def _build_md_proven_pregnant_slot"):src.index("def build_pregnant_slot")]
-    assert "Follow the hardware-proven TRANSITION2 rule" in md
-    assert "runtime_off = (active_end + 0x1FFFF) & ~0x1FFFF" in md
+    assert "Hardware-proven TRANSITION2 semantics" in md
+    assert 'for image in fit_meta.get("image_ranges") or []:' in md
+    assert 'occupied_end = max(end for _begin, end in occupied)' in md
     assert "handoff-linux-image" in md
     assert "active-kernel" not in md
     assert "refreshed_hash_ranges" not in md
@@ -232,17 +235,30 @@ def test_runtime_overlap_policy_matches_handoff_design():
 def test_md_runtime_uses_exact_live_tail_span():
     src=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
     md=src[src.index("def _build_md_proven_pregnant_slot"):src.index("def build_pregnant_slot")]
-    assert 'active_end = max(fit_off + int(fit_meta["total_size"]), kernel_off + kernel_size)' in md
-    assert 'int(fit_meta["fdt_data_offset"]) + int(fit_meta["fdt_data_size"])' in md
-    assert 'out[PREGNANT_PRODUCTION_OFF:PREGNANT_PRODUCTION_OFF + len(production_itb)] = production_itb' in md
-    assert 'out[PREGNANT_FIP_OFF:PREGNANT_FIP_OFF + len(vanilla_fip)] = vanilla_fip' in md
-    assert 'out[PREGNANT_PRELOADER_OFF:PREGNANT_PRELOADER_OFF + len(vanilla_preloader)] = vanilla_preloader' in md
+    assert 'occupied = [(nt_off, fit_off + int(fit_meta["total_size"]))]' in md
+    assert 'occupied.append((int(image["offset"]), int(image["end"])))' in md
+    assert 'out[production_off:production_off + len(production_itb)] = production_itb' in md
+    assert 'out[fip_off:fip_off + len(vanilla_fip)] = vanilla_fip' in md
+    assert 'out[preloader_off:preloader_off + len(vanilla_preloader)] = vanilla_preloader' in md
+
+
+def test_stage2_discovers_dynamic_manifest_and_offsets():
+    stage2=(ROOT/"openwrt"/"pregnant-overlay"/"usr"/"sbin"/"ursus-vanilla-stage2").read_text()
+    assert "blocks=$((SLOT_SIZE / ERASE_SIZE))" in stage2
+    assert "META_NOT_FOUND" in stage2
+    assert "META_SLOT_OFF=$candidate_off" in stage2
+    assert "PROD_SLOT_OFF=\"$(meta_get PRODUCTION_SLOT_OFF)\"" in stage2
+    assert "FIP_SLOT_OFF=\"$(meta_get FIP_SLOT_OFF)\"" in stage2
+    assert "PRE_SLOT_OFF=\"$(meta_get PRELOADER_SLOT_OFF)\"" in stage2
+    assert '[ "$(meta_get PRODUCTION_SLOT_OFF)" = 0x01000000 ]' not in stage2
+    assert '[ "$(meta_get FIP_SLOT_OFF)" = 0x01c00000 ]' not in stage2
+    assert '[ "$(meta_get PRELOADER_SLOT_OFF)" = 0x01e00000 ]' not in stage2
 
 
 def test_md_uses_hw_proven_stock_wrapper():
     sfi_source=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
     pregnant=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
-    assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_DYNAMIC_TAIL_V3" in sfi_source
+    assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_FREE_TAIL_V4" in sfi_source
     assert "sfw.build_transition_slot(" in sfi_source
     assert "stock_tcboot_fdt_byte_identical" in sfi_source
     assert 'files["handoff"]' in pregnant
@@ -284,5 +300,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_runtime_uses_exact_live_tail_span(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_runtime_uses_exact_live_tail_span(); test_stage2_discovers_dynamic_manifest_and_offsets(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
