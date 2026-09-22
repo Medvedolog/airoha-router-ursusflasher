@@ -266,8 +266,17 @@ fi
 [ "$(dd if="$FIP" bs=1 count=8 2>/dev/null | hexdump -v -e '8/1 "%02x"')" = 010064aa78563412 ] || fail FIP_MAGIC
 sysupgrade -T "$PROD" >>"$LOG" 2>&1 || fail SYSUPGRADE_TEST
 
-# Positive NAND evidence is the only rollback authority on virgin stock.
-ursusstockslot probe >>"$LOG" 2>&1 || fail STOCK_EVIDENCE
+# Legacy SLOT2 carrier needs its own stock-slot proof. The Recovery-loader
+# route has no SLOT2 manifest by design: mtd0 already contains temporary
+# UrsusBoot, while the still-pristine NAND proof is the geometry + absence of
+# canonical UBI established above. Do not make an obsolete SLOT2 manifest a
+# gate for the autonomous embedded-ramdisk route.
+if [ "$PAYLOAD_MODE" = LEGACY_SLOT2 ]; then
+    ursusstockslot probe >>"$LOG" 2>&1 || fail STOCK_EVIDENCE
+else
+    canonical_ubi_header_present && fail PREEXISTING_CANONICAL_UBI
+    log 'RECOVERY_PRISTINE_PROOF=PASS mode=EMBEDDED_RAMDISK'
+fi
 BOSA_IDX="$(require_geom bosa_stock 00040000 00020000)"
 RI_IDX="$(require_geom ri_stock 00040000 00020000)"
 dd if="/dev/mtd${BOSA_IDX}" of="$WORK/bosa.bin" bs=131072 count=2 2>/dev/null || fail BOSA_READ
