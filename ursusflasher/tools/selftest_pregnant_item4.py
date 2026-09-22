@@ -212,9 +212,9 @@ def test_md_staging_does_not_require_config_filesystem_or_fit_carrier():
 def test_runtime_ram_bound_uses_ntfw_not_fit_totalsize():
     src=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
     md=src[src.index("def _build_md_proven_pregnant_slot"):src.index("def build_pregnant_slot")]
-    assert "FIT totalsize describes only the FDT/FIT container" in md
     assert "loaded_nt_payload_size = nt_size - (fit_off - nt_off)" in md
-    assert "fit_meta[\"total_size\"]" not in md[md.index("runtime_ram_offset ="):md.index("patched_handoff =")]
+    assert "runtime_ram_offset + len(runtime_fit) > loaded_nt_payload_size" in md
+    assert 'fit_meta["total_size"]' not in md[md.index("runtime_ram_offset ="):md.index("patched_handoff =")]
 
 
 def test_runtime_overlap_policy_matches_handoff_design():
