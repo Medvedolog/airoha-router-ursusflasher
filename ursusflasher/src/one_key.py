@@ -411,16 +411,21 @@ def install_or_update_openwrt(st: dict) -> dict:
                           "The supported layout could not be determined. Nothing will be written."))
 
 
-def main(*, skip_full_backup: bool = False) -> int:
-    global _STAGE_NO
+def main(*, skip_full_backup: bool = False, router_host: str | None = None) -> int:
+    global _STAGE_NO, RECOVERY_HOST
     _STAGE_NO = 0
     choose_language()
+    if router_host is None:
+        default_host = os.environ.get("NOKIA_ROUTER_IP", RECOVERY_HOST).strip() or "192.168.1.1"
+        RECOVERY_HOST = network_guidance.choose_router_host(default_host)
+    else:
+        RECOVERY_HOST = str(router_host).strip() or "192.168.1.1"
     proven.start_session_logging()
 
     say()
     say(tr(f"UrsusFlasher ONE-KEY {HOST_VERSION} — Nokia XG-040G-MD, UrsusBoot {TARGET_URSUS}",
            f"UrsusFlasher ONE-KEY {HOST_VERSION} — Nokia XG-040G-MD, UrsusBoot {TARGET_URSUS}"))
-    network_guidance.show()
+    network_guidance.show(RECOVERY_HOST)
     say(tr("Прошивка уже в комплекте, интернет не нужен. Всё остальное определю сам.",
            "Firmware is bundled; Internet is not required. Everything else is detected automatically."))
 
@@ -460,8 +465,8 @@ def main(*, skip_full_backup: bool = False) -> int:
                     ) + str(ssh_exc)) from ssh_exc
             elif identity == "none":
                 raise RuntimeError(tr(
-                    "Роутер не отвечает на 192.168.1.1. Записывать вслепую не буду. Проверьте питание, LAN2/LAN3 и IP компьютера. Если в UART видно LZMA: res 1 или PANIC — используйте EXPERT → 5.",
-                    "The router does not respond at 192.168.1.1. Nothing will be written blindly. Check power, LAN2/LAN3 and the PC IP. If UART shows LZMA: res 1 or PANIC, use EXPERT → 5.",
+                    f"Роутер не отвечает на {RECOVERY_HOST}. Записывать вслепую не буду. Проверьте питание, LAN2/LAN3, статический IP компьютера, отключение Wi-Fi/VPN и выбранный IP Nokia. Если в UART видно LZMA: res 1 или PANIC — используйте EXPERT → 5.",
+                    f"The router does not respond at {RECOVERY_HOST}. Nothing will be written blindly. Check power, LAN2/LAN3, the PC static IP, disabled Wi-Fi/VPN and the selected Nokia IP. If UART shows LZMA: res 1 or PANIC, use EXPERT → 5.",
                 ))
             else:
                 raise RuntimeError(tr(
