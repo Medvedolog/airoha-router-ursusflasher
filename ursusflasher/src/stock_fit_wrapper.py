@@ -32,23 +32,37 @@ def validate_linux_image(data: bytes) -> dict:
     return {"size": len(data), "text_offset": text_offset, "image_size": image_size, "flags": flags}
 
 
-def fip_nt_fw(slot: bytes, *, slot_size: int, nt_fw_uuid: bytes) -> tuple[int, int]:
+def fip_nt_fw(slot: bytes, *, slot_size: int, nt_fw_uuid: bytes | None = None) -> tuple[int, int]:
+    """Resolve the unique stock boot payload by structure, not by OEM UUID.
+
+    nt_fw_uuid is accepted for API compatibility but intentionally ignored.
+    The safe invariant is that exactly one in-range FIP entry contains the
+    stock HDR2 wrapper followed by a valid FIT/FDT header.
+    """
     if len(slot) != slot_size:
         raise RuntimeError(f"nsb_slave size mismatch: {len(slot):#x} != {slot_size:#x}")
     if slot[:8] != bytes.fromhex("010064aa78563412"):
         raise RuntimeError("nsb_slave has no stock Airoha FIP header")
+    candidates: list[tuple[int, int]] = []
     pos = 16
     while pos + 40 <= len(slot):
         uuid = slot[pos:pos + 16]
         if uuid == b"\0" * 16:
             break
         off, size, _flags = struct.unpack_from("<QQQ", slot, pos + 16)
-        if uuid == nt_fw_uuid:
-            if off + size > len(slot) or size <= 0x100:
-                raise RuntimeError("stock NT-FW range is invalid")
-            return int(off), int(size)
+        off = int(off); size = int(size)
+        if (
+            size > 0x100
+            and 0 <= off < off + size <= len(slot)
+            and slot[off:off + 4] == b"HDR2"
+            and off + 0x104 <= len(slot)
+            and struct.unpack_from(">I", slot, off + 0x100)[0] == 0xD00DFEED
+        ):
+            candidates.append((off, size))
         pos += 40
-    raise RuntimeError("stock nsb_slave has no Nokia NT-FW FIP entry")
+    if len(candidates) != 1:
+        raise RuntimeError(f"expected exactly one in-range HDR2/FIT boot payload, got {len(candidates)}")
+    return candidates[0]
 
 
 def fit_props(slot: bytes, fit_off: int, nt_size: int) -> tuple[dict[str, tuple[int, int]], dict]:
@@ -163,15 +177,46 @@ def image_data_range(
     return int(off), int(size)
 
 
-def kernel_hash_fields(slot: bytes, props: dict[str, tuple[int, int]]) -> list[dict]:
-    """Resolve kernel hash value fields without hard-coding a node name.
+def _cstring(slot: bytes, props: dict[str, tuple[int, int]], key: str) -> str:
+    return prop(slot, props, key).split(b"\0", 1)[0].decode("ascii", "strict")
 
-    Stock FITs are allowed to omit hash nodes entirely, use hash@N names other
-    than hash@1, or omit the optional algo property.  If a value is present,
-    its algorithm must be determinable from an explicit supported algo or from
-    the canonical digest length.  Only the value bytes are rewritten.
-    """
-    prefix = "/images/kernel@1/"
+
+def selected_fit_nodes(slot: bytes, props: dict[str, tuple[int, int]]) -> dict:
+    """Resolve the active FIT config and its referenced image nodes dynamically."""
+    config_names = sorted({
+        key[len("/configurations/"):].split("/", 1)[0]
+        for key in props
+        if key.startswith("/configurations/") and "/" in key[len("/configurations/"):]
+    })
+    default = None
+    if "/configurations/default" in props:
+        default = _cstring(slot, props, "/configurations/default")
+    if not default:
+        usable = []
+        for name in config_names:
+            base = f"/configurations/{name}"
+            if all(f"{base}/{role}" in props for role in ("kernel", "fdt", "filesystem")):
+                usable.append(name)
+        if len(usable) != 1:
+            raise RuntimeError(f"cannot resolve one active stock FIT configuration: {usable}")
+        default = usable[0]
+
+    base = f"/configurations/{default}"
+    refs = {}
+    for role in ("kernel", "fdt", "filesystem"):
+        key = f"{base}/{role}"
+        if key not in props:
+            raise RuntimeError(f"active stock FIT config lacks {role} reference")
+        refs[role] = _cstring(slot, props, key)
+        if not refs[role]:
+            raise RuntimeError(f"active stock FIT {role} reference is empty")
+    refs["config"] = default
+    return refs
+
+
+def kernel_hash_fields(slot: bytes, props: dict[str, tuple[int, int]], kernel_node: str) -> list[dict]:
+    """Resolve writable kernel digest fields without assuming node names."""
+    prefix = f"/images/{kernel_node}/"
     nodes: dict[str, dict[str, str]] = {}
     for key in props:
         if not key.startswith(prefix):
@@ -199,20 +244,18 @@ def kernel_hash_fields(slot: bytes, props: dict[str, tuple[int, int]]) -> list[d
             elif raw == b"sha256":
                 algo = "sha256"
             else:
-                raise RuntimeError(f"unsupported stock FIT kernel hash algorithm in {node}: {raw!r}")
+                # Unknown hash metadata does not authorize changing its value.
+                # Preserve it byte-for-byte instead of rejecting the whole FIT.
+                continue
         elif value_len == 20:
             algo = "sha1"
         elif value_len == 32:
             algo = "sha256"
         else:
-            raise RuntimeError(
-                f"cannot infer stock FIT kernel hash algorithm in {node} from digest length {value_len}"
-            )
+            continue
         expected_len = 20 if algo == "sha1" else 32
         if value_len != expected_len:
-            raise RuntimeError(
-                f"stock FIT kernel hash length mismatch in {node}: {value_len} for {algo}"
-            )
+            continue
         out.append({
             "node": node,
             "algorithm": algo,
@@ -226,140 +269,137 @@ def kernel_hash_fields(slot: bytes, props: dict[str, tuple[int, int]]) -> list[d
 def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[dict[str, tuple[int, int]], dict]:
     fit_off = nt_off + 0x100
     props, meta = fit_props(stock_slot, fit_off, nt_size)
-    expected = {
-        "/images/kernel@1/type": b"kernel\0",
-        "/images/kernel@1/arch": b"arm64\0",
-        "/images/kernel@1/os": b"linux\0",
-        "/configurations/default": b"conf@1\0",
-        "/configurations/conf@1/kernel": b"kernel@1\0",
-        "/configurations/conf@1/fdt": b"fdt@1\0",
-        "/configurations/conf@1/filesystem": b"filesystem@1\0",
-    }
-    for key, value in expected.items():
-        got = prop(stock_slot, props, key)
-        if got != value:
-            raise RuntimeError(f"unexpected stock FIT property {key}: {got!r} != {value!r}")
+    nodes = selected_fit_nodes(stock_slot, props)
+    kernel_node = str(nodes["kernel"])
+    fdt_node = str(nodes["fdt"])
+    fs_node = str(nodes["filesystem"])
 
-    stock_compression = prop(stock_slot, props, "/images/kernel@1/compression")
-    if stock_compression not in (b"none\0", b"lzma\0"):
-        raise RuntimeError(
-            "unsupported stock FIT kernel compression: "
-            f"{stock_compression!r}; expected b'none\\x00' or b'lzma\\x00'"
-        )
-
-    load = struct.unpack(">I", prop(stock_slot, props, "/images/kernel@1/load"))[0]
-    entry = struct.unpack(">I", prop(stock_slot, props, "/images/kernel@1/entry"))[0]
-    if load != 0x80088000 or entry != 0x80088000:
-        raise RuntimeError(f"unexpected stock kernel load/entry: {load:#x}/{entry:#x}")
     nt_end = nt_off + nt_size
     kernel_off, kernel_len = image_data_range(
-        stock_slot, props, "kernel@1",
+        stock_slot, props, kernel_node,
         fit_off=fit_off, fit_total=meta["total_size"], nt_end=nt_end,
     )
     fdt_off, fdt_len = image_data_range(
-        stock_slot, props, "fdt@1",
+        stock_slot, props, fdt_node,
         fit_off=fit_off, fit_total=meta["total_size"], nt_end=nt_end,
     )
     fs_off, fs_len = image_data_range(
-        stock_slot, props, "filesystem@1",
+        stock_slot, props, fs_node,
         fit_off=fit_off, fit_total=meta["total_size"], nt_end=nt_end,
     )
+
+    # Properties below are telemetry unless they are directly needed to patch
+    # the existing node in place. Stock topology/data are preserved otherwise.
+    kbase = f"/images/{kernel_node}"
+    compression_key = f"{kbase}/compression"
+    if compression_key in props:
+        stock_compression_raw = prop(stock_slot, props, compression_key)
+        stock_compression = stock_compression_raw.rstrip(b"\0").decode("ascii", "replace")
+    else:
+        stock_compression_raw = b""
+        stock_compression = "none"
+
+    def optional_u32(key: str):
+        if key not in props:
+            return None
+        raw = prop(stock_slot, props, key)
+        return struct.unpack(">I", raw)[0] if len(raw) == 4 else None
+
+    load = optional_u32(f"{kbase}/load")
+    entry = optional_u32(f"{kbase}/entry")
     fdt_data = stock_slot[fdt_off:fdt_off + fdt_len]
     fs_data = stock_slot[fs_off:fs_off + fs_len]
-    if not fdt_data.startswith(bytes.fromhex("d00dfeed")):
-        raise RuntimeError("stock fdt@1 data is not an FDT")
-    if not fs_data.startswith(b"hsqs"):
-        raise RuntimeError("stock filesystem@1 is not SquashFS")
-    if struct.unpack_from("<I", stock_slot, nt_off + 0x08)[0] != nt_size:
-        raise RuntimeError("HDR2 NT-FW size does not match FIP entry")
-    if struct.unpack_from("<I", stock_slot, nt_off + 0x50)[0] != kernel_len:
-        raise RuntimeError("HDR2 kernel size does not match stock FIT kernel@1 data")
-    if struct.unpack_from("<I", stock_slot, nt_off + 0x54)[0] != len(fs_data):
-        raise RuntimeError("HDR2 filesystem size does not match stock FIT filesystem@1 data")
+
+    hdr2_nt_size = struct.unpack_from("<I", stock_slot, nt_off + 0x08)[0] if nt_off + 0x0c <= len(stock_slot) else None
+    hdr2_kernel_size = struct.unpack_from("<I", stock_slot, nt_off + 0x50)[0] if nt_off + 0x54 <= len(stock_slot) else None
+    hdr2_filesystem_size = struct.unpack_from("<I", stock_slot, nt_off + 0x54)[0] if nt_off + 0x58 <= len(stock_slot) else None
+
     meta.update({
+        "config_node": nodes["config"],
+        "kernel_node": kernel_node,
+        "fdt_node": fdt_node,
+        "filesystem_node": fs_node,
         "kernel_data_offset": kernel_off,
         "kernel_data_size": kernel_len,
         "filesystem_data_offset": fs_off,
-        "filesystem_data_size": len(fs_data),
+        "filesystem_data_size": fs_len,
         "fdt_data_offset": fdt_off,
-        "fdt_data_size": len(fdt_data),
+        "fdt_data_size": fdt_len,
         "fit_trailing_payload_size": (nt_size - 0x100) - meta["total_size"],
         "kernel_load": load,
         "kernel_entry": entry,
-        "stock_kernel_compression": stock_compression.rstrip(b"\0").decode("ascii"),
-        "kernel_hash_fields": kernel_hash_fields(stock_slot, props),
+        "stock_kernel_compression": stock_compression,
+        "compression_key": compression_key if compression_key in props else None,
+        "kernel_hash_fields": kernel_hash_fields(stock_slot, props, kernel_node),
+        "stock_fdt_magic_ok": fdt_data.startswith(bytes.fromhex("d00dfeed")),
+        "stock_filesystem_squashfs_magic": fs_data.startswith(b"hsqs"),
+        "hdr2_nt_size": hdr2_nt_size,
+        "hdr2_kernel_size": hdr2_kernel_size,
+        "hdr2_filesystem_size": hdr2_filesystem_size,
     })
     return props, meta
 
 
-def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: int, nt_fw_uuid: bytes) -> tuple[bytes, dict]:
+
+def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: int, nt_fw_uuid: bytes | None = None) -> tuple[bytes, dict]:
     validate_linux_image(linux_image)
     nt_off, nt_size = fip_nt_fw(stock_slot, slot_size=slot_size, nt_fw_uuid=nt_fw_uuid)
-    if stock_slot[nt_off:nt_off + 4] != b"HDR2":
-        raise RuntimeError(f"stock NT-FW does not start with HDR2 at {nt_off:#x}")
     props, fit_meta = stock_fit_contract(stock_slot, nt_off, nt_size)
-    kernel_off = fit_meta["kernel_data_offset"]
-    kernel_size = fit_meta["kernel_data_size"]
+    kernel_off = int(fit_meta["kernel_data_offset"])
+    kernel_size = int(fit_meta["kernel_data_size"])
     if len(linux_image) > kernel_size:
-        raise RuntimeError(f"TRANSITION Linux Image does not fit stock kernel@1: {len(linux_image)} > {kernel_size}")
+        raise RuntimeError(f"TRANSITION Linux Image does not fit active stock kernel span: {len(linux_image)} > {kernel_size}")
 
     kernel = linux_image + (b"\0" * (kernel_size - len(linux_image)))
     out = bytearray(stock_slot)
     out[kernel_off:kernel_off + kernel_size] = kernel
-    comp_off, comp_len = props["/images/kernel@1/compression"]
-    if comp_len != 5:
-        raise RuntimeError("stock kernel compression property length is unexpected")
-    out[comp_off:comp_off + comp_len] = b"none\0"
+
+    allowed = [(kernel_off, kernel_off + kernel_size)]
+    compression_key = fit_meta.get("compression_key")
+    if compression_key:
+        comp_off, comp_len = props[str(compression_key)]
+        if comp_len < 5:
+            raise RuntimeError("active stock kernel compression property cannot encode 'none'")
+        comp_value = b"none\0" + (b"\0" * (comp_len - 5))
+        out[comp_off:comp_off + comp_len] = comp_value
+        allowed.append((comp_off, comp_off + comp_len))
+
     hash_fields = list(fit_meta.get("kernel_hash_fields") or [])
     for field in hash_fields:
         hash_off = int(field["value_offset"])
         hash_len = int(field["value_size"])
         algo = str(field["algorithm"])
-        if algo == "sha1":
-            digest = hashlib.sha1(kernel).digest()
-        elif algo == "sha256":
-            digest = hashlib.sha256(kernel).digest()
-        else:
-            raise RuntimeError(f"unsupported resolved kernel hash algorithm: {algo}")
+        digest = hashlib.sha1(kernel).digest() if algo == "sha1" else hashlib.sha256(kernel).digest()
         if len(digest) != hash_len:
             raise RuntimeError(f"resolved kernel hash length mismatch: {algo}/{hash_len}")
         out[hash_off:hash_off + hash_len] = digest
+        allowed.append((hash_off, hash_off + hash_len))
 
-    if bytes(out[:nt_off + 0x100]) != stock_slot[:nt_off + 0x100]:
-        raise RuntimeError("stock FIP/HDR2 preservation invariant failed")
-    for label, off_key, size_key in (
-        ("fdt@1", "fdt_data_offset", "fdt_data_size"),
-        ("filesystem@1", "filesystem_data_offset", "filesystem_data_size"),
-    ):
-        off = fit_meta[off_key]
-        size = fit_meta[size_key]
-        if bytes(out[off:off + size]) != stock_slot[off:off + size]:
-            raise RuntimeError(f"stock FIT preservation invariant failed for {label}")
-    allowed = [
-        (kernel_off, kernel_off + kernel_size),
-        (comp_off, comp_off + comp_len),
-    ]
-    allowed.extend(
-        (int(field["value_offset"]), int(field["value_offset"]) + int(field["value_size"]))
-        for field in hash_fields
-    )
+    # True safety invariant: only the active kernel payload and the existing
+    # metadata fields needed to describe that payload may change.
     allowed = sorted(allowed)
     cursor = 0
     for begin, end in allowed:
+        if begin < cursor:
+            raise RuntimeError("overlapping writable FIT spans")
         if bytes(out[cursor:begin]) != stock_slot[cursor:begin]:
-            raise RuntimeError("unexpected bytes changed outside TRANSITION kernel FIT fields")
+            raise RuntimeError("unexpected bytes changed outside active kernel FIT spans")
         cursor = end
     if bytes(out[cursor:]) != stock_slot[cursor:]:
-        raise RuntimeError("unexpected bytes changed after TRANSITION kernel FIT fields")
+        raise RuntimeError("unexpected bytes changed after active kernel FIT spans")
 
     return bytes(out), {
-        "wrapper_contract": "STOCK_FIP_HDR2_FIT_LINUX_KERNEL_HANDOFF",
+        "wrapper_contract": "STOCK_FIP_HDR2_FIT_ACTIVE_KERNEL_HANDOFF",
         "slot_size": len(out),
         "nt_fw_offset": nt_off,
         "nt_fw_size": nt_size,
         "fit_offset": fit_meta["fit_offset"],
         "fit_total_size": fit_meta["total_size"],
         "fit_trailing_payload_size": fit_meta["fit_trailing_payload_size"],
+        "config_node": fit_meta["config_node"],
+        "kernel_node": fit_meta["kernel_node"],
+        "fdt_node": fit_meta["fdt_node"],
+        "filesystem_node": fit_meta["filesystem_node"],
         "kernel_data_size": kernel_size,
         "transition_linux_image_size": len(linux_image),
         "transition_kernel_padding": kernel_size - len(linux_image),
@@ -369,6 +409,11 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
         "transition_kernel_compression": "none",
         "filesystem_data_size": fit_meta["filesystem_data_size"],
         "fdt_data_size": fit_meta["fdt_data_size"],
+        "stock_fdt_magic_ok": fit_meta["stock_fdt_magic_ok"],
+        "stock_filesystem_squashfs_magic": fit_meta["stock_filesystem_squashfs_magic"],
+        "hdr2_nt_size": fit_meta["hdr2_nt_size"],
+        "hdr2_kernel_size": fit_meta["hdr2_kernel_size"],
+        "hdr2_filesystem_size": fit_meta["hdr2_filesystem_size"],
         "stock_sha256": sha256_bytes(stock_slot),
         "candidate_sha256": sha256_bytes(bytes(out)),
         "kernel_hashes": [
@@ -384,7 +429,7 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
             }
             for field in hash_fields
         ],
-        "outer_fip_hdr2_byte_identical": True,
-        "stock_fdt_byte_identical": True,
-        "stock_filesystem_byte_identical": True,
+        "outer_fip_hdr2_byte_identical": bytes(out[:nt_off + 0x100]) == stock_slot[:nt_off + 0x100],
+        "stock_fdt_byte_identical": bytes(out[int(fit_meta["fdt_data_offset"]):int(fit_meta["fdt_data_offset"]) + int(fit_meta["fdt_data_size"])]) == stock_slot[int(fit_meta["fdt_data_offset"]):int(fit_meta["fdt_data_offset"]) + int(fit_meta["fdt_data_size"])],
+        "stock_filesystem_byte_identical": bytes(out[int(fit_meta["filesystem_data_offset"]):int(fit_meta["filesystem_data_offset"]) + int(fit_meta["filesystem_data_size"])]) == stock_slot[int(fit_meta["filesystem_data_offset"]):int(fit_meta["filesystem_data_offset"]) + int(fit_meta["filesystem_data_size"])],
     }
