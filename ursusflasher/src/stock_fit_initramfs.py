@@ -251,14 +251,8 @@ def _build_md_proven_pregnant_slot(
     nt_off, nt_size = sfw.fip_nt_fw(stock_slot, slot_size=slot_size, nt_fw_uuid=nt_uuid)
     props, fit_meta = sfw.stock_fit_contract(stock_slot, nt_off, nt_size)
     fit_off = int(fit_meta["fit_offset"])
-    fs_off, fs_size = sfw.image_data_range(
-        stock_slot,
-        props,
-        "filesystem@1",
-        fit_off=fit_off,
-        fit_total=int(fit_meta["total_size"]),
-        nt_end=nt_off + nt_size,
-    )
+    fs_off = int(fit_meta["filesystem_data_offset"])
+    fs_size = int(fit_meta["filesystem_data_size"])
     fs_end = fs_off + fs_size
 
     reserved = [
@@ -354,7 +348,8 @@ def _build_md_proven_pregnant_slot(
     if bytes(out[cursor:]) != base[cursor:]:
         raise RuntimeError("unexpected MD pregnant byte change after filesystem carrier")
 
-    fdt_off, fdt_size = props["/images/fdt@1/data"]
+    fdt_off = int(fit_meta["fdt_data_offset"])
+    fdt_size = int(fit_meta["fdt_data_size"])
     if bytes(out[fdt_off:fdt_off + fdt_size]) != stock_slot[fdt_off:fdt_off + fdt_size]:
         raise RuntimeError("stock tcboot fdt@1 changed in MD pregnant wrapper")
 
