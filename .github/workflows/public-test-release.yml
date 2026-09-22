@@ -1,12 +1,22 @@
-name: Public test release - Nokia XG-040G-MD
+name: Public test release - Nokia XG-040G-MD + MF
 
-# The only workflow that publishes a release. The full repository kit is not
-# published: it carries SDK parts, build trees and engineering material that
-# nobody needs in order to flash a router.
+# The only workflow that publishes a release. It does not rebuild anything: it
+# publishes the ZIP that "MD+MF direct item4 test kit" already built and
+# verified (verify_kit) for this exact commit, after the operator confirms the
+# hardware test. The full repository kit is not published.
 
 on:
   workflow_dispatch:
     inputs:
+      kit_run_id:
+        description: 'Successful "MD+MF direct item4 test kit" run for this exact commit'
+        required: true
+        type: string
+      hardware_passed:
+        description: "TEST63 hardware acceptance passed on MD and MF (docs/TEST63_TEST_RU.md)"
+        required: true
+        type: boolean
+        default: false
       tag:
         description: "Test tag. Leave empty for test-v<RELEASE>-run<RUN_NUMBER>"
         required: false
@@ -14,6 +24,7 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: public-test-release
@@ -24,23 +35,35 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Require hardware acceptance
+        if: ${{ !inputs.hardware_passed }}
+        run: |
+          echo "Publish only after the TEST63 hardware acceptance passed on MD and MF (docs/TEST63_TEST_RU.md)." >&2
+          exit 2
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: Verify repository and boot-chain artifacts
+      - name: Fetch the verified kit built for this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KIT_RUN: ${{ inputs.kit_run_id }}
         run: |
-          python3 scripts/verify_boot_chain.py
-          python3 scripts/verify_repo.py
-
-      - name: Build public MD test package
-        run: python3 scripts/build_public_release.py --out-dir dist-public
+          set -euo pipefail
+          RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$KIT_RUN")"
+          test "$(jq -r .path <<<"$RUN")" = ".github/workflows/md-item4-direct-ubi.yml"
+          test "$(jq -r .conclusion <<<"$RUN")" = success
+          test "$(jq -r .head_sha <<<"$RUN")" = "$GITHUB_SHA" || { echo "kit run $KIT_RUN is for $(jq -r .head_sha <<<"$RUN"), not $GITHUB_SHA" >&2; exit 3; }
+          gh run download "$KIT_RUN" -R "$GITHUB_REPOSITORY" -p "UrsusFlasher-MD-MF-URSUSBOOT-*-$GITHUB_SHA" -D kit-artifact
+          mkdir -p dist-public
+          find kit-artifact -type f -exec mv -t dist-public {} +
+          ls -la dist-public
+          cat dist-public/URSUSFLASHER_COMMIT.txt
+          grep -Fxq "URSUSFLASHER_COMMIT=$GITHUB_SHA" dist-public/URSUSFLASHER_COMMIT.txt
+          ZIP="$(find dist-public -maxdepth 1 -name '*.zip' -print -quit)"
+          grep -Fxq "ZIP_SHA256=$(sha256sum "$ZIP" | cut -d' ' -f1)" dist-public/URSUSFLASHER_COMMIT.txt
 
       - name: Verify public package boundary and checksums
         run: python3 scripts/verify_public_release.py dist-public
@@ -93,9 +116,9 @@ jobs:
           set -euo pipefail
           DIGEST="$(awk '{print $1; exit}' "dist-public/${ASSET}.sha256.txt")"
           cat > dist-public/RELEASE_NOTES_RU.md <<EOF
-          # UrsusFlasher ${RELEASE} — Nokia XG-040G-MD
+          # UrsusFlasher ${RELEASE} — Nokia XG-040G-MD и XG-040G-MF
 
-          Установка OpenWrt на Nokia XG-040G-MD. Нужен Python 3.12+ и кабель Ethernet; сторонние Python-пакеты не требуются.
+          Установка OpenWrt на Nokia XG-040G-MD (AN7581) и XG-040G-MF (AN7583). Нужен Python 3.12+ и кабель Ethernet; сторонние Python-пакеты не требуются.
 
           ## Сначала сбросьте Nokia на заводские настройки
 
@@ -132,6 +155,7 @@ jobs:
           | \`1\` Установить OpenWrt | маршрут ONE-CLICK; на Nokia STOCK EXPERT может явно пропустить полный backup только для этого запуска; один \`[y/N]\` остаётся перед direct \`mtd0\` write |
           | \`2\` Установить или обновить UrsusBoot | обновить загрузчик на уже работающем роутере |
           | \`3\` Записать свою прошивку OpenWrt | поставить собственный образ вместо комплектного |
+          | \`4\` Stock Nokia → OpenWrt UBI с UrsusBoot Recovery | MD и MF: UrsusBoot TEST63 + быстрый BL2, OpenWrt на UBI |
           | \`5\` Восстановить загрузчик | роутер не включается; нужен USB-UART 3,3 В |
           | \`7\` Создать полную копию flash | снять резервную копию до любых записей |
           | \`8\` Проверить резервную копию | убедиться, что копия пригодна для восстановления |
@@ -151,8 +175,9 @@ jobs:
 
           Подробности — в приложенных \`INSTRUCTIONS_RU.md\` и \`EMERGENCY_URSUSBOOT_RU.md\`.
 
-          > **UrsusBoot TEST61 / SAFETYREG1:** source/build/package QA пройден. TEST59/60
-          > отозваны для новых HW-прогонов; перед публикацией нужен полный hardware safety regression TEST61.
+          > **UrsusBoot TEST63** из \`Medvedolog/airoha-ursusboot\` на закреплённом коммите, MD и MF,
+          > с быстрым UBI BL2. Хэши preloader и BL2 — в \`PUBLIC_TEST_RELEASE.txt\` внутри архива.
+          > Аппаратная приёмка MD и MF пройдена (\`TEST63_TEST_RU.md\`).
 
           ## Проверка архива
 
@@ -181,4 +206,5 @@ jobs:
             "dist-public/${ASSET}.sha256.txt" \
             "docs/INSTRUCTIONS_RU.md" \
             "docs/EMERGENCY_URSUSBOOT_RU.md" \
-            "docs/CHANGELOG_RU.md"
+            "docs/CHANGELOG_RU.md" \\
+            "docs/TEST63_TEST_RU.md"

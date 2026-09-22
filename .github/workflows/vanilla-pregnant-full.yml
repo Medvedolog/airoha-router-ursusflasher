@@ -1,26 +1,9 @@
 name: Vanilla pregnant full MD MF kit
 
+# Legacy: manual only. Superseded by md-item4-direct-ubi.yml (the canonical MD+MF
+# TEST63 operator kit built from the pinned airoha-ursusboot release).
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/ursusboot-modular-airoha
-    paths:
-      - '.github/workflows/vanilla-pregnant-full.yml'
-      - 'fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin'
-      - 'fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb'
-      - 'fw/openwrt-airoha-an7583-nokia_xg-040g-mf-squashfs-sysupgrade.bin'
-      - 'fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb'
-      - 'config/UNAMEONE_2026-09-16_PAYLOADS.json'
-      - 'config/VANILLA_BOOT_CHAIN_PROFILES.json'
-      - 'docs/HW_TEST_ITEM4_RU.md'
-      - 'openwrt/pregnant-overlay/**'
-      - 'ursusflasher/src/expert.py'
-      - 'ursusflasher/src/stock_ab_pregnant.py'
-      - 'ursusflasher/src/stock_ab_transition.py'
-      - 'ursusflasher/src/stock_fit_initramfs.py'
-      - 'ursusflasher/tools/build_pregnant_runtime.py'
-      - 'ursusflasher/tools/build_vanilla_pregnant_payloads.py'
 
 permissions:
   contents: read

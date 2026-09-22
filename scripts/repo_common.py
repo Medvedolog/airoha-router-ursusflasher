@@ -13,11 +13,13 @@ RELEASE_PAYLOADS = (
     'payloads/md/ursusboot/openwrt-6.18.44-mtd-rw.ko',
     'payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin',
     'payloads/md/stock/nokia-xg-040g-md-stock-mtd0.bin',
+    # UART bootrom full-flash backup (proven_backend.backup_recovery_profile_md)
+    'payloads/md/bootrom-backup/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip',
+    'payloads/md/bootrom-backup/nokia-xg040gmd-stock-recovery-initramfs.itb',
     'payloads/md/ursusboot/ursus-mtd-raw',
     'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-bl2.bin',
     'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-ram-installer.fip',
     'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-update.fip',
-    'payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip',
     # MF / AN7583 stock restore image. The MF runtime, UART recovery pair and
     # STOCK->UBI BL2 are CI-built and added by scripts/apply_ursusboot_release.py
     # (build_public_release.py --ursusboot-md/--ursusboot-mf).
@@ -25,12 +27,12 @@ RELEASE_PAYLOADS = (
 )
 
 # Operator-facing documents only. Historical TEST57-TEST60 notes remain in the
-# repository for provenance but do not belong in a TEST61 hardware kit.
+# repository for provenance but do not belong in a TEST63 hardware kit.
 RELEASE_DOCS = (
     'INSTRUCTIONS_RU.md',
     'INSTRUCTIONS_EN.md',
     'EMERGENCY_URSUSBOOT_RU.md',
-    'TEST61_TEST_RU.md',
+    'TEST63_TEST_RU.md',
     'CHANGELOG_RU.md',
     'CHANGELOG_EN.md',
     'README_EN.md',

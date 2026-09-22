@@ -1,4 +1,6 @@
 name: Vanilla pregnant MD+MF build
+# Legacy: manual only. Superseded by md-item4-direct-ubi.yml (the canonical MD+MF
+# TEST63 operator kit built from the pinned airoha-ursusboot release).
 on:
   workflow_dispatch:
     inputs:
@@ -10,32 +12,6 @@ on:
         description: Optional stable URL for exact pinned UnameOne 2026-09-16 MF UBI ITB
         required: false
         type: string
-  push:
-    branches: [feature/ursusboot-modular-airoha]
-    paths:
-      - '.github/workflows/vanilla-pregnant-full-build.yml'
-      - 'openwrt/pregnant-overlay/**'
-      - 'ursusflasher/src/stock_ab_pregnant.py'
-      - 'ursusflasher/src/stock_slot_telnet.py'
-      - 'ursusflasher/src/one_key_multi.py'
-      - 'ursusflasher/src/stock_fit_initramfs.py'
-      - 'ursusflasher/src/expert.py'
-      - 'ursusflasher/src/expert_multi.py'
-      - 'ursusflasher/src/expert_airoha.py'
-      - 'ursusflasher/tools/build_pregnant_runtime.py'
-      - 'ursusflasher/tools/repack_vanilla_fip.py'
-      - 'ursusflasher/tools/assemble_pregnant_payload.py'
-      - 'ursusflasher/tools/selftest_pregnant_item4.py'
-      - 'config/UNAMEONE_2026-09-16_PAYLOADS.json'
-      - 'config/FIRMWARE_BUNDLE.json'
-      - 'config/FIRMWARE_BUNDLES.json'
-      - 'config/VANILLA_BOOT_CHAIN_PROFILES.json'
-      - 'ursusboot/patches/openwrt-pr24025/**'
-      - 'ursusboot/configs/ursusboot-pregnant-handoff.cfg'
-      - 'ursusboot/patches/191-md-pregnant-handoff.patch'
-      - 'ursusboot/scripts/build_md_pregnant_handoff.sh'
-      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
-      - 'toolchains/openwrt-sdk-r35906/**'
 permissions: { contents: read }
 concurrency:
   group: vanilla-pregnant-proven-${{ github.ref }}

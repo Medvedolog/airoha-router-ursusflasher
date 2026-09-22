@@ -1372,7 +1372,9 @@ def selftest() -> int:
     hybrid = require_payload()
     check = validate_checksum_entry(hybrid)
     lineage = validate_direct_stock_lineage(hybrid)
-    stock_ref = PAYLOAD_DIR / "stock_mtd0_reference.bin"
+    stock_ref = next((p for p in (PAYLOAD_DIR / "stock_mtd0_reference.bin",
+                                  PAYLOAD_DIR.parent / "stock" / "nokia-xg-040g-md-stock-mtd0.bin") if p.is_file()),
+                     PAYLOAD_DIR / "stock_mtd0_reference.bin")
     if not stock_ref.is_file() or stock_ref.stat().st_size != MTD0_SIZE:
         raise RuntimeError("stock mtd0 reference missing")
     live = stock_ref.read_bytes()

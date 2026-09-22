@@ -31,6 +31,8 @@ on:
       - 'scripts/build_public_release.py'
       - 'scripts/apply_ursusboot_release.py'
       - 'scripts/verify_kit.py'
+      - 'scripts/verify_public_release.py'
+      - 'docs/TEST63_TEST_RU.md'
       - 'config/URSUSBOOT_PIN.json'
       - 'scripts/repo_common.py'
 
@@ -127,6 +129,8 @@ jobs:
           test -n "$ZIP" && test -s "$ZIP"
           python3 scripts/verify_kit.py --zip "$ZIP" --ursusboot-md /tmp/ursusboot/xg040-md \
             --ursusboot-mf /tmp/ursusboot/xg040-mf --pin config/URSUSBOOT_PIN.json
+          # The same boundary check public-test-release.yml applies before publishing.
+          python3 scripts/verify_public_release.py /tmp/kit-public
           {
             echo "URSUSFLASHER_COMMIT=$GITHUB_SHA"
             echo "URSUSBOOT_REPO=Medvedolog/airoha-ursusboot"

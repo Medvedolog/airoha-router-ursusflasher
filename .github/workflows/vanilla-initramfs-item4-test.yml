@@ -1,20 +1,9 @@
 name: EXPERT item4 Vanilla pregnant initramfs TEST
 
+# Legacy: manual only. Superseded by md-item4-direct-ubi.yml (the canonical MD+MF
+# TEST63 operator kit built from the pinned airoha-ursusboot release).
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/ursusboot-modular-airoha
-    paths:
-      - '.github/workflows/vanilla-initramfs-item4-test.yml'
-      - 'START_EXPERT_ITEM4_INITRAMFS_TEST.cmd'
-      - 'START_EXPERT_ITEM4_INITRAMFS_TEST.sh'
-      - 'openwrt/initramfs-test-overlay/**'
-      - 'ursusflasher/src/stock_fit_initramfs.py'
-      - 'ursusflasher/src/stock_ab_initramfs_test.py'
-      - 'ursusflasher/src/expert_item4_initramfs_test.py'
-      - 'docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.45_VANILLA_INITRAMFS.md'
-      - 'docs/MD_VANILLA_HANDOFF.md'
 
 permissions:
   contents: read

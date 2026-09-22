@@ -2,6 +2,7 @@
 from __future__ import annotations
 import argparse
 import hashlib
+import json
 import tempfile
 import zipfile
 import subprocess
@@ -38,15 +39,17 @@ def main() -> None:
         'ursus-mtd-raw.c', '.tar.zst', '.tar.xz', '.tar.gz',
     )
     required_suffixes = (
-        '/START_ONECLICK.cmd', '/START_EXPERT.cmd', '/README.md', '/VERSION',
+        '/START_ONECLICK.cmd', '/START_EXPERT.cmd', '/START_ONECLICK.sh', '/START_EXPERT.sh',
+        '/README.md', '/VERSION', '/data/URSUSBOOT_RELEASE.json',
         '/data/one_key.py', '/data/expert.py', '/data/proven_backend.py',
-        '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip',
         '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-ram-installer.fip',
         '/data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha3-bl2.bin',
         '/data/payloads/md/bootrom-backup/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot-ethfix.fip',
         '/data/payloads/md/bootrom-backup/nokia-xg040gmd-stock-recovery-initramfs.itb',
         '/fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin',
         '/fw/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb',
+        '/fw/openwrt-airoha-an7583-nokia_xg-040g-mf-squashfs-sysupgrade.bin',
+        '/fw/openwrt-airoha-an7583-nokia_xg-040g-mf-ubi-squashfs-sysupgrade.itb',
         '/doc/INSTRUCTIONS_RU.md', '/doc/EMERGENCY_URSUSBOOT_RU.md',
         '/PUBLIC_TEST_RELEASE.txt', '/SHA256SUMS', '/PAYLOAD_SHA256SUMS.txt',
     )
@@ -76,6 +79,21 @@ def main() -> None:
             assert p.is_file(), rel
             assert sha256(p) == expected, rel
             checked += 1
+        # MD and MF UrsusBoot: exactly the pinned airoha-ursusboot release, every file present.
+        pin = json.loads((repo / 'config' / 'URSUSBOOT_PIN.json').read_text(encoding='utf-8'))
+        rel = json.loads((root / 'data' / 'URSUSBOOT_RELEASE.json').read_text(encoding='utf-8'))
+        for key in ('repo', 'commit', 'version'):
+            assert rel[key] == pin[key], f'URSUSBOOT_RELEASE.json {key}={rel[key]!r}, pin {pin[key]!r}'
+        assert set(rel['boards']) == {'md', 'mf'}, sorted(rel['boards'])
+        for board, info in sorted(rel['boards'].items()):
+            assert info['version'] == pin['version'], (board, info['version'])
+            for fkey, f in sorted(info['files'].items()):
+                p = root / f['path']
+                assert p.is_file(), f'{board} {fkey}: {f["path"]}'
+                assert sha256(p) == f['sha256'], f'{board} {fkey}: digest mismatch'
+        stale = [n for n in normalized if '/ursusboot' in n and ('-TEST61-' in n or '-TEST62-' in n)]
+        assert not stale, f'stale UrsusBoot builds in public kit: {stale}'
+
         assert not list(root.rglob('__pycache__'))
         assert not list(root.rglob('*.pyc'))
 
@@ -89,7 +107,7 @@ def main() -> None:
             cwd=root, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
 
-    print(f'PUBLIC_RELEASE_QA=PASS files={checked}')
+    print(f'PUBLIC_RELEASE_QA=PASS files={checked} ursusboot={rel["version"]}@{rel["commit"]}')
 
 
 if __name__ == '__main__':

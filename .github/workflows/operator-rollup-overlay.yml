@@ -1,14 +1,8 @@
 name: UrsusFlasher operator rollup overlay
 
+# Legacy: manual only. Superseded by md-item4-direct-ubi.yml (the canonical MD+MF
+# TEST63 operator kit built from the pinned airoha-ursusboot release).
 on:
-  push:
-    branches:
-      - feature/ursusboot-modular-airoha
-    paths:
-      - '.github/workflows/operator-rollup-overlay.yml'
-      - 'START_*.cmd'
-      - 'START_*.sh'
-      - 'ursusflasher/src/**'
   workflow_dispatch:
 
 permissions:

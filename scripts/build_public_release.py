@@ -5,6 +5,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+import json
 import zipfile
 from pathlib import Path
 from repo_common import ROOT, export_tree, write_manifest, sha256
@@ -15,10 +16,7 @@ KEEP_DOCS = {
     'INSTRUCTIONS_EN.md',
     'EMERGENCY_URSUSBOOT_RU.md',
     'CHANGELOG_RU.md',
-    'TEST58_TEST_RU.md',
-    'TEST59_TEST_RU.md',
-    'TEST60_TEST_RU.md',
-    'TEST61_TEST_RU.md',
+    'TEST63_TEST_RU.md',
 }
 
 
@@ -64,14 +62,18 @@ def prune_public_tree(root: Path) -> None:
         '\n'.join(payload_rows) + '\n', encoding='utf-8', newline='\n'
     )
 
-    (root / 'PUBLIC_TEST_RELEASE.txt').write_text(
-        'UrsusFlasher public test release for Nokia XG-040G-MD\n'
-        'Contains the runnable flasher, required boot/recovery payloads, OpenWrt sysupgrade images, and user documentation.\n'
-        'Excluded: repository sources, SDK/toolchains/GCC, build trees, QA archives, self-test tools, internal engineering documents, and helper C source.\n'
-        'UrsusBoot alpha5-UBIUX1-TEST61 is a SAFETY REGRESSION public-test candidate. TEST59/60 are revoked for hardware use; historical main stock ONE-CLICK PASS remains TEST57/SkyHigh.\n'
-        'TEST61 retains CONFIGTRIM1 and fixes split identity, redundant automatic FIP update, active-UBI detach, interrupted-upload recovery and stale failure-session behavior. Installed UrsusBoot updates are explicit operator actions only.\n',
-        encoding='utf-8', newline='\n',
-    )
+    rel_path = root / 'data' / 'URSUSBOOT_RELEASE.json'
+    rel = json.loads(rel_path.read_text(encoding='utf-8')) if rel_path.is_file() else None
+    lines = [
+        'UrsusFlasher public test release for Nokia XG-040G-MD and XG-040G-MF',
+        'Contains the runnable flasher, required boot/recovery payloads, OpenWrt sysupgrade images, and user documentation.',
+        'Excluded: repository sources, SDK/toolchains/GCC, build trees, QA archives, self-test tools, internal engineering documents, and helper C source.',
+    ]
+    if rel:
+        lines.append(f"UrsusBoot {rel['version']} from {rel['repo']}@{rel['commit']} (MD and MF, fast-scan UBI BL2).")
+        for board, info in sorted(rel['boards'].items()):
+            lines.append(f"{board}: ubi_preloader_sha256={info['ubi_preloader_sha256']} ubi_bl2_image_sha256={info['ubi_bl2_image_sha256']}")
+    (root / 'PUBLIC_TEST_RELEASE.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8', newline='\n')
     write_manifest(root)
 
 
