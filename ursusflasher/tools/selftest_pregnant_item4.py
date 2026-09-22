@@ -108,6 +108,19 @@ def test_item4_backup_is_optional_and_never_recaptured():
     assert "restore-grade backup" in run
 
 
+def test_postwrite_readback_reconnect_never_rewrites():
+    source=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
+    helper=source[source.index("def _readback_sha_with_reconnect"):source.index("def run(")]
+    assert "attempts: int = 3" in helper
+    assert "sat._remote_partition_sha" in helper
+    assert "_reopen_verified_stock_root(host, policy)" in helper
+    assert "_write_partition(" not in helper
+    assert "NAND повторно НЕ записывается" in helper
+    run=source[source.index("def run("):source.index("def run_expert(")]
+    assert 'access, telnet, got = _readback_sha_with_reconnect(' in run
+    assert 'access, telnet, got_flag = _readback_sha_with_reconnect(' in run
+
+
 def test_stock_wrapper_accepts_fit_smaller_than_nt_payload():
     src=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
     assert "total != nt_size - 0x100" not in src
