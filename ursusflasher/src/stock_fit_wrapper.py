@@ -397,6 +397,119 @@ def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[di
 
 
 
+def build_md_proven_transition_slot(
+    stock_slot: bytes,
+    linux_image: bytes,
+    *,
+    slot_size: int,
+    nt_fw_uuid: bytes | None = None,
+) -> tuple[bytes, dict]:
+    """Literal hardware-proven XG-040G-MD tcboot wrapper contract.
+
+    Keep the exact TRANSITION2-visible FIT topology and mutate only
+    kernel@1/data, kernel@1/compression and kernel@1/hash@1/value.
+    """
+    validate_linux_image(linux_image)
+    nt_off, nt_size = fip_nt_fw(stock_slot, slot_size=slot_size, nt_fw_uuid=nt_fw_uuid)
+    if stock_slot[nt_off:nt_off + 4] != b"HDR2":
+        raise RuntimeError(f"stock NT-FW does not start with HDR2 at {nt_off:#x}")
+    fit_off = nt_off + 0x100
+    props, meta = fit_props(stock_slot, fit_off, nt_size)
+
+    required = {
+        "/images/kernel@1/type": b"kernel\0",
+        "/images/kernel@1/arch": b"arm64\0",
+        "/images/kernel@1/os": b"linux\0",
+        "/images/kernel@1/hash@1/algo": b"sha1\0",
+        "/configurations/default": b"conf@1\0",
+        "/configurations/conf@1/kernel": b"kernel@1\0",
+        "/configurations/conf@1/fdt": b"fdt@1\0",
+        "/configurations/conf@1/filesystem": b"filesystem@1\0",
+    }
+    for key, value in required.items():
+        got = prop(stock_slot, props, key)
+        if got != value:
+            raise RuntimeError(f"MD proven tcboot FIT contract mismatch for {key}: {got!r} != {value!r}")
+
+    kernel_key = "/images/kernel@1/data"
+    fdt_key = "/images/fdt@1/data"
+    fs_key = "/images/filesystem@1/data"
+    if kernel_key not in props or fdt_key not in props or fs_key not in props:
+        raise RuntimeError("MD proven tcboot FIT requires inline kernel@1/fdt@1/filesystem@1 data")
+
+    kernel_off, kernel_size = props[kernel_key]
+    fdt_off, fdt_size = props[fdt_key]
+    fs_off, fs_size = props[fs_key]
+    if len(linux_image) > kernel_size:
+        raise RuntimeError(
+            f"TRANSITION Linux Image does not fit proven stock kernel@1 span: {len(linux_image)} > {kernel_size}"
+        )
+    if stock_slot[fdt_off:fdt_off + min(fdt_size, 4)] != bytes.fromhex("d00dfeed"):
+        raise RuntimeError("MD proven stock fdt@1 data is not an FDT")
+    if stock_slot[fs_off:fs_off + min(fs_size, 4)] != b"hsqs":
+        raise RuntimeError("MD proven stock filesystem@1 is not SquashFS")
+
+    comp_off, comp_len = props["/images/kernel@1/compression"]
+    if comp_len != 5:
+        raise RuntimeError("MD proven kernel@1 compression property length is not 5")
+    hash_off, hash_len = props["/images/kernel@1/hash@1/value"]
+    if hash_len != 20:
+        raise RuntimeError("MD proven kernel@1 SHA1 field length is not 20")
+
+    kernel = linux_image + (b"\0" * (kernel_size - len(linux_image)))
+    out = bytearray(stock_slot)
+    out[kernel_off:kernel_off + kernel_size] = kernel
+    out[comp_off:comp_off + comp_len] = b"none\0"
+    out[hash_off:hash_off + hash_len] = hashlib.sha1(kernel).digest()
+
+    if bytes(out[:nt_off + 0x100]) != stock_slot[:nt_off + 0x100]:
+        raise RuntimeError("MD proven FIP/HDR2 preservation invariant failed")
+    if bytes(out[fdt_off:fdt_off + fdt_size]) != stock_slot[fdt_off:fdt_off + fdt_size]:
+        raise RuntimeError("MD proven fdt@1 preservation invariant failed")
+    if bytes(out[fs_off:fs_off + fs_size]) != stock_slot[fs_off:fs_off + fs_size]:
+        raise RuntimeError("MD proven filesystem@1 preservation invariant failed")
+
+    allowed = sorted([
+        (kernel_off, kernel_off + kernel_size),
+        (comp_off, comp_off + comp_len),
+        (hash_off, hash_off + hash_len),
+    ])
+    cursor = 0
+    for begin, end in allowed:
+        if bytes(out[cursor:begin]) != stock_slot[cursor:begin]:
+            raise RuntimeError("unexpected bytes changed outside proven MD TRANSITION2 FIT fields")
+        cursor = end
+    if bytes(out[cursor:]) != stock_slot[cursor:]:
+        raise RuntimeError("unexpected bytes changed after proven MD TRANSITION2 FIT fields")
+
+    generic_props, generic_meta = stock_fit_contract(stock_slot, nt_off, nt_size)
+    return bytes(out), {
+        "wrapper_contract": "MD_HW_PROVEN_TRANSITION2_LITERAL_FIT_V1",
+        "slot_size": len(out),
+        "nt_fw_offset": nt_off,
+        "nt_fw_size": nt_size,
+        "fit_offset": fit_off,
+        "fit_total_size": meta["total_size"],
+        "config_node": "conf@1",
+        "kernel_node": "kernel@1",
+        "fdt_node": "fdt@1",
+        "filesystem_node": "filesystem@1",
+        "kernel_data_offset": kernel_off,
+        "kernel_data_size": kernel_size,
+        "fdt_data_offset": fdt_off,
+        "fdt_data_size": fdt_size,
+        "filesystem_data_offset": fs_off,
+        "filesystem_data_size": fs_size,
+        "image_ranges": generic_meta["image_ranges"],
+        "stock_sha256": sha256_bytes(stock_slot),
+        "candidate_sha256": sha256_bytes(bytes(out)),
+        "kernel_sha1": hashlib.sha1(kernel).hexdigest(),
+        "outer_fip_hdr2_byte_identical": True,
+        "stock_fdt_byte_identical": True,
+        "stock_filesystem_byte_identical": True,
+    }
+
+
 def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: int, nt_fw_uuid: bytes | None = None) -> tuple[bytes, dict]:
     validate_linux_image(linux_image)
     nt_off, nt_size = fip_nt_fw(stock_slot, slot_size=slot_size, nt_fw_uuid=nt_fw_uuid)
