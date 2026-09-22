@@ -366,6 +366,55 @@ def _reopen_verified_stock_root(host: str, policy: Policy):
     return access, telnet
 
 
+def _readback_sha_with_reconnect(
+    host: str,
+    policy: Policy,
+    access,
+    telnet,
+    dev: str,
+    *,
+    timeout: int,
+    attempts: int = 3,
+):
+    """Retry only readback across stock transport disconnects.
+
+    NAND write is never retried here. Each retry re-establishes the same verified
+    stock root transport and re-runs full-partition SHA256.
+    """
+    current_access, current_telnet = access, telnet
+    for attempt in range(1, attempts + 1):
+        try:
+            digest = sat._remote_partition_sha(current_telnet, dev, timeout=timeout)
+            return current_access, current_telnet, digest
+        except (OSError, ConnectionError, TimeoutError, EOFError) as exc:
+            pb._write_session_only(
+                f"[PREGNANT-READBACK-DISCONNECT] dev={dev} attempt={attempt}/{attempts} error={exc!r}"
+            )
+            if attempt >= attempts:
+                raise
+            ui.status(
+                "WARNING",
+                pb.tr(
+                    f"Соединение оборвалось во время readback {dev}; переподключаюсь и повторяю только SHA-чтение ({attempt + 1}/{attempts}). NAND повторно НЕ записывается.",
+                    f"Connection dropped during {dev} readback; reconnecting and retrying SHA read only ({attempt + 1}/{attempts}). NAND is NOT rewritten.",
+                ),
+            )
+            try:
+                if current_telnet:
+                    current_telnet.close()
+            except Exception:
+                pass
+            try:
+                if current_access:
+                    current_access.close_web(announce=False)
+            except Exception:
+                pass
+            current_access = current_telnet = None
+            time.sleep(3)
+            current_access, current_telnet = _reopen_verified_stock_root(host, policy)
+    raise RuntimeError("unreachable readback retry state")
+
+
 def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True, backup_path: str | Path | None = None) -> int:
     policy = _policy(profile)
     ui.enable()
@@ -548,7 +597,9 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True, backup
             time.sleep(5)
             access, telnet = _reopen_verified_stock_root(host, policy)
 
-        got = sat._remote_partition_sha(telnet, slot_dev, timeout=600)
+        access, telnet, got = _readback_sha_with_reconnect(
+            host, policy, access, telnet, slot_dev, timeout=600
+        )
         if got != slot_meta["candidate_sha256"]:
             raise RuntimeError(
                 f"nsb_slave readback mismatch after write/disconnect handling: {got} != {slot_meta['candidate_sha256']}; "
@@ -567,7 +618,9 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True, backup
             policy.erase_size,
             timeout=120,
         )
-        got_flag = sat._remote_partition_sha(telnet, f"/dev/mtd{policy.flag_mtd}", timeout=120)
+        access, telnet, got_flag = _readback_sha_with_reconnect(
+            host, policy, access, telnet, f"/dev/mtd{policy.flag_mtd}", timeout=120
+        )
         if got_flag != expected_flag_sha:
             raise RuntimeError(f"flag readback mismatch: {got_flag} != {expected_flag_sha}")
         ui.status("PASS", "Selector active=1 readback verified; flagback untouched")
