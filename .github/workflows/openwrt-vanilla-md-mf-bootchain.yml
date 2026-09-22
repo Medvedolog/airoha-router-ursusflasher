@@ -119,7 +119,21 @@ jobs:
           cp "$BL2" "$OUT/openwrt-vanilla-${{ matrix.family }}-fast-ubi-bl2.bin"
           cp "$BIN" "$OUT/openwrt-vanilla-${{ matrix.family }}-fudan-u-boot.bin"
           cp "$LZMA" "$OUT/openwrt-vanilla-${{ matrix.family }}-fudan-u-boot.lzma"
-          sha256sum "$OUT"/*.bin "$OUT"/*.lzma | tee "$OUT/SHA256SUMS"
+
+          manifest=kit/config/VANILLA_BOOT_CHAIN_PROFILES.json
+          profile="xg040-${{ matrix.family }}"
+          donor_path="$(jq -r ".profiles[\"$profile\"].fip.path" "$manifest")"
+          donor_commit="$(jq -r '.source.commit' "$manifest")"
+          donor_base="$(jq -r '.source.raw_base' "$manifest")"
+          curl -fL --retry 5 "$donor_base/$donor_commit/$donor_path" -o "$OUT/donor.fip"
+          python3 kit/ursusflasher/tools/repack_vanilla_fip.py \
+            --donor "$OUT/donor.fip" \
+            --nt-fw "$LZMA" \
+            --output "$OUT/openwrt-vanilla-${{ matrix.family }}-bl31-uboot-fudan.fip" \
+            --require-marker "U-Boot 2026.07" \
+            --require-marker "FM25G02B"
+          rm -f "$OUT/donor.fip"
+          sha256sum "$OUT"/*.bin "$OUT"/*.lzma "$OUT"/*.fip | tee "$OUT/SHA256SUMS"
           cat > "$OUT/BUILD_INFO.txt" <<EOF
           ROLE=VANILLA_OPENWRT_BOOT_CHAIN
           FAMILY=${{ matrix.family }}
