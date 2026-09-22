@@ -50,6 +50,34 @@ def test_slot_layout_contract():
     for i,(a,alen) in enumerate(regions):
         for b,blen in regions[i+1:]: assert max(a,b)>=min(a+alen,b+blen)
 
+def test_no_stock_snapshot_hash_gates():
+    pregnant=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
+    initramfs=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
+    slot=(ROOT/"openwrt"/"pregnant-overlay"/"usr"/"sbin"/"ursusstockslot").read_text()
+    for token in (
+        "STOCK_BOOTLOADER_SHA256",
+        "STOCK_MASTER_SHA256",
+        "STOCK_FLAGBACK_SHA256",
+        "STOCK_FLAG_TAIL_SHA256",
+        "STOCK_BOSA_SHA256",
+        "STOCK_RI_SHA256",
+    ):
+        assert token not in pregnant
+        assert token not in initramfs
+        assert token not in slot
+    for refusal in (
+        "STOCK_BOOTLOADER_CHANGED",
+        "MASTER_CHANGED",
+        "FLAGBACK_CHANGED",
+        "FLAG_NON_ACTIVE_CHANGED",
+        "BOSA_CHANGED",
+        "RI_CHANGED",
+    ):
+        assert refusal not in slot
+    assert "canonical_ubi_header_present && fail UBI_OR_PARTIAL_CONVERSION" in slot
+    assert "require_geom nsb_slave 02880000 00020000" in slot
+
+
 def test_runtime_safety_contract():
     stage2=(ROOT/"openwrt"/"pregnant-overlay"/"usr"/"sbin"/"ursus-vanilla-stage2").read_text()
     slot=(ROOT/"openwrt"/"pregnant-overlay"/"usr"/"sbin"/"ursusstockslot").read_text()
@@ -230,5 +258,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_overlap_policy_matches_handoff_design(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_overlap_policy_matches_handoff_design(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
