@@ -23,6 +23,7 @@ def test_expert_can_skip_full_backup():
     assert "install_ursus_from_stock(stock_host, skip_full_backup=skip_full_backup)" in one_key
     assert "skip_full_backup=skip_full_backup" in install
     assert "full_stock_backup_skipped" in install
+    assert "EXPERT: skip the full restore-grade backup for this run? [y/N]" not in multi
 
 
 def test_item1_live_stock_gates_are_structural_not_sample_sha():
@@ -31,6 +32,8 @@ def test_item1_live_stock_gates_are_structural_not_sample_sha():
 
     assert "live BootROM prefix 0x0..0x7ff differs from the proven Nokia prefix" not in build
     assert "live persistent BL2 differs from proven Nokia BL2" not in build
+    assert "EXPECTED_ROM_HEADER_SHA256" not in build
+    assert "EXPECTED_STOCK_BL2_SHA256" not in build
     assert "live mtd0 has no Airoha FIP at physical 0x800" in build
     assert "env_crc_info(live)" in build
     assert "hybrid FIP overlaps stock boot environment" in build
