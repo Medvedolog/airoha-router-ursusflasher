@@ -5,6 +5,8 @@
 **HEAD перед этой редакцией handoff:** `a9e3036451ec778fb6567232dd0e26622645580b`  
 **Нормативное ТЗ:** `docs/UrsusBoot_UrsusFlasher_TZ_RU_v5.45_VANILLA_INITRAMFS.md`
 
+> **CURRENT OVERRIDE — 2026-09-23:** ownership of the persistent UrsusBoot source/build line is moved to `Medvedolog/airoha-ursusboot`. TEST63 must be built there from its source tree plus the proven UrsusFlasher-era changes that are deliberately ported into that repository. UrsusFlasher must consume an exact pinned `airoha-ursusboot` commit/artifact set when assembling the operator kit. See §21. Where older sections conflict with §21 on UrsusBoot source ownership/build provenance, §21 wins.
+
 ## 1. Главный архитектурный pivot
 
 Vanilla item 4 больше не должен зависеть от исправления сетевого стека `UrsusBoot TRANSITION2`.
@@ -921,3 +923,166 @@ CI PASS != HW PASS
 exact run + exact SHA required for CI PASS
 XG140 line paused unless operator explicitly reopens it
 ```
+## 21. Session update — 2026-09-23 / `airoha-ursusboot` становится main line для TEST63
+
+### Решение по ownership
+
+Начиная с TEST63, source-of-truth для самого UrsusBoot переносится из монолитного `airoha-router-ursusflasher` в standalone repository:
+
+`Medvedolog/airoha-ursusboot`.
+
+Нормативное разделение ответственности:
+
+```text
+Medvedolog/airoha-ursusboot
+  = UrsusBoot source-of-truth
+  = MD/MF board profiles and policies
+  = TEST63 identity and firmware source delta
+  = persistent/RAM-recovery UrsusBoot build
+  = UrsusBoot fast-BL2/preloader provenance
+  = family-specific UrsusBoot artifacts + hashes
+
+Medvedolog/airoha-router-ursusflasher
+  = operator orchestration
+  = stock/OpenWrt access, backup and restore validation
+  = transports, diagnostics and readback
+  = production OpenWrt payload manifests
+  = exact pin to one airoha-ursusboot commit/artifact set
+  = canonical ONECLICK/EXPERT kit packaging
+```
+
+UrsusFlasher must not remain a second independently evolving UrsusBoot source tree. TEST63 is not assembled by replaying an UrsusFlasher-local historical patch stack over a stale source bundle. The relevant proven firmware changes are ported into `airoha-ursusboot`, reviewed there, and TEST63 is built from that repository's actual source at an exact commit.
+
+Host-only UrsusFlasher fixes remain host-only. In particular the `/api/status` polling/reconnect/fallback logic belongs to UrsusFlasher and is not a reason to duplicate host code into the bootloader repository.
+
+### Standalone repository state at the time of this decision
+
+Observed `Medvedolog/airoha-ursusboot` main HEAD when this handoff section was written:
+
+`9427623e1974407f1eac12f147a077f848195843`.
+
+Current standalone build contract is not yet sufficient for TEST63 release production:
+
+- `xg040-md` / AN7581 has the complete persistent packaging path: `u-boot.TEST61.full.config`, a 512 KiB stock boot-area template and `reference/md/ursusboot-test61-update.fip`. `build.sh` can emit `u-boot.bin`, `u-boot.lzma`, repacked `ursusboot-update.fip`, `ursusboot-install-mtd0.bin` and per-build `SHA256SUMS`.
+- `xg040-mf` / AN7583 has a real source/profile/config/template, but its registry entry still uses `an7583_nokia_xg-040g-mf_MF2_RAM_defconfig` and `reference_fip: null`. Therefore the current generic `build.sh` has only a raw `u-boot.bin` path for MF and does not yet have a complete persistent FIP/install lineage.
+- `xg140-md` remains intentionally non-buildable/scaffolded and is outside this TEST63 work unless explicitly reopened.
+- The source tree already contains the Fudan/FMSH `FM25G01B/FM25G02B` U-Boot support inherited from the FUDAN1 line. TEST63 must preserve it and add explicit binary assertions so this support cannot silently disappear.
+- `src/u-boot/cmd/ursusubi.c` still contains the old MD HW-proven UBI preloader and 128 KiB BL2 SHA256 constants. A new fast preloader therefore requires an explicit build-time pin/generation mechanism before compiling TEST63.
+- The fast NAND/UBI scan patch is an ATF/BL2 change, not a U-Boot BL33 change. The current standalone tree contains no `nandflash_read_range` fast-BL2 implementation/build path. That provenance/build responsibility must be moved into the standalone TEST63 line rather than left as an UrsusFlasher-only CI sidecar.
+- `config/board-profiles.json` contains fragment and `board_policy_header` metadata, but today's top-level `build.sh` primarily consumes the resolved full config/template/reference FIP and runtime role; it does not currently drive the complete modular fragment/policy application pipeline. TEST63 work must make the actual build path and the declared profile contract agree rather than relying on metadata that is not consumed.
+
+### Current standalone CI is QA-only
+
+At `9427623e...`, `.github/workflows/qa.yml` contains one Ubuntu job which runs:
+
+```text
+bash ./scripts/qa.sh
+```
+
+That QA verifies repository structure and important source/packaging invariants, including board-template identity/size, profile registry paths, MD donor-FIP repack reproducibility, self-contained-repository policy, shared lwIP/network invariants, MAC/preboot and environment guards, and negative profile/role cases.
+
+It deliberately does **not** cross-compile MD or MF, does not build ATF/BL2, does not produce target artifacts, and therefore cannot currently provide TEST63 BUILD PASS. This distinction must remain explicit:
+
+```text
+standalone QA PASS != target BUILD PASS != HW PASS
+```
+
+### TEST63 build contract in `airoha-ursusboot`
+
+The target architecture is one reproducible family-aware pipeline per exact standalone commit.
+
+For each supported XG-040G family:
+
+```text
+1. resolve board/profile from airoha-ursusboot
+2. use pinned toolchain/OpenWrt/ATF provenance
+3. build the family fast-scan BL2 with the NAND/UBI scan patch applied inside the real prepare/compile path
+4. prove the compiled ATF source still contains the fast-scan code
+5. wrap that raw BL2 into the exact UBI preloader/FIP presentation expected by UrsusBoot
+6. compute the preloader SHA256 and complete 128 KiB BL2-candidate SHA256
+7. compile TEST63 BL33 from airoha-ursusboot source with exactly those hashes pinned/generated into the runtime
+8. prove old family/preloader hashes did not survive accidentally
+9. prove Fudan FM25G01B/FM25G02B support remains in the resulting U-Boot binary where applicable
+10. LZMA1EXT/no-EOPM pack the current BL33
+11. repack the board-correct donor FIP with that exact current BL33
+12. verify FIP boundaries/current BL33 identity
+13. build board-correct persistent install image and RAM-recovery artifacts required by the supported recovery contract
+14. publish artifacts, SHA256 and machine-readable provenance for that exact commit
+```
+
+The fast BL2 and TEST63 BL33 are a matched pair. A build which packages a preloader that the compiled UrsusBoot does not accept by SHA is invalid even if both pieces independently compile.
+
+### MD and MF parity requirement
+
+TEST63 is not considered a complete common-line candidate while MF remains an external side build.
+
+For MF, the standalone repository must gain the missing persistent/recovery lineage needed by its own self-contained policy. Proven MF donor/recovery inputs currently sourced from MedveFlasher-era work must be imported with explicit provenance into `airoha-ursusboot` (or otherwise made a first-class pinned input owned by that repository) rather than cloned from MedveFlasher during an ordinary release build.
+
+The end state is:
+
+```text
+xg040-md -> standalone persistent + recovery build PASS
+xg040-mf -> standalone persistent + recovery build PASS
+same airoha-ursusboot commit -> both families
+```
+
+Board-specific configs, FIP/container lineage and hashes remain separate. "Parity" means one ownership/build contract, not pretending AN7581 and AN7583 have identical boot artifacts.
+
+### Required standalone CI before TEST63 can be pinned by UrsusFlasher
+
+`airoha-ursusboot` CI must be extended beyond `scripts/qa.sh` to produce an exact build proof for the target families. Minimum acceptance:
+
+- standalone QA job remains;
+- target build job(s) compile MD and MF from the exact commit;
+- toolchain/OpenWrt/ATF source identity is pinned and recorded;
+- fast-BL2 patch persistence is verified after the actual compile preparation path;
+- preloader/BL2 hashes compiled into each TEST63 binary are verified against the packaged family preloader;
+- TEST63 build identity is checked in the raw binary and packaged FIP/runtime;
+- Fudan markers/driver contract are explicitly asserted rather than inherited only by assumption;
+- FIP/current-BL33 and boot-area boundaries are checked;
+- artifacts and SHA256/provenance are uploaded per family;
+- CI status remains BUILD/QA evidence only, never HW PASS.
+
+### UrsusFlasher pin and kit contract
+
+Once an exact `airoha-ursusboot` commit has passed the required standalone build CI, UrsusFlasher pins **that exact commit**, not `main`, `latest`, a branch tip, or "latest successful run".
+
+The kit build must prove at least:
+
+```text
+pinned UrsusBoot repository = Medvedolog/airoha-ursusboot
+pinned UrsusBoot commit     = exact full SHA
+MD artifact provenance     = same exact SHA
+MF artifact provenance     = same exact SHA
+artifact hashes            = match standalone provenance
+TEST63 identity            = present
+family preloader pair      = accepted by that family's compiled TEST63
+UrsusFlasher host/runtime  = current pinned flasher commit
+production OpenWrt payload = pinned by existing firmware manifest
+```
+
+The resulting operator ZIP is built by UrsusFlasher, but the UrsusBoot bytes inside it originate from the pinned standalone commit. Rebuilding the same kit must never silently substitute another UrsusBoot commit.
+
+### Relationship to Vanilla
+
+This ownership change concerns the **UrsusBoot product line**. It does not redefine Vanilla U-Boot as UrsusBoot and does not move Ursus-specific Web/API code into the final Vanilla bootloader. Vanilla remains a separate final boot-chain product track unless a later explicit decision moves its own source/build ownership elsewhere.
+
+UrsusFlasher may package both UrsusBoot recovery/install artifacts and separate Vanilla/OpenWrt production artifacts, but their provenance must remain distinct.
+
+### Immediate engineering sequence
+
+```text
+1. Stop treating UrsusFlasher-local TEST62 build machinery as the future canonical UrsusBoot source line.
+2. Port the proven TEST62/fast-BL2/MD+MF firmware work that belongs to the bootloader into Medvedolog/airoha-ursusboot.
+3. Reconcile board-profiles.json with the build path actually used by build.sh/CI.
+4. Promote MF from raw/MF2-RAM-only packaging to a self-contained persistent + recovery lineage with explicit provenance.
+5. Move/add fast-BL2 build + preloader wrapping + exact hash pin/generation into the standalone TEST63 build contract.
+6. Add MD/MF target-build CI in airoha-ursusboot; keep existing offline QA as a separate evidence level.
+7. Build TEST63 from one exact standalone commit and publish per-family artifacts/provenance.
+8. Add/update the UrsusFlasher manifest so the operator kit pins that exact standalone commit and exact artifact hashes.
+9. Build/verify the canonical UrsusFlasher kit from that pin.
+10. Only then perform the next full hardware run from Nokia STOCK; CI PASS must not be reported as HW PASS.
+```
+
+This section supersedes older handoff statements only where they imply that UrsusBoot firmware source/build ownership remains inside `airoha-router-ursusflasher`. Existing operator-safety, backup/readback, one meaningful `y/N`, identity-preservation and CI-vs-HW rules remain in force.
+
