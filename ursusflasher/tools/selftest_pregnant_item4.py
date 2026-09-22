@@ -204,8 +204,8 @@ def test_md_staging_does_not_require_config_filesystem_or_fit_carrier():
     assert 'runtime_capacity = PREGNANT_META_OFF - runtime_off' in md
     assert '("runtime", runtime_off, len(runtime_fit))' in md
     assert 'out[runtime_off:runtime_off + len(runtime_fit)] = runtime_fit' in md
-    assert "final_kernel = bytes(out[kernel_off:kernel_off + kernel_size])" in md
-    assert "final kernel hash length mismatch" in md
+    assert "final_kernel = bytes(out[kernel_off:kernel_off + kernel_size])" not in md
+    assert "final kernel hash length mismatch" not in md
     assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_DYNAMIC_TAIL_V3" in md
 
 
@@ -224,7 +224,8 @@ def test_runtime_overlap_policy_matches_handoff_design():
     assert "runtime_off = (active_end + 0x1FFFF) & ~0x1FFFF" in md
     assert "handoff-linux-image" in md
     assert "active-kernel" not in md
-    assert "refreshed_hash_ranges" in md
+    assert "refreshed_hash_ranges" not in md
+    assert "transition_kernel_hashes_preserved" in md
     assert "PREGNANT_RUNTIME_OFF:PREGNANT_RUNTIME_OFF + PREGNANT_RUNTIME_WINDOW" not in md
 
 
