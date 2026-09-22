@@ -404,25 +404,13 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True, backup
                 f"SLOT1 fallback invariant requires live stock active=0 curimg=0, got {flag_state}"
             )
 
-        # These hashes are evidence/telemetry for stage2 metadata. No full PC
-        # download is required. Identity bytes are read by stage2 from live
-        # bosa/ri before the destructive UBI boundary.
-        bootloader_sha = _remote_mtd_sha(telnet, policy.bootloader_mtd)
-        master_sha = _remote_mtd_sha(telnet, policy.master_mtd)
-        flagback_sha = _remote_mtd_sha(telnet, policy.flagback_mtd)
-        bosa_sha = _remote_mtd_sha(telnet, policy.bosa_mtd)
-        ri_sha = _remote_mtd_sha(telnet, policy.ri_mtd)
-        flagback_state = {"sha256": flagback_sha, "source": "live-hash-only"}
-
+        # Stage2 will re-read bosa/ri from the live stock partitions immediately
+        # before the destructive UBI boundary. Do not gate migration on snapshots
+        # of unrelated stock partition hashes taken before reboot.
+        flagback_state = {"source": "not-gated"}
         evidence = {
             "family": policy.family,
             "profile": policy.profile,
-            "bootloader_sha256": bootloader_sha,
-            "master_sha256": master_sha,
-            "flagback_sha256": flagback_sha,
-            "flag_tail_sha256": sha_bytes(flag[4:]),
-            "bosa_sha256": bosa_sha,
-            "ri_sha256": ri_sha,
         }
         slot, slot_meta = sfi.build_pregnant_slot(
             slave,
@@ -479,11 +467,6 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True, backup
                 "slave_sha256": slave_sha,
                 "flag_source": str(flag_path),
                 "flag_sha256": flag_sha,
-                "bootloader_sha256": bootloader_sha,
-                "master_sha256": master_sha,
-                "flagback_sha256": flagback_sha,
-                "bosa_sha256": bosa_sha,
-                "ri_sha256": ri_sha,
             },
         }
         (run_dir / "VANILLA_PREGNANT_PLAN.json").write_text(
