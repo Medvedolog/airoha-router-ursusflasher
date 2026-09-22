@@ -297,6 +297,13 @@ def test_md_staging_does_not_require_config_filesystem_or_fit_carrier():
     assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_FREE_TAIL_V4" in md
 
 
+def test_md_ntfw_tail_is_not_treated_as_free_carrier():
+    src=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
+    md=src[src.index("def _build_md_proven_pregnant_slot"):src.index("def build_pregnant_slot")]
+    assert "MD pregnant in-NT-FW tail staging is disabled" in md
+    assert "FIT trailing payload is stock parser data, not free space" in md
+
+
 def test_runtime_ram_bound_uses_ntfw_not_fit_totalsize():
     src=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
     md=src[src.index("def _build_md_proven_pregnant_slot"):src.index("def build_pregnant_slot")]
@@ -404,5 +411,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_postwrite_readback_reconnect_does_not_require_web(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_kernel_hash_refresh_is_fail_closed_and_crc32_big_endian(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_runtime_uses_exact_live_tail_span(); test_stage2_discovers_dynamic_manifest_and_offsets(); test_md_uses_hw_proven_stock_wrapper(); test_md_proven_wrapper_matches_hw_transition2_mutation_surface(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_postwrite_readback_reconnect_does_not_require_web(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_kernel_hash_refresh_is_fail_closed_and_crc32_big_endian(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_md_ntfw_tail_is_not_treated_as_free_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_runtime_uses_exact_live_tail_span(); test_stage2_discovers_dynamic_manifest_and_offsets(); test_md_uses_hw_proven_stock_wrapper(); test_md_proven_wrapper_matches_hw_transition2_mutation_surface(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
