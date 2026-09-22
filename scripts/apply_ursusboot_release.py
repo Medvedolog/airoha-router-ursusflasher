@@ -27,16 +27,16 @@ LAYOUT = {
         "update_fip": ("ursusboot-update.fip", "data/payloads/md/ursusboot/ursusboot-md-{v}-update.fip"),
         "u_boot_bin": ("u-boot.bin", "data/payloads/md/ursusboot/ursusboot-md-{v}-u-boot.bin"),
         "install_mtd0": ("ursusboot-install-mtd0.bin", "data/payloads/md/ursusboot/ursusboot-md-{v}-install-mtd0.bin"),
-        "ubi_preloader": ("ursusboot-ubi-preloader.fip",
-                          "data/payloads/md/ursusboot/openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin"),
+        # Own name: openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin is the proven RC
+        # preloader that UART repair (items 5/9) and the bootrom backup require by SHA256.
+        "ubi_preloader": ("ursusboot-ubi-preloader.fip", "data/payloads/md/ursusboot/ursusboot-md-{v}-ubi-preloader.fip"),
     },
     "mf": {
         "runtime_lzma": ("u-boot.runtime.lzma", "data/payloads/mf/ursusboot/u-boot.runtime.lzma"),
         "u_boot_bin": ("u-boot.bin", "data/payloads/mf/ursusboot/ursusboot-mf-{v}-u-boot.bin"),
         "runtime_ram_fip": ("ursusboot-runtime-ram.fip", "data/payloads/mf/recovery/ursusboot-mf-{v}-runtime-ram.fip"),
         "uart_preloader": ("ursusboot-uart-preloader.bin", "data/payloads/mf/recovery/ursusboot-mf-{v}-uart-preloader.bin"),
-        "ubi_preloader": ("ursusboot-ubi-preloader.fip",
-                          "data/payloads/mf/proven/nokia-xg-040g-mf-an7583-production-preloader.bin"),
+        "ubi_preloader": ("ursusboot-ubi-preloader.fip", "data/payloads/mf/ursusboot/ursusboot-mf-{v}-ubi-preloader.fip"),
     },
 }
 BOARD_PROFILE = {"md": "xg040-md", "mf": "xg040-mf"}
@@ -110,9 +110,9 @@ def set_preloader_role(tree: Path, fam: str, rel: str, digest: str, size: int, p
     for path, files_of in targets:
         manifest = json.loads(path.read_text(encoding="utf-8"))
         hits = [f for f in files_of(manifest) if f.get("role") == "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE"]
-        if len(hits) != 1 or hits[0].get("path") != rel:
-            raise RuntimeError(f"{path.name}: {fam} STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE is not at {rel}")
-        hits[0].update({"sha256": digest, "size": size, "provenance": provenance})
+        if len(hits) != 1:
+            raise RuntimeError(f"{path.name}: {fam} needs exactly one STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE")
+        hits[0].update({"path": rel, "sha256": digest, "size": size, "provenance": provenance})
         path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
 
 

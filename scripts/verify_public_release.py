@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import tempfile
 import zipfile
 import subprocess
@@ -106,6 +107,22 @@ def main() -> None:
         subprocess.run(
             [sys.executable, str(root / 'data' / 'ursusboot_install.py'), '--selftest'],
             cwd=root, check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+
+        # Both launchers' entry points must import in the shipped tree (no network at import).
+        subprocess.run(
+            [sys.executable, '-c', 'import one_key_multi, expert_airoha'],
+            cwd=root / 'data', check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+        )
+
+        # EXPERT items 5/9 UART RAM profiles (MD and MF) and the MD BootROM preloader pin.
+        subprocess.run(
+            [sys.executable, '-c',
+             'import expert_airoha, uart_bootarea_restore as u, ursusboot_update as uu; '
+             '[u.verify_profile(u.family_profile(f)) for f in ("md", "mf")]; '
+             'uu._require_exact_file(uu.PRELOADER, uu._ursus_meta()["preloader_sha256"], "BootROM preloader")'],
+            cwd=root / 'data', check=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            env={**os.environ, 'NOKIA_LANG': 'en'},
         )
 
         # EXPERT item 6 (Nokia stock restore) / UART recovery resources, MD and MF.

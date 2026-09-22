@@ -14,9 +14,18 @@ import device_state as ds
 import mf_runtime_install
 import ursusboot_install
 import ursusboot_update
-import xg140_emergency_initramfs
-import xg140_runtime_install
 
+
+
+def _xg140_module(name: str):
+    """XG140 modules need the repack tool that only the XG140 kit ships."""
+    try:
+        return __import__(name)
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(tr(
+            "XG-140G-MD не входит в этот комплект (MD/MF). Используйте комплект XG140.",
+            "XG-140G-MD is not part of this (MD/MF) kit. Use the XG140 kit.",
+        )) from exc
 
 def tr(ru: str, en: str) -> str:
     return en if os.environ.get("NOKIA_LANG") == "en" else ru
@@ -129,7 +138,7 @@ def _run_uart(family: str, state: ds.DeviceState) -> None:
         expert_multi._run_ursus_recovery(state)
         return
     if family == "xg140":
-        rc = xg140_emergency_initramfs.main()
+        rc = _xg140_module("xg140_emergency_initramfs").main()
         if rc:
             raise RuntimeError(f"XG140 UART/initramfs installer returned rc={rc}")
         return
@@ -147,7 +156,7 @@ def _run_telnet(family: str, host: str) -> None:
             skip_full_backup=skip, recovery_after=False,
         )
     elif family == "xg140":
-        rc = xg140_runtime_install.install_from_stock(host=host)
+        rc = _xg140_module("xg140_runtime_install").install_from_stock(host=host)
     else:
         raise RuntimeError(f"unsupported UrsusBoot family: {family}")
     if rc:
