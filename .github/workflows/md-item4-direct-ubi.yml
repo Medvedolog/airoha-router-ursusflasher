@@ -1,0 +1,103 @@
+name: MD direct item4 test kit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - '.github/workflows/md-item4-direct-ubi.yml'
+      - 'START_EXPERT.cmd'
+      - 'START_EXPERT.sh'
+      - 'ursusflasher/src/expert.py'
+      - 'ursusflasher/src/ursusboot_pregnant.py'
+      - 'ursusflasher/src/ursus_web_client.py'
+      - 'ursusflasher/src/ursusboot_install.py'
+      - 'ursusflasher/src/one_key.py'
+      - 'ursusflasher/tools/selftest_item4_direct_ubi.py'
+      - 'config/**'
+      - 'fw/**'
+      - 'payloads/md/ursusboot/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Host contract QA
+        run: |
+          set -euo pipefail
+          python3 -m py_compile             ursusflasher/src/expert.py             ursusflasher/src/ursusboot_pregnant.py             ursusflasher/src/ursus_web_client.py             ursusflasher/src/ursusboot_install.py             ursusflasher/src/one_key.py             ursusflasher/tools/selftest_item4_direct_ubi.py
+          python3 ursusflasher/tools/selftest_item4_direct_ubi.py
+          python3 - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('.')
+          m=json.loads((root/'config/FIRMWARE_BUNDLE.json').read_text())
+          need={'OPENWRT_UBI_SYSUPGRADE','STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE'}
+          seen=set()
+          for item in m.get('files',[]):
+              role=item.get('role')
+              if role not in need:
+                  continue
+              p=root/item['path']
+              assert p.is_file(), p
+              got=hashlib.sha256(p.read_bytes()).hexdigest()
+              assert got==item['sha256'], (role,got,item['sha256'])
+              print(f'{role}=PASS size={p.stat().st_size} sha256={got}')
+              seen.add(role)
+          assert seen==need, seen
+          PY
+
+      - name: Assemble MD test kit
+        run: |
+          set -euo pipefail
+          ART=/tmp/ursus-item4-direct-md
+          rm -rf "$ART"
+          mkdir -p "$ART"
+          cp -a START_EXPERT.cmd START_EXPERT.sh VERSION README.md "$ART/"
+          cp -a config fw payloads ursusflasher docs "$ART/"
+          cat > "$ART/ITEM4-DIRECT-MD-READ-ME-FIRST.txt" <<EOF
+          UrsusFlasher EXPERT item 4 - MD direct UrsusBoot STOCK->UBI HW test
+          Source commit: ${GITHUB_SHA}
+
+          Flow:
+            Nokia STOCK
+            -> install/readback bundled UrsusBoot
+            -> enter UrsusBoot Recovery
+            -> existing firmware RAM upload: production OpenWrt UBI sysupgrade
+            -> existing ubi-preloader RAM upload: proven transition preloader
+            -> native UrsusBoot STOCK->OPENWRT_UBI migration backend
+            -> BOSA/RI preserved
+            -> UrsusBoot-compatible FIP preserved
+            -> compatible BL2 committed LAST
+            -> full verification
+            -> reboot to OpenWrt
+
+          This build DOES NOT use pregnant initramfs, bootm, SLOT2 carrier, or vanilla bootloader replacement.
+          UrsusBoot Recovery remains installed after item 4.
+          Vanilla FIP/BL2 replacement is a separate future operation.
+          CI PASS is only admission to the first HW test, not HW PASS.
+          EOF
+          find "$ART" -type d -name __pycache__ -prune -exec rm -rf {} + || true
+          find "$ART" -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+          git rev-parse HEAD > "$ART/URSUSFLASHER_COMMIT.txt"
+          (cd "$ART" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
+          cd /tmp
+          zip -qr UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${GITHUB_SHA}.zip ursus-item4-direct-md
+          sha256sum UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${GITHUB_SHA}.zip > UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${GITHUB_SHA}.zip.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${{ github.sha }}
+          path: |
+            /tmp/UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${{ github.sha }}.zip
+            /tmp/UrsusFlasher-EXPERT-ITEM4-MD-DIRECT-${{ github.sha }}.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
