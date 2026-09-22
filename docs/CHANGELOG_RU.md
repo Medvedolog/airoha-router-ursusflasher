@@ -1,3 +1,19 @@
+# Development checkpoint — Vanilla pregnant item 4 / MD stock fallback / OEM FIT carrier (2026-09-22)
+
+- EXPERT пункт 4 переведён на полный автономный путь `stock tcboot -> stock-compatible SLOT2 -> ARM64 handoff shim -> RAM-only UrsusBoot -> pregnant OpenWrt initramfs -> stage2 -> canonical UBI -> pinned UnameOne -> Vanilla FIP -> BL2 LAST`. Persistent UrsusBoot в конечной Vanilla-системе не остаётся.
+- До первой разрушительной операции сохраняется заводской Nokia A/B rollback: `mtd14/nsb_master` не трогается, selector переводится только на SLOT2, а transient handoff при возврате из `bootm` выполняет `reset`, чтобы stock `tcboot` мог расходовать retry counter и вернуться на MASTER/SLOT1.
+- Stage2 имеет явную destructive boundary: до первого `ubiformat` ошибка приводит к reboot через stock tcboot; после начала destructive стадии автоматический stock rollback запрещён.
+- Для MD используется аппаратно доказанный TRANSITION2-style stock envelope: сохраняются FIP/HDR2, `conf@1`, stock FDT/filesystem topology; заменяется только `kernel@1` handoff + compression/hash. Внутренний pregnant OpenWrt FIT остаётся в native upstream naming.
+- Pinned production child: UnameOne Edition 2026-09-16. MD UBI sysupgrade SHA256 `9b1f0899ca4ef610f6d87e8572d369adb420f104bda667556e8a0b5979f066dd`; MF SHA256 `21dcf4c6ca64ea0c5bc3d601e4a8f99a3f002371b873f399f622cbd9223fd1d1`.
+- Первый реальный Fudan MD прогон нового FULL-кита успешно снял и restore-валидировал полный stock backup `mtd0..mtd16`, после чего корректно остановился **до любой записи NAND** на ложном host-side gate `stock FIT/NT-FW size mismatch: fit=0x70d018 nt_payload=0x2058127`.
+- Причина gate признана архитектурной ошибкой: равенство `FIT totalsize == весь NT-FW payload` описывало частную упаковку одного OEM-образца, а не инвариант безопасности. Gate удалён commit `22499840065a067ca0eec02186b16ad2e115bea0`.
+- Stock wrapper теперь допускает FIT меньше NT-FW carrier и поддерживает inline/external image data через `data`, `data-position` и `data-offset`, при этом сохраняет byte-identical invariant для всех байтов вне разрешённых полей `kernel@1` / compression / hash.
+- Regression test для OEM FIT trailing payload добавлен commit `42efabbeb433621c94c2c79f1a1a146a9668065e`.
+- Exact GitHub Actions run `35625391866` для SHA `42efabbeb433621c94c2c79f1a1a146a9668065e` завершён `SUCCESS`; все шаги Vanilla pregnant MD+MF build прошли. FULL artifact `10652380364`, digest `sha256:413d77e9fd4038e2e9474802386b70098db95e637f9ece8d8842083f5d9d74ec`. Это **CI PASS, не HW PASS**.
+- XG140-specific automatic workflows остаются на паузе/manual-only. Отдельный общий `Airoha multimodel public test` на этом SHA завершился failure и не считается доказательством или опровержением item 4 MD pregnant path.
+- README UrsusFlasher дополнен аварийным playbook: захват UrsusBoot Recovery кнопкой Reset, преддеструктивный stock A/B fallback, one-shot initramfs из Web, SSH-диагностика, stock SLOT selector через root Telnet и BootROM/UART recovery.
+- Политика новых preflight/gates ужесточена в обратную сторону: разрешены только проверки, которые доказывают безопасную цель/диапазон записи, identity/profile, preservation invariants и readback. Запрещено превращать частные байтовые особенности одного stock dump в обязательный gate без доказанной safety-роли.
+
 # Development checkpoint — XG140 NATIVE1 / stock access RE (2026-09-14)
 
 - Добавлен отдельный XG-140G-MD development path на ветке `feature/xg140-ursusboot-ram-recovery`; `main` и опубликованный MD/MF production contract не менялись.
