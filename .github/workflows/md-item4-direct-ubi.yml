@@ -2,9 +2,15 @@ name: MD direct item4 test kit
 
 on:
   workflow_dispatch:
+    inputs:
+      test62_run_id:
+        description: 'Run ID of "MD AN7581 TEST62 + fast BL2" to embed (empty = pinned build #5)'
+        required: false
+        default: ''
   push:
     branches:
       - feature/ursusboot-modular-airoha
+      - claude/lucid-gauss-t0il1g
     paths:
       - '.github/workflows/md-item4-direct-ubi.yml'
       - 'START_ONECLICK.cmd'
@@ -22,10 +28,13 @@ on:
       - 'fw/**'
       - 'payloads/md/ursusboot/**'
       - 'scripts/build_public_release.py'
+      - 'scripts/apply_md_test62_overlay.py'
+      - 'scripts/verify_md_item4_kit.py'
       - 'scripts/repo_common.py'
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build:
@@ -56,34 +65,53 @@ jobs:
               print(f'{role}=PASS path={p} size={p.stat().st_size} sha256={got}')
           PY
 
-      - name: Assemble canonical operator kit
+      - name: Resolve exact TEST62 + fast BL2 run
+        id: test62
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Exact TEST62 + fast BL2 build #5 (head 9b85007). Override only via dispatch input.
+          PIN: ${{ github.event.inputs.test62_run_id || '35779344707' }}
         run: |
           set -euo pipefail
-          rm -rf /tmp/item4-public /tmp/item4-check
-          python3 scripts/build_public_release.py --target md --out-dir /tmp/item4-public
+          RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PIN")"
+          test -n "$RUN" && test "$RUN" != null
+          ID="$(jq -r .id <<<"$RUN")"; NUM="$(jq -r .run_number <<<"$RUN")"
+          SHA="$(jq -r .head_sha <<<"$RUN")"; CONC="$(jq -r .conclusion <<<"$RUN")"
+          test "$(jq -r .path <<<"$RUN")" = .github/workflows/md-test62-build.yml
+          test "$CONC" = success
+          echo "TEST62 run id=$ID number=#$NUM head_sha=$SHA conclusion=$CONC"
+          { echo "id=$ID"; echo "number=$NUM"; echo "sha=$SHA"; } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ursusboot-md-TEST62-fast-bl2-${{ steps.test62.outputs.sha }}
+          path: /tmp/test62-art
+          run-id: ${{ steps.test62.outputs.id }}
+          github-token: ${{ github.token }}
+
+      - name: Assemble canonical operator kit with TEST62 overlay
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/item4-public
+          ls -la /tmp/test62-art
+          cat /tmp/test62-art/TEST62-BUILD_INFO.txt
+          python3 scripts/build_public_release.py --target md --out-dir /tmp/item4-public --md-test62-dir /tmp/test62-art
 
           ZIP="$(find /tmp/item4-public -maxdepth 1 -type f -name '*.zip' -print -quit)"
           test -n "$ZIP" && test -s "$ZIP"
-          mkdir -p /tmp/item4-check
-          unzip -q "$ZIP" -d /tmp/item4-check
-          ROOT="$(find /tmp/item4-check -mindepth 1 -maxdepth 1 -type d -print -quit)"
-          test -n "$ROOT"
-
-          test -f "$ROOT/START_ONECLICK.cmd"
-          test -f "$ROOT/START_ONECLICK.sh"
-          test -f "$ROOT/START_EXPERT.cmd"
-          test -f "$ROOT/START_EXPERT.sh"
-          test ! -e "$ROOT/START_MD_TRANSITION.cmd"
-          test ! -e "$ROOT/START_MD_TRANSITION.sh"
-          test -d "$ROOT/data"
-          test -d "$ROOT/fw"
-
-          python3 "$ROOT/data/selftest_item4_direct_ubi.py" 2>/dev/null || true
-          printf '%s\n' "$GITHUB_SHA" > /tmp/item4-public/URSUSFLASHER_COMMIT.txt
+          python3 scripts/verify_md_item4_kit.py --zip "$ZIP" --artifacts /tmp/test62-art
+          {
+            echo "URSUSFLASHER_COMMIT=$GITHUB_SHA"
+            echo "TEST62_RUN_ID=${{ steps.test62.outputs.id }}"
+            echo "TEST62_RUN_NUMBER=${{ steps.test62.outputs.number }}"
+            echo "TEST62_HEAD_SHA=${{ steps.test62.outputs.sha }}"
+            echo "ZIP_SHA256=$(sha256sum "$ZIP" | cut -d' ' -f1)"
+          } > /tmp/item4-public/URSUSFLASHER_COMMIT.txt
+          cat /tmp/item4-public/URSUSFLASHER_COMMIT.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UrsusFlasher-MD-DIRECT-CANONICAL-${{ github.sha }}
+          name: UrsusFlasher-MD-DIRECT-TEST62-${{ github.sha }}
           path: |
             /tmp/item4-public/*.zip
             /tmp/item4-public/*.sha256.txt

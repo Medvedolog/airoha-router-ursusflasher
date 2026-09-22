@@ -42,6 +42,9 @@ def apply_overlay(tree: Path, artifacts: Path) -> None:
     dst_preloader = payload_dir / CANONICAL_PRELOADER
     shutil.copy2(fip, dst_fip)
     shutil.copy2(preloader, dst_preloader)
+    # Ship only the TEST62 candidate; a leftover TEST61 FIP must not be installable.
+    for stale in payload_dir.glob("*TEST61*.fip"):
+        stale.unlink()
 
     temp = {
         "schema": 1,
