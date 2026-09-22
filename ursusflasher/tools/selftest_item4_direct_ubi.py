@@ -15,6 +15,8 @@ assert 'preloader=preloader' in route
 assert 'uw.upload(host, image, "initramfs"' not in route
 assert 'boot_once(' not in route
 assert 'UrsusBoot Recovery is retained' in route
+assert 'verify_stock_restore_backup' in route
+assert 'skip_full_backup=reuse_backup' in route
 assert 'Stock Nokia → OpenWrt UBI с UrsusBoot Recovery' in expert
 assert 'UrsusBoot Recovery сохраняется' in expert
 assert "'firmware': ('/api/firmware-begin', '/api/firmware-chunk')" in web
