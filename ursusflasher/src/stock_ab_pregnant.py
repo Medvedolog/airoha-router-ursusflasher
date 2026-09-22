@@ -352,15 +352,28 @@ def _monitor(host: str, policy: Policy, payload_meta: dict, seconds: int = 600) 
         ui.status("WARNING", "Telemetry window ended. No write was retried; inspect UART or reconnect and read state/log.")
 
 
-def _reopen_verified_stock_root(host: str, policy: Policy):
-    access, telnet = ubi.open_root_auto(host)
+def _reopen_verified_stock_root(host: str, policy: Policy, access):
+    """Reopen the already-proven stock root shell without re-entering Web UI.
+
+    After NAND write starts, readback recovery must not depend on HTTP/Web state.
+    The access object already contains Telnet/SU credentials obtained and verified
+    before the destructive boundary; reuse only those credentials here.
+    """
+    if access is None:
+        raise RuntimeError("post-write stock reconnect has no preserved Telnet credentials")
+    if str(getattr(access, "host", "") or "") != host:
+        raise RuntimeError(
+            f"post-write reconnect host mismatch: credentials={getattr(access, 'host', None)!r} requested={host!r}"
+        )
     reported = str(getattr(access, "family", "") or "").strip().lower()
     if reported not in ("", "unknown", policy.family):
         raise RuntimeError(f"board profile mismatch after reconnect: selected {policy.profile}, stock reports {reported}")
+    telnet = pb.login_root_family(access, policy.family, allow_service_provisioning=False)
     _require_stock_geometry(telnet, policy)
     rc_uid, uid_text = telnet.command_clean("id -u", timeout=15)
     uid_lines = [line.strip() for line in uid_text.replace("\r", "\n").split("\n") if line.strip().isdigit()]
     if rc_uid or not uid_lines or uid_lines[-1] != "0":
+        telnet.close()
         raise RuntimeError(f"reconnected stock Telnet is not UID 0: rc={rc_uid} output={uid_text!r}")
     access.family = policy.family
     return access, telnet
@@ -409,9 +422,12 @@ def _readback_sha_with_reconnect(
                     current_access.close_web(announce=False)
             except Exception:
                 pass
-            current_access = current_telnet = None
+            # Preserve the already-verified Telnet/SU credentials in StockAccess.
+            # Only the dead Telnet socket is discarded; post-write recovery must
+            # never require the stock Web UI to become available again.
+            current_telnet = None
             time.sleep(3)
-            current_access, current_telnet = _reopen_verified_stock_root(host, policy)
+            current_access, current_telnet = _reopen_verified_stock_root(host, policy, current_access)
     raise RuntimeError("unreachable readback retry state")
 
 
