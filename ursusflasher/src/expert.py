@@ -594,8 +594,11 @@ def main() -> int:
         if number == 1:
             skip_backup = False
             if state.current_system == "NOKIA_STOCK":
-                ans = ui.prompt(tr("EXPERT: пропустить полный backup mtd0..mtd16 для этого запуска? [y/N]: ", "EXPERT: skip the full mtd0..mtd16 backup for this run? [y/N]: ")).strip().lower()
-                skip_backup = ans in ("y", "yes", "д", "да")
+                choice = ui.prompt(tr(
+                    "EXPERT backup: Enter — полный mtd0..mtd16; s — пропустить и сохранить только обязательный live mtd0: ",
+                    "EXPERT backup: Enter — full mtd0..mtd16; s — skip it and keep only the mandatory live mtd0 capture: ",
+                )).strip().lower()
+                skip_backup = choice in ("s", "skip", "п", "пропустить")
             run_action(lambda: one_key.main(skip_full_backup=skip_backup), write_may_happen=True)
         elif number == 2:
             network_guidance.show()
