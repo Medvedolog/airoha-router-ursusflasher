@@ -5,6 +5,7 @@ import hashlib
 from pathlib import Path
 
 import uart_bootarea_restore as ubr
+import ursusboot_release
 
 _ORIGINAL = ubr.family_profile
 
@@ -28,12 +29,14 @@ def family_profile(family: str) -> dict:
     if family.strip().lower() != "mf":
         return _ORIGINAL(family)
     payloads = ubr._runtime_payload_root()
-    preloader = _first([
+    rel_pre = ursusboot_release.path("mf", "uart_preloader")
+    rel_fip = ursusboot_release.path("mf", "runtime_ram_fip")
+    preloader = _first(([rel_pre] if rel_pre else []) + [
         payloads / "mf" / "recovery" / "ursusboot-mf-0.1.0-TEST62-uart-preloader.bin",
         payloads / "mf" / "ursusboot" / "ursusboot-mf-0.1.0-TEST62-uart-preloader.bin",
         ubr.HERE.parent / "work" / "mf-runtime" / "out" / "ursusboot-mf-0.1.0-TEST62-uart-preloader.bin",
     ], "MF TEST62 UART preloader")
-    fip = _first([
+    fip = _first(([rel_fip] if rel_fip else []) + [
         payloads / "mf" / "recovery" / "ursusboot-mf-0.1.0-TEST62-runtime-ram.fip",
         payloads / "mf" / "ursusboot" / "ursusboot-mf-0.1.0-TEST62-runtime-ram.fip",
         ubr.HERE.parent / "work" / "mf-runtime" / "out" / "ursusboot-mf-0.1.0-TEST62-runtime-ram.fip",

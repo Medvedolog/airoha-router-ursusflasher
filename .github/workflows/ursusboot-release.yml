@@ -1,0 +1,99 @@
+name: UrsusBoot release (pinned airoha-ursusboot)
+
+# Builds the UrsusBoot release this kit ships from Medvedolog/airoha-ursusboot at
+# the exact commit in config/URSUSBOOT_PIN.json, using that repository's own
+# scripts/ci/build-release.sh (fast-scan BL2 -> preloader FIP -> pinned UrsusBoot
+# -> PROVENANCE.json). UrsusFlasher does not build firmware from its own sources.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+      - claude/lucid-gauss-t0il1g
+    paths:
+      - '.github/workflows/ursusboot-release.yml'
+      - 'config/URSUSBOOT_PIN.json'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.board }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        board: [xg040-md, xg040-mf]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: kit
+          fetch-depth: 1
+
+      - name: Read pin
+        id: pin
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, re
+          p = json.load(open('kit/config/URSUSBOOT_PIN.json'))
+          assert re.fullmatch(r'[0-9a-f]{40}', p['commit']), p
+          print(f"repo={p['repo']}")
+          print(f"commit={p['commit']}")
+          print(f"version={p['version']}")
+          PY
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.pin.outputs.repo }}
+          ref: ${{ steps.pin.outputs.commit }}
+          path: ursusboot
+          fetch-depth: 1
+
+      - name: Verify pinned checkout and resolve OpenWrt
+        id: owrt
+        run: |
+          set -euo pipefail
+          test "$(git -C ursusboot rev-parse HEAD)" = "${{ steps.pin.outputs.commit }}"
+          test "$(tr -d '[:space:]' < ursusboot/VERSION)" = "${{ steps.pin.outputs.version }}"
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          c = json.load(open('ursusboot/config/fast-bl2.json'))
+          print(f"repo={c['openwrt_repo']}")
+          print(f"ref={c['openwrt_ref']}")
+          PY
+
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.owrt.outputs.repo }}
+          ref: ${{ steps.owrt.outputs.ref }}
+          path: openwrt
+          fetch-depth: 1
+
+      - name: Host dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib gettext git \
+            libncurses-dev libssl-dev liblzma-dev python3 python3-setuptools rsync swig unzip zlib1g-dev \
+            file wget jq time xz-utils zstd device-tree-compiler perl xxd
+
+      - name: QA + release build at the pinned commit
+        env:
+          OPENWRT_DIR: ${{ github.workspace }}/openwrt
+          JOBS: '4'
+        run: |
+          set -euo pipefail
+          bash ursusboot/scripts/qa.sh
+          bash ursusboot/scripts/ci/build-release.sh "${{ matrix.board }}"
+          cat "ursusboot/dist/${{ matrix.board }}/BUILD-INFO.txt"
+          python3 -c "import json,sys; p=json.load(open(sys.argv[1])); assert p['commit']==sys.argv[2], p['commit']" \
+            "ursusboot/dist/${{ matrix.board }}/PROVENANCE.json" "${{ steps.pin.outputs.commit }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-${{ matrix.board }}-${{ steps.pin.outputs.commit }}
+          path: ursusboot/dist/${{ matrix.board }}/
+          if-no-files-found: error
+          retention-days: 14

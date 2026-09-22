@@ -1,36 +1,48 @@
-name: MD direct item4 test kit
+name: MD+MF direct item4 test kit
+
+# Canonical two-target operator kit: MD and MF are equal targets. UrsusBoot comes
+# from Medvedolog/airoha-ursusboot at the exact commit in config/URSUSBOOT_PIN.json,
+# built by "UrsusBoot release (pinned airoha-ursusboot)" for exactly that pinned
+# commit (reused across host-only changes); the kit fails closed on any commit/version/digest mismatch
+# (scripts/apply_ursusboot_release.py, scripts/verify_kit.py).
 
 on:
   workflow_dispatch:
+    inputs:
+      release_run_id:
+        description: 'Run ID of "UrsusBoot release (pinned airoha-ursusboot)" (empty = the run for this exact commit)'
+        required: false
+        default: ''
   push:
     branches:
       - feature/ursusboot-modular-airoha
+      - claude/lucid-gauss-t0il1g
     paths:
       - '.github/workflows/md-item4-direct-ubi.yml'
       - 'START_ONECLICK.cmd'
       - 'START_ONECLICK.sh'
       - 'START_EXPERT.cmd'
       - 'START_EXPERT.sh'
-      - 'ursusflasher/src/expert.py'
-      - 'ursusflasher/src/expert_airoha.py'
-      - 'ursusflasher/src/ursusboot_pregnant.py'
-      - 'ursusflasher/src/ursus_web_client.py'
-      - 'ursusflasher/src/ursusboot_install.py'
-      - 'ursusflasher/src/one_key.py'
+      - 'ursusflasher/src/**'
       - 'ursusflasher/tools/selftest_item4_direct_ubi.py'
       - 'config/**'
       - 'fw/**'
-      - 'payloads/md/ursusboot/**'
+      - 'payloads/**'
       - 'scripts/build_public_release.py'
+      - 'scripts/apply_ursusboot_release.py'
+      - 'scripts/verify_kit.py'
+      - 'config/URSUSBOOT_PIN.json'
       - 'scripts/repo_common.py'
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # May wait for the UrsusBoot release build of the pinned commit (~40-60 min).
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
         with:
@@ -39,54 +51,98 @@ jobs:
       - name: Host contract QA
         run: |
           set -euo pipefail
-          python3 -m py_compile             ursusflasher/src/expert.py             ursusflasher/src/ursusboot_pregnant.py             ursusflasher/src/ursus_web_client.py             ursusflasher/src/ursusboot_install.py             ursusflasher/src/one_key.py             ursusflasher/tools/selftest_item4_direct_ubi.py
+          python3 -m py_compile ursusflasher/src/*.py ursusflasher/tools/selftest_item4_direct_ubi.py scripts/*.py
           python3 ursusflasher/tools/selftest_item4_direct_ubi.py
-          python3 - <<'PY'
-          import pathlib
-          import sys
 
-          root = pathlib.Path('.').resolve()
-          sys.path.insert(0, str(root / 'ursusflasher' / 'src'))
-
-          import one_key
-
-          for role in ('OPENWRT_UBI_SYSUPGRADE', 'STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE'):
-              p = one_key.require_bundle_role(role)
-              got = one_key.sha256(p)
-              print(f'{role}=PASS path={p} size={p.stat().st_size} sha256={got}')
-          PY
-
-      - name: Assemble canonical operator kit
+      - name: Resolve the UrsusBoot release run for the pinned airoha-ursusboot commit
+        id: runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PIN_RUN: ${{ github.event.inputs.release_run_id }}
         run: |
           set -euo pipefail
-          rm -rf /tmp/item4-public /tmp/item4-check
-          python3 scripts/build_public_release.py --target md --out-dir /tmp/item4-public
+          WF=ursusboot-release.yml
+          COMMIT="$(python3 -c "import json; print(json.load(open('config/URSUSBOOT_PIN.json'))['commit'])")"
+          # A release run qualifies only if it produced both boards' artifacts for the
+          # pinned commit; their content is then verified against PROVENANCE.json.
+          has_pin_artifacts() {
+            local names
+            names="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$1/artifacts?per_page=100" --jq '.artifacts[] | select(.expired == false) | .name')"
+            grep -Fxq "ursusboot-xg040-md-$COMMIT" <<<"$names" && grep -Fxq "ursusboot-xg040-mf-$COMMIT" <<<"$names"
+          }
+          RUN_ID=""
+          if [ -n "${PIN_RUN:-}" ]; then
+            RUN_ID="$PIN_RUN"
+          else
+            for i in $(seq 1 110); do
+              # 1) any successful release run that built the pinned commit (host-only changes reuse it)
+              for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WF/runs?status=success&per_page=30" --jq '.workflow_runs[].id'); do
+                if has_pin_artifacts "$id"; then RUN_ID="$id"; break; fi
+              done
+              [ -n "$RUN_ID" ] && break
+              # 2) otherwise a release run must be in flight for this very commit (pin just changed)
+              RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WF/runs?head_sha=$GITHUB_SHA&per_page=1" --jq '.workflow_runs[0] // empty')"
+              if [ -z "$RUN" ] && [ "$i" -gt 3 ]; then
+                echo "no release run for pinned $COMMIT and none started for $GITHUB_SHA; dispatch $WF" >&2; exit 1
+              fi
+              if [ -n "$RUN" ] && [ "$(jq -r .status <<<"$RUN")" = completed ] && [ "$(jq -r .conclusion <<<"$RUN")" != success ]; then
+                echo "release run $(jq -r .id <<<"$RUN") for $GITHUB_SHA ended $(jq -r .conclusion <<<"$RUN")" >&2; exit 1
+              fi
+              echo "waiting for a $WF run with artifacts for $COMMIT (poll $i)"
+              sleep 180
+            done
+          fi
+          test -n "$RUN_ID"
+          RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
+          echo "$WF run id=$RUN_ID number=#$(jq -r .run_number <<<"$RUN") head_sha=$(jq -r .head_sha <<<"$RUN") conclusion=$(jq -r .conclusion <<<"$RUN")"
+          test "$(jq -r .path <<<"$RUN")" = ".github/workflows/$WF"
+          test "$(jq -r .conclusion <<<"$RUN")" = success
+          has_pin_artifacts "$RUN_ID"
+          { echo "id=$RUN_ID"; echo "number=$(jq -r .run_number <<<"$RUN")"; echo "commit=$COMMIT"; } >> "$GITHUB_OUTPUT"
 
-          ZIP="$(find /tmp/item4-public -maxdepth 1 -type f -name '*.zip' -print -quit)"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ursusboot-xg040-md-${{ steps.runs.outputs.commit }}
+          path: /tmp/ursusboot/xg040-md
+          run-id: ${{ steps.runs.outputs.id }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ursusboot-xg040-mf-${{ steps.runs.outputs.commit }}
+          path: /tmp/ursusboot/xg040-mf
+          run-id: ${{ steps.runs.outputs.id }}
+          github-token: ${{ github.token }}
+
+      - name: Assemble canonical MD+MF operator kit
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/kit-public
+          cat /tmp/ursusboot/xg040-md/BUILD-INFO.txt /tmp/ursusboot/xg040-mf/BUILD-INFO.txt
+          python3 scripts/build_public_release.py --target all --out-dir /tmp/kit-public \
+            --ursusboot-md /tmp/ursusboot/xg040-md --ursusboot-mf /tmp/ursusboot/xg040-mf \
+            --ursusboot-pin config/URSUSBOOT_PIN.json
+
+          ZIP="$(find /tmp/kit-public -maxdepth 1 -type f -name '*.zip' -print -quit)"
           test -n "$ZIP" && test -s "$ZIP"
-          mkdir -p /tmp/item4-check
-          unzip -q "$ZIP" -d /tmp/item4-check
-          ROOT="$(find /tmp/item4-check -mindepth 1 -maxdepth 1 -type d -print -quit)"
-          test -n "$ROOT"
-
-          test -f "$ROOT/START_ONECLICK.cmd"
-          test -f "$ROOT/START_ONECLICK.sh"
-          test -f "$ROOT/START_EXPERT.cmd"
-          test -f "$ROOT/START_EXPERT.sh"
-          test ! -e "$ROOT/START_MD_TRANSITION.cmd"
-          test ! -e "$ROOT/START_MD_TRANSITION.sh"
-          test -d "$ROOT/data"
-          test -d "$ROOT/fw"
-
-          python3 "$ROOT/data/selftest_item4_direct_ubi.py" 2>/dev/null || true
-          printf '%s\n' "$GITHUB_SHA" > /tmp/item4-public/URSUSFLASHER_COMMIT.txt
+          python3 scripts/verify_kit.py --zip "$ZIP" --ursusboot-md /tmp/ursusboot/xg040-md \
+            --ursusboot-mf /tmp/ursusboot/xg040-mf --pin config/URSUSBOOT_PIN.json
+          {
+            echo "URSUSFLASHER_COMMIT=$GITHUB_SHA"
+            echo "URSUSBOOT_REPO=Medvedolog/airoha-ursusboot"
+            echo "URSUSBOOT_COMMIT=${{ steps.runs.outputs.commit }}"
+            echo "URSUSBOOT_RELEASE_RUN_ID=${{ steps.runs.outputs.id }}"
+            echo "URSUSBOOT_RELEASE_RUN_NUMBER=${{ steps.runs.outputs.number }}"
+            echo "ZIP_SHA256=$(sha256sum "$ZIP" | cut -d' ' -f1)"
+          } > /tmp/kit-public/URSUSFLASHER_COMMIT.txt
+          cat /tmp/kit-public/URSUSFLASHER_COMMIT.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UrsusFlasher-MD-DIRECT-CANONICAL-${{ github.sha }}
+          name: UrsusFlasher-MD-MF-URSUSBOOT-TEST63-${{ github.sha }}
           path: |
-            /tmp/item4-public/*.zip
-            /tmp/item4-public/*.sha256.txt
-            /tmp/item4-public/URSUSFLASHER_COMMIT.txt
+            /tmp/kit-public/*.zip
+            /tmp/kit-public/*.sha256.txt
+            /tmp/kit-public/URSUSFLASHER_COMMIT.txt
           if-no-files-found: error
           retention-days: 14

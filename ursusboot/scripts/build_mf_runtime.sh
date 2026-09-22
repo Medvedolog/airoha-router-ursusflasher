@@ -57,6 +57,9 @@ cp -a "$WORK/u-boot" "$WORK/u-boot-pristine"
 
 python3 "$MF_BASE_TRANSFORM" "$WORK/u-boot"
 python3 "$RUNTIME_ENABLE" "$WORK/u-boot" "$WORK/u-boot-pristine"
+if [ -n "${URSUS_UBI_PRELOADER:-}" ]; then
+    python3 "$ROOT/ursusboot/scripts/pin_ubi_preloader.py" --tree "$WORK/u-boot" --preloader "$URSUS_UBI_PRELOADER" --from mf | tee "$WORK/ubi-preloader-pin.txt"
+fi
 python3 "$BOARD_HW" "$WORK/u-boot"
 python3 "$POLICY_APPLIER" "$WORK/u-boot" "$BOARD_POLICY"
 printf '%s\n' "-UrsusBoot-${VERSION}" > "$WORK/u-boot/.scmversion"
@@ -177,5 +180,11 @@ printf '%s\n' \
   "PROFILE_KCONFIG=PASS" \
   "MODE_KCONFIG=RUNTIME" > "$OUT/MF-RUNTIME-BUILD-INFO.txt"
 
+if [ -n "${URSUS_UBI_PRELOADER:-}" ]; then
+    grep '^UBI_' "$WORK/ubi-preloader-pin.txt" >> "$OUT/MF-RUNTIME-BUILD-INFO.txt"
+    PIN_SHA=$(sed -n 's/^UBI_PRELOADER_SHA256=//p' "$WORK/ubi-preloader-pin.txt")
+    grep -Fq "$PIN_SHA" "$WORK/u-boot.strings" || { echo "pinned UBI preloader digest missing from MF runtime" >&2; exit 1; }
+    ! grep -Fq 778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e "$WORK/u-boot.strings" || { echo "old MF UBI preloader digest survived pin" >&2; exit 1; }
+fi
 echo "MF_RUNTIME_BUILD=PASS version=${VERSION} profile=${PROFILE} policy=${POLICY_HEADER} commit=${BUILD_COMMIT} epoch=${BUILD_EPOCH}"
 echo "Artifacts: $OUT"

@@ -19,6 +19,13 @@ assert 'verify_stock_restore_backup' in route
 assert 'skip_full_backup=reuse_backup' in route
 assert 'Stock Nokia → OpenWrt UBI с UrsusBoot Recovery' in expert
 assert 'UrsusBoot Recovery сохраняется' in expert
+# Item 4 for XG-040G-MF: same native STOCK->UBI backend with the MF persistent runtime.
+assert '"xg040-mf": "mf"' in route
+assert 'one_key_multi.require_role("mf", "OPENWRT_UBI_SYSUPGRADE")' in route
+assert 'one_key_multi.require_role("mf", "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE")' in route
+assert 'mf_runtime_install.run_install(' in route
+assert 'one_key_multi.mf_runtime_mode(st) != "PERSISTENT_RUNTIME"' in route
+assert '_select_backup_policy("mf")' in route
 assert "'firmware': ('/api/firmware-begin', '/api/firmware-chunk')" in web
 assert "'preloader': ('/api/ubi-preloader-begin', '/api/ubi-preloader-chunk')" in web
 assert "'fip': ('/api/ursus-fip-begin', '/api/ursus-fip-chunk')" in web
