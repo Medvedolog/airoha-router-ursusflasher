@@ -150,10 +150,11 @@ def main() -> int:
     parser.add_argument("--md-preloader", type=Path, required=True)
     parser.add_argument("--mf-preloader", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, default=ROOT / "payloads" / "vanilla-pregnant")
+    parser.add_argument("--bootchain-manifest", type=Path, default=BOOTCHAIN)
     args = parser.parse_args()
 
     unameone = json.loads(UNAMEONE.read_text(encoding="utf-8"))
-    bootchain = json.loads(BOOTCHAIN.read_text(encoding="utf-8"))
+    bootchain = json.loads(args.bootchain_manifest.read_text(encoding="utf-8"))
     args.output_root.mkdir(parents=True, exist_ok=True)
 
     build_family(
