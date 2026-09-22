@@ -27,6 +27,17 @@ def test_single_confirmation_boundary():
     assert ".prompt(" not in source[boundary:]
     assert "no second confirmation exists" in source
 
+def test_item4_reuses_existing_verified_backup():
+    source=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
+    run=source[source.index("def run("):source.index("def run_expert(")]
+    helper=source[source.index("def _choose_verified_stock_backup"):source.index("def _payload_root")]
+    assert "pb.backup_tftp(" not in run
+    assert "_choose_verified_stock_backup(policy, backup_path)" in run
+    assert "pb.verify_stock_restore_backup(path)" in helper
+    assert "existing stock backup path is required for item 4" in helper
+    assert "Path to an existing complete stock backup" in helper
+    assert "--backup" in source
+
 def test_slot_layout_contract():
     regions=[(sfi.PREGNANT_META_OFF,sfi.PREGNANT_META_SIZE),(sfi.PREGNANT_PRODUCTION_OFF,sfi.PREGNANT_PRODUCTION_WINDOW),(sfi.PREGNANT_FIP_OFF,sfi.PREGNANT_FIP_WINDOW),(sfi.PREGNANT_PRELOADER_OFF,sfi.PREGNANT_PRELOADER_WINDOW)]
     slot=0x02880000
@@ -189,5 +200,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_single_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
