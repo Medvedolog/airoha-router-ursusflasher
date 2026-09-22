@@ -18,14 +18,16 @@ def test_shipped_route():
     assert "stock_ab_pregnant.run_expert(host=host, profile=profile)" in multi
     assert "stock_ab_transition.run_expert(host=host, profile=profile)" not in multi
 
-def test_single_confirmation_boundary():
+def test_confirmation_boundary():
     source=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
     tree=ast.parse(source); run=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=="run")
     prompts=[n for n in ast.walk(run) if isinstance(n,ast.Call) and isinstance(n.func,ast.Attribute) and n.func.attr=="prompt"]
-    assert len(prompts)==1, len(prompts)
+    assert len(prompts)==2, len(prompts)
     boundary=source.index("sat._write_partition(")
     assert ".prompt(" not in source[boundary:]
-    assert "no second confirmation exists" in source
+    assert 'if full_backup is None:' in source
+    assert 'Type YES to continue' in source
+    assert 'emergency != "YES"' in source
 
 def test_item4_reuses_existing_verified_backup():
     source=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
@@ -62,6 +64,19 @@ def test_runtime_safety_contract():
     boundary=stage2.index("DESTRUCTIVE=1")
     assert boundary < stage2.index('ubiformat -y "/dev/mtd${UBI_IDX}"')
     assert "automatic stock rollback/reboot is disabled" in stage2
+
+
+def test_item4_backup_is_optional_and_never_recaptured():
+    source=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
+    run=source[source.index("def run("):source.index("def run_expert(")]
+    assert "pb.backup_tftp(" not in run
+    assert "continue WITHOUT backup" in source
+    assert "_capture_live_partition(" in run
+    assert "number=policy.slave_mtd" in run
+    assert "number=policy.flag_mtd" in run
+    assert "_remote_mtd_sha(telnet, policy.master_mtd)" in run
+    assert "full_backup is None" in run
+    assert "restore-grade backup" in run
 
 
 def test_stock_wrapper_accepts_fit_smaller_than_nt_payload():
@@ -201,5 +216,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_single_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
