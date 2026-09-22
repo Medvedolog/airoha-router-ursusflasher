@@ -754,8 +754,11 @@ def _require_mtd0_target(telnet: pb.Telnet, *, check_bad_blocks: bool = True) ->
     if rc:
         raise RuntimeError("cannot read /proc/mtd")
     proc = pb.parse_proc_mtd_text(proc_text)
-    if proc.get(0) != MTD0_EXPECTED:
-        raise RuntimeError(f"mtd0 mismatch: got {proc.get(0)!r}, expected {MTD0_EXPECTED!r}")
+    got = proc.get(0)
+    if not got or tuple(got[:2]) != tuple(MTD0_EXPECTED[:2]):
+        raise RuntimeError(
+            f"mtd0 geometry mismatch: got {got!r}, expected size/erase {MTD0_EXPECTED[:2]!r}"
+        )
 
     bad_blocks = None
     if check_bad_blocks:
@@ -766,7 +769,7 @@ def _require_mtd0_target(telnet: pb.Telnet, *, check_bad_blocks: bool = True) ->
             if bad_blocks != 0:
                 raise RuntimeError(f"bootloader mtd0 reports {bad_blocks} bad blocks")
     return {
-        "mtd0": {"size": MTD0_EXPECTED[0], "erase": MTD0_EXPECTED[1], "name": MTD0_EXPECTED[2]},
+        "mtd0": {"size": MTD0_EXPECTED[0], "erase": MTD0_EXPECTED[1], "name": got[2]},
         "mtd0_bad_blocks": bad_blocks,
     }
 
