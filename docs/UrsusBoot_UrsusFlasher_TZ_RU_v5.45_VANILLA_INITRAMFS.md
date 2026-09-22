@@ -710,3 +710,212 @@ Vanilla OpenWrt boot chain остаётся отдельным продукто�
 
 Этот раздел изменяет ownership/build provenance persistent UrsusBoot и имеет приоритет над прежними формулировками, где его future main-line source предполагался внутри `airoha-router-ursusflasher`. Safety/readback/identity/one-y-N и HW-evidence требования настоящего ТЗ сохраняются.
 
+
+
+## 20. UrsusFlasher как модульный Airoha orchestration layer
+
+### 20.1. Назначение модульности UrsusFlasher
+
+Модульность `airoha-router-ursusflasher` является отдельным слоем от firmware modularity `airoha-ursusboot`.
+
+Нормативное разделение:
+
+```text
+airoha-ursusboot
+  = common UrsusBoot firmware source
+  = SoC/board fragments and board policy
+  = family firmware build
+  = TEST63+ artifacts/provenance
+
+airoha-router-ursusflasher
+  = common host/orchestration core
+  = device identification
+  = operation/capability resolution
+  = transports and physical writers
+  = backup/restore/readback
+  = exact firmware pin and payload-role resolution
+  = operator UI and canonical kit packaging
+```
+
+Цель: добавление следующего Airoha-устройства не должно требовать копирования всей host-логики или создания отдельной почти полной реализации UrsusFlasher.
+
+### 20.2. Canonical board profile ID
+
+Для одного физического профиля должен существовать один canonical profile ID, общий между firmware и host проектами, например:
+
+```text
+xg040-md
+xg040-mf
+xg140-md
+```
+
+Строки вида `md`, `mf`, marketing/model aliases, OpenWrt compatible и legacy filenames могут использоваться только как detection aliases/compatibility keys. После определения устройства внутренний dispatch должен опираться на canonical profile ID.
+
+`BOARD_PROFILES.json` UrsusFlasher должен явно связывать host profile с `airoha-ursusboot` profile через поле уровня `ursusboot_profile` или его последующий schema-equivalent. Exact TEST63 pin обязан подтверждать совпадение profile identity в artifact provenance.
+
+### 20.3. Profile-driven operation contract
+
+High-level orchestration не должна выбирать реализацию по цепочкам вида:
+
+```python
+if family == "mf":
+    ...
+elif family == "md":
+    ...
+```
+
+как постоянной архитектуре.
+
+Нормативная модель:
+
+```text
+detected device
+ -> canonical board profile
+ -> requested operation
+ -> capability/write-policy check
+ -> backend resolution
+ -> payload-role resolution
+ -> automatic preflight
+ -> one meaningful y/N if destructive
+ -> backend execution
+ -> required readback/evidence
+```
+
+Профиль должен уметь описать как минимум:
+
+- model/SoC/compatible detection aliases;
+- flash geometry и board-specific layout;
+- доступные transports;
+- supported operations;
+- operation backend key;
+- write authorization/policy;
+- backup/preflight requirements;
+- readback/verification requirements;
+- payload roles;
+- network/recovery characteristics;
+- hardware/CI evidence state.
+
+### 20.4. Operation/backend registry
+
+Общие пользовательские действия должны иметь стабильные operation keys, не привязанные к названию платы, например:
+
+```text
+backup
+validate_backup
+install_ursusboot
+recover_ursusboot
+install_openwrt
+stock_to_ubi
+restore_stock
+restore_factory_bootarea
+switch_stock_slot
+diagnostics
+```
+
+Для каждой операции профиль выбирает backend. Концептуально:
+
+```json
+"operations": {
+  "install_ursusboot": {
+    "backend": "airoha_stock_persistent_fip",
+    "requires": ["verified_backup"],
+    "readback": "full_boot_area"
+  }
+}
+```
+
+Формат schema может эволюционировать, но смысл обязателен: high-level menu/action code спрашивает у профиля, **какой backend выполнить**, а не содержит знание о каждой модели.
+
+### 20.5. Где отдельный Python backend допустим
+
+Data-driven архитектура не означает, что вся физическая механика обязана помещаться в JSON.
+
+Отдельный backend/plugin является правильным решением, когда реально различаются:
+
+- BootROM/UART transport;
+- Nokia stock A/B selector format;
+- boot-area/FIP container mechanics;
+- raw MTD writer;
+- UBI migration topology;
+- identity/RI/BOSA preservation;
+- device-derived candidate construction;
+- recovery bootstrap;
+- board-specific destructive transaction.
+
+Запрещённый анти-паттерн — создавать для каждой новой модели полный набор дублирующих orchestration/UI/menu модулей только потому, что модель новая. Board-specific код должен быть локализован на границе backend/profile, а общий workflow оставаться общим.
+
+### 20.6. Текущее состояние и migration debt
+
+В UrsusFlasher уже существуют необходимые основы:
+
+- `config/BOARD_PROFILES.json`;
+- `ursusflasher/src/board_profiles.py`;
+- `config/FIRMWARE_BUNDLES.json`;
+- `config/FIRMWARE_CAPABILITIES.json`;
+- общий `device_state.py`;
+- multi-model dispatch в `one_key_multi` / `expert_multi.py`;
+- profile-specific write policy/evidence.
+
+Однако текущая реализация ещё содержит прямые MD/MF/XG140 ветвления и board-named orchestration modules. Это допустимый переходный долг, но не целевая архитектура.
+
+После стабилизации TEST63 новые изменения должны по возможности двигать dispatch в сторону:
+
+```text
+profile -> capability -> backend -> payload role
+```
+
+а не увеличивать количество `if family == ...` в high-level orchestration.
+
+### 20.7. Связь с exact TEST63 pin
+
+UrsusFlasher не строит будущий UrsusBoot самостоятельно. Для операции, использующей UrsusBoot, profile/backend resolver должен получить payload из exact pinned `Medvedolog/airoha-ursusboot` artifact set.
+
+Для каждого supported profile kit verifier обязан доказать:
+
+```text
+canonical profile ID matches
+airoha-ursusboot repository matches
+full pinned commit SHA matches
+artifact provenance matches that SHA
+payload role exists for this profile
+payload SHA256/size match provenance
+board/family identity matches
+required recovery/persistent pair is internally consistent
+```
+
+Нельзя разрешать fallback на payload соседней семьи только потому, что SoC совпадает.
+
+### 20.8. Требование к портированию новых Airoha устройств
+
+Добавление нового Airoha router profile в нормальном случае должно состоять преимущественно из:
+
+```text
+identity/detection profile
+SoC + flash/layout data
+supported operation map
+backend selections
+payload roles and exact firmware provenance
+board-specific safety/readback policy
+hardware evidence state
+```
+
+Новый hardware profile не получает write-capable operation автоматически. Пока geometry, backend и evidence не доказаны, соответствующие destructive actions остаются fail-closed/read-only.
+
+Совпадение SoC само по себе не является разрешением использовать offsets, FIP lineage, selector mechanics или destructive backend другой платы.
+
+### 20.9. Immediate refactor direction
+
+После получения первого standalone TEST63 BUILD PASS приоритетный рефактор UrsusFlasher:
+
+```text
+1. Нормализовать canonical profile IDs между airoha-ursusboot и UrsusFlasher.
+2. Добавить operation/backend mapping в BOARD_PROFILES schema либо отдельный profile-owned registry.
+3. Ввести общий backend resolver.
+4. Перевести install/recover/restore/stock-to-UBI dispatch с family conditionals на backend keys.
+5. Сохранить hardware-specific writer implementations отдельными backend modules без копирования UI/orchestration.
+6. Перевести payload lookup на profile + semantic role + exact standalone provenance.
+7. Добавить QA, запрещающий неизвестный backend, cross-family payload fallback и write action без явного profile authorization.
+8. Новые Airoha boards добавлять через этот contract, а существующие MD/MF/XG140 переносить постепенно без рискованного big-bang rewrite.
+```
+
+Модульность не отменяет существующие safety contracts: automatic preflight, один meaningful `y/N`, BL2-LAST где требуется, полный readback, identity preservation и строгая граница `CI PASS != HW PASS` сохраняются.
