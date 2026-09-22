@@ -1,3 +1,4 @@
+# CI artifact refresh: exact FULL kit for current EXPERT/item4 contract.
 #!/usr/bin/env python3
 from __future__ import annotations
 import ast, json, os, sys
