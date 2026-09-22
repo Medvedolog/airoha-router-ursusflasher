@@ -37,22 +37,18 @@ jobs:
           python3 -m py_compile             ursusflasher/src/expert.py             ursusflasher/src/ursusboot_pregnant.py             ursusflasher/src/ursus_web_client.py             ursusflasher/src/ursusboot_install.py             ursusflasher/src/one_key.py             ursusflasher/tools/selftest_item4_direct_ubi.py
           python3 ursusflasher/tools/selftest_item4_direct_ubi.py
           python3 - <<'PY'
-          import hashlib,json,pathlib
-          root=pathlib.Path('.')
-          m=json.loads((root/'config/FIRMWARE_BUNDLE.json').read_text())
-          need={'OPENWRT_UBI_SYSUPGRADE','STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE'}
-          seen=set()
-          for item in m.get('files',[]):
-              role=item.get('role')
-              if role not in need:
-                  continue
-              p=root/item['path']
-              assert p.is_file(), p
-              got=hashlib.sha256(p.read_bytes()).hexdigest()
-              assert got==item['sha256'], (role,got,item['sha256'])
-              print(f'{role}=PASS size={p.stat().st_size} sha256={got}')
-              seen.add(role)
-          assert seen==need, seen
+          import pathlib
+          import sys
+
+          root = pathlib.Path('.').resolve()
+          sys.path.insert(0, str(root / 'ursusflasher' / 'src'))
+
+          import one_key
+
+          for role in ('OPENWRT_UBI_SYSUPGRADE', 'STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE'):
+              p = one_key.require_bundle_role(role)
+              got = one_key.sha256(p)
+              print(f'{role}=PASS path={p} size={p.stat().st_size} sha256={got}')
           PY
 
       - name: Assemble MD test kit
