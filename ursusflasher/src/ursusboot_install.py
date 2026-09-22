@@ -22,7 +22,7 @@ REPO_MODE = (_REPO_ROOT / "fw").is_dir() and (_REPO_ROOT / "payloads").is_dir() 
 ROOT = _REPO_ROOT if REPO_MODE else HERE.parent
 DATA = HERE if REPO_MODE else (ROOT / "data")
 PAYLOAD_DIR = (ROOT / "payloads" / "md" / "ursusboot") if REPO_MODE else (ROOT / "data" / "payloads" / "md" / "ursusboot")
-PAYLOAD = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip"
+ITEM4_TEMP_MANIFEST = (ROOT / "config" / "ITEM4_TEMP_URSUSBOOT.json") if REPO_MODE else (ROOT / "data" / "ITEM4_TEMP_URSUSBOOT.json")
 ALPHA3_REFERENCE_PAYLOAD = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha3-update.fip"
 WORK = ROOT / "work"
 PRIVATE = WORK / "private"
@@ -43,9 +43,21 @@ EXPECTED_HYBRID_FIP_SIZE = 0x7B000
 MANIFEST_PATH = (ROOT / 'config' / 'MANIFEST.json') if REPO_MODE else (ROOT / 'data' / 'MANIFEST.json')
 _URSUS_ROOT_META = json.loads(MANIFEST_PATH.read_text(encoding='utf-8'))['ursusboot']
 _URSUS_META = _URSUS_ROOT_META['alpha5_test61_candidate']
-EXPECTED_HYBRID_FIP_SHA256 = _URSUS_META['fip_sha256']
-EXPECTED_U_BOOT_SHA256 = _URSUS_META['raw_bl33_sha256']
-TARGET_URSUS = _URSUS_META['version']
+if ITEM4_TEMP_MANIFEST.is_file():
+    _TEMP = json.loads(ITEM4_TEMP_MANIFEST.read_text(encoding="utf-8"))
+    if int(_TEMP.get("schema", 0)) != 1 or _TEMP.get("role") != "TEMPORARY_ITEM4_URSUSBOOT":
+        raise RuntimeError("invalid ITEM4_TEMP_URSUSBOOT descriptor")
+    PAYLOAD = ROOT / str(_TEMP["fip_path"])
+    EXPECTED_HYBRID_FIP_SIZE = int(_TEMP["fip_size"])
+    EXPECTED_HYBRID_FIP_SHA256 = str(_TEMP["fip_sha256"]).lower()
+    EXPECTED_U_BOOT_SHA256 = str(_TEMP["raw_bl33_sha256"]).lower()
+    TARGET_URSUS = str(_TEMP["version"])
+else:
+    PAYLOAD = PAYLOAD_DIR / "ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip"
+    EXPECTED_HYBRID_FIP_SIZE = 0x7B000
+    EXPECTED_HYBRID_FIP_SHA256 = _URSUS_META['fip_sha256']
+    EXPECTED_U_BOOT_SHA256 = _URSUS_META['raw_bl33_sha256']
+    TARGET_URSUS = _URSUS_META['version']
 CHECKSUM_UUID = bytes.fromhex("a2cceab7f8254b279704633a6fd69ad8")
 TB_FW_UUID = bytes.fromhex("5ff9ec0b4d223e4da544c39d81c73f0a")
 NT_FW_UUID = bytes.fromhex("d6d0eea7fcead54b97829934f234b6e4")
