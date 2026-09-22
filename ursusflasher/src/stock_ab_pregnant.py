@@ -310,9 +310,10 @@ def _monitor(host: str, policy: Policy, payload_meta: dict, seconds: int = 600) 
                 prod_verified = True
                 ui.status("PASS", "Stage2 reported PROD_VERIFIED; waiting for production reboot.")
         elif not transient_seen and time.time() >= next_stock_probe:
-            # Distinguish an OEM fallback from a generic "pregnant never appeared"
-            # timeout. This is a contextual migration outcome: the running OS is
-            # still NOKIA_STOCK, but it returned after SLOT2 had been selected.
+            # Distinguish a return to the untouched stock OS from a generic
+            # "pregnant never appeared" timeout. In the Recovery-loader route
+            # this means boot-once never reached the transient Linux; stage2
+            # therefore did not cross its destructive boundary.
             next_stock_probe = time.time() + 10
             try:
                 state = ds.probe_device_state(host, interactive_ssh=False)
@@ -325,12 +326,12 @@ def _monitor(host: str, policy: Policy, payload_meta: dict, seconds: int = 600) 
                         ui.status(
                             "STOCK_MASTER_FALLBACK",
                             pb.tr(
-                                "После попытки SLOT2 снова загрузилась штатная Nokia stock/master. Pregnant initramfs не стартовал; stage2 и UBI migration не выполнялись.",
-                                "Nokia stock/master booted again after the SLOT2 attempt. Pregnant initramfs did not start; stage2 and UBI migration were not executed.",
+                                "После boot-once снова загрузилась штатная Nokia stock. Pregnant initramfs не стартовал; stage2 и UBI migration не выполнялись.",
+                                "Nokia stock booted again after boot-once. Pregnant initramfs did not start; stage2 and UBI migration were not executed.",
                             ),
                         )
                         raise RuntimeError(
-                            "STOCK_MASTER_FALLBACK: stock master booted again after SLOT2 selection; "
+                            "STOCK_FALLBACK: Nokia stock booted again after Recovery boot-once; "
                             "pregnant runtime did not start and no stage2 migration writes were attempted"
                         )
         elif transient_seen and prod_verified and time.time() >= next_confirm_attempt:
