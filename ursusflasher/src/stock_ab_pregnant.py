@@ -184,12 +184,11 @@ def _load_payload(policy: Policy) -> tuple[dict[str, Path], dict]:
         raise RuntimeError("pregnant payload metadata mismatch")
     files = {
         "runtime": root / "runtime.itb",
+        "pregnant_itb": root / "pregnant-autonomous.itb",
         "production": root / policy.production_name,
         "fip": root / "vanilla-bl31-uboot.fip",
         "preloader": root / "vanilla-preloader.bin",
     }
-    if policy.family == "md":
-        files["handoff"] = root / "pregnant-handoff.linuximg"
     for role, path in files.items():
         spec = meta.get("files", {}).get(role, {})
         if not path.is_file():
@@ -200,6 +199,16 @@ def _load_payload(policy: Policy) -> tuple[dict[str, Path], dict]:
     if sha_file(files["production"]) != str(meta.get("unameone_sha256", "")).lower():
         raise RuntimeError("pinned UnameOne production SHA mismatch")
     sfi.source_fit_contract(files["runtime"].read_bytes())
+    pregnant_contract = sfi.source_fit_contract(files["pregnant_itb"].read_bytes())
+    autonomous = meta.get("autonomous") or {}
+    if autonomous.get("mode") != "EMBEDDED_RAMDISK":
+        raise RuntimeError("pregnant payload is not autonomous embedded-ramdisk mode")
+    if int(autonomous.get("fit_size", -1)) != files["pregnant_itb"].stat().st_size:
+        raise RuntimeError("autonomous pregnant FIT size metadata mismatch")
+    if str(autonomous.get("fit_sha256", "")).lower() != sha_file(files["pregnant_itb"]):
+        raise RuntimeError("autonomous pregnant FIT SHA metadata mismatch")
+    if pregnant_contract["kernel_data_size"] != sfi.source_fit_contract(files["runtime"].read_bytes())["kernel_data_size"]:
+        raise RuntimeError("autonomous payload unexpectedly changed transient kernel size")
     return files, meta
 
 
