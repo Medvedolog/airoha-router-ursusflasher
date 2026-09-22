@@ -60,7 +60,7 @@ jobs:
           sh -n openwrt/pregnant-overlay/etc/uci-defaults/99-ursus-pregnant
           grep -Fq 'out[4:] != flag[4:]' ursusflasher/src/stock_ab_transition.py
           ! grep -R -- '--force' openwrt/pregnant-overlay ursusflasher/src/stock_ab_pregnant.py
-          test "$(grep -c 'ui.prompt(' ursusflasher/src/stock_ab_pregnant.py)" -eq 1
+          grep -Fq 'Type YES to continue' ursusflasher/src/stock_ab_pregnant.py
       - name: Fetch current official UBI-recovery inputs
         run: |
           set -euo pipefail
