@@ -251,24 +251,39 @@ def _build_md_proven_pregnant_slot(
     props, fit_meta = sfw.stock_fit_contract(stock_slot, nt_off, nt_size)
     fit_off = int(fit_meta["fit_offset"])
 
-    reserved = [
-        ("runtime", PREGNANT_RUNTIME_OFF, PREGNANT_RUNTIME_WINDOW),
-        ("manifest", PREGNANT_META_OFF, PREGNANT_META_SIZE),
-        ("production", PREGNANT_PRODUCTION_OFF, PREGNANT_PRODUCTION_WINDOW),
-        ("fip", PREGNANT_FIP_OFF, PREGNANT_FIP_WINDOW),
-        ("preloader", PREGNANT_PRELOADER_OFF, PREGNANT_PRELOADER_WINDOW),
-    ]
     nt_end = nt_off + nt_size
-    if len(runtime_fit) > PREGNANT_RUNTIME_WINDOW:
-        raise RuntimeError("pregnant runtime exceeds reserved MD runtime window")
-    runtime_ram_offset = PREGNANT_RUNTIME_OFF - fit_off
-    # tcboot/FIP loads the complete NT-FW payload into the stock staging buffer
-    # at 0x81800000. FIT totalsize describes only the FDT/FIT container inside
-    # that loaded payload and must not be used as the RAM-availability limit.
+    kernel_off = int(fit_meta["kernel_data_offset"])
+    kernel_size = int(fit_meta["kernel_data_size"])
+    active_end = max(fit_off + int(fit_meta["total_size"]), kernel_off + kernel_size)
+    if fit_meta.get("fdt_data_offset") is not None:
+        active_end = max(
+            active_end,
+            int(fit_meta["fdt_data_offset"]) + int(fit_meta["fdt_data_size"]),
+        )
+
+    # Follow the hardware-proven TRANSITION2 rule: preserve the active stock
+    # kernel/FDT wrapper and use only trailing NT-FW bytes for additional data.
+    # Runtime placement is derived from the live SLOT2 layout, never a sample
+    # address. Keep the fixed manifest boundary so stage2 can find metadata.
+    runtime_off = (active_end + 0x1FFFF) & ~0x1FFFF
+    runtime_capacity = PREGNANT_META_OFF - runtime_off
+    if runtime_capacity <= 0 or len(runtime_fit) > runtime_capacity:
+        raise RuntimeError(
+            "pregnant runtime does not fit the live NT-FW tail before manifest: "
+            f"active_end={active_end:#x} runtime_off={runtime_off:#x} "
+            f"runtime_size={len(runtime_fit):#x} capacity={max(runtime_capacity, 0):#x}"
+        )
+    if not (nt_off <= runtime_off < runtime_off + len(runtime_fit) <= nt_end):
+        raise RuntimeError(
+            "derived pregnant runtime span is outside stock NT-FW payload: "
+            f"runtime={runtime_off:#x}+{len(runtime_fit):#x} ntfw={nt_off:#x}..{nt_end:#x}"
+        )
+
+    runtime_ram_offset = runtime_off - fit_off
     loaded_nt_payload_size = nt_size - (fit_off - nt_off)
     if runtime_ram_offset < 0 or runtime_ram_offset + len(runtime_fit) > loaded_nt_payload_size:
         raise RuntimeError(
-            "pregnant runtime is outside tcboot-loaded stock NT-FW payload: "
+            "derived pregnant runtime span is outside tcboot-loaded NT-FW payload: "
             f"runtime_off={runtime_ram_offset:#x} size={len(runtime_fit):#x} "
             f"loaded={loaded_nt_payload_size:#x}"
         )
@@ -278,10 +293,17 @@ def _build_md_proven_pregnant_slot(
         runtime_fit_size=len(runtime_fit),
     )
 
+    reserved = [
+        ("runtime", runtime_off, len(runtime_fit)),
+        ("manifest", PREGNANT_META_OFF, PREGNANT_META_SIZE),
+        ("production", PREGNANT_PRODUCTION_OFF, len(production_itb)),
+        ("fip", PREGNANT_FIP_OFF, len(vanilla_fip)),
+        ("preloader", PREGNANT_PRELOADER_OFF, len(vanilla_preloader)),
+    ]
+
     # The runtime is intentionally embedded in bytes already loaded by tcboot.
     # It may occupy unused/padded bytes of the active kernel carrier, but it
     # must never overwrite the executable Linux Image itself or the active FDT.
-    kernel_off = int(fit_meta["kernel_data_offset"])
     protected = [
         ("handoff-linux-image", kernel_off, len(patched_handoff)),
     ]
@@ -291,16 +313,16 @@ def _build_md_proven_pregnant_slot(
         )
 
     for name, off, size in reserved:
-        if off % 0x20000 or size % 0x20000 or not (nt_off <= off < off + size <= nt_end):
+        if off % 0x20000 or size <= 0 or not (nt_off <= off < off + size <= nt_end):
             raise RuntimeError(
-                f"MD pregnant staging region {name} is outside stock NT-FW payload: "
-                f"region={off:#x}+{size:#x} ntfw={nt_off:#x}..{nt_end:#x}"
+                f"MD pregnant staging span {name} is outside stock NT-FW payload: "
+                f"span={off:#x}+{size:#x} ntfw={nt_off:#x}..{nt_end:#x}"
             )
         for protected_name, protected_off, protected_size in protected:
             if _pregnant_overlap(off, size, protected_off, protected_size):
                 raise RuntimeError(
-                    f"MD pregnant staging region {name} overlaps {protected_name}: "
-                    f"region={off:#x}+{size:#x} protected={protected_off:#x}+{protected_size:#x}"
+                    f"MD pregnant staging span {name} overlaps {protected_name}: "
+                    f"span={off:#x}+{size:#x} protected={protected_off:#x}+{protected_size:#x}"
                 )
     for i, (name_a, off_a, size_a) in enumerate(reserved):
         for name_b, off_b, size_b in reserved[i + 1:]:
@@ -320,7 +342,7 @@ def _build_md_proven_pregnant_slot(
         f"PROFILE={evidence['profile']}",
         f"SLOT_SIZE=0x{slot_size:08x}",
         f"META_SLOT_OFF=0x{PREGNANT_META_OFF:08x}",
-        f"RUNTIME_FIT_SLOT_OFF=0x{PREGNANT_RUNTIME_OFF:08x}",
+        f"RUNTIME_FIT_SLOT_OFF=0x{runtime_off:08x}",
         f"RUNTIME_FIT_SIZE={len(runtime_fit)}",
         f"RUNTIME_FIT_SHA256={sha256_bytes(runtime_fit)}",
         f"PRODUCTION_SLOT_OFF=0x{PREGNANT_PRODUCTION_OFF:08x}",
@@ -340,21 +362,13 @@ def _build_md_proven_pregnant_slot(
         raise RuntimeError("pregnant manifest exceeds reserved eraseblock")
 
     out = bytearray(base)
-    out[PREGNANT_RUNTIME_OFF:PREGNANT_RUNTIME_OFF + PREGNANT_RUNTIME_WINDOW] = (
-        runtime_fit + b"\0" * (PREGNANT_RUNTIME_WINDOW - len(runtime_fit))
-    )
+    out[runtime_off:runtime_off + len(runtime_fit)] = runtime_fit
     out[PREGNANT_META_OFF:PREGNANT_META_OFF + PREGNANT_META_SIZE] = (
         manifest + b"\0" * (PREGNANT_META_SIZE - len(manifest))
     )
-    out[PREGNANT_PRODUCTION_OFF:PREGNANT_PRODUCTION_OFF + PREGNANT_PRODUCTION_WINDOW] = (
-        production_itb + b"\0" * (PREGNANT_PRODUCTION_WINDOW - len(production_itb))
-    )
-    out[PREGNANT_FIP_OFF:PREGNANT_FIP_OFF + PREGNANT_FIP_WINDOW] = (
-        vanilla_fip + b"\0" * (PREGNANT_FIP_WINDOW - len(vanilla_fip))
-    )
-    out[PREGNANT_PRELOADER_OFF:PREGNANT_PRELOADER_OFF + PREGNANT_PRELOADER_WINDOW] = (
-        vanilla_preloader + b"\0" * (PREGNANT_PRELOADER_WINDOW - len(vanilla_preloader))
-    )
+    out[PREGNANT_PRODUCTION_OFF:PREGNANT_PRODUCTION_OFF + len(production_itb)] = production_itb
+    out[PREGNANT_FIP_OFF:PREGNANT_FIP_OFF + len(vanilla_fip)] = vanilla_fip
+    out[PREGNANT_PRELOADER_OFF:PREGNANT_PRELOADER_OFF + len(vanilla_preloader)] = vanilla_preloader
 
     # Runtime bytes may intentionally occupy the padding tail of the active
     # kernel data property. Refresh any existing supported kernel digest fields
@@ -398,13 +412,14 @@ def _build_md_proven_pregnant_slot(
 
     meta = dict(wrapper)
     meta.update({
-        "wrapper_contract": "STOCK_FIP_HDR2_PROVEN_HANDOFF_NTFW_STAGING_V2",
+        "wrapper_contract": "STOCK_FIP_HDR2_PROVEN_HANDOFF_DYNAMIC_TAIL_V3",
         "candidate_sha256": sha256_bytes(bytes(out)),
-        "runtime_offset": PREGNANT_RUNTIME_OFF,
+        "runtime_offset": runtime_off,
         "runtime_size": len(runtime_fit),
         "runtime_sha256": sha256_bytes(runtime_fit),
         "runtime_ram_source_offset": runtime_ram_offset,
         "runtime_ram_loaded_payload_size": loaded_nt_payload_size,
+        "runtime_tail_capacity": runtime_capacity,
         "runtime_ram_destination": "0x92000000",
         "manifest_offset": PREGNANT_META_OFF,
         "manifest_size": len(manifest),
