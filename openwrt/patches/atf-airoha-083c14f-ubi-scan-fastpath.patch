@@ -8,7 +8,7 @@ Backport of Yuzhii0718/atf-airoha commit
 
 --- a/plat/ecnt/common/drivers/flash/spi_nand_flash.c
 +++ b/plat/ecnt/common/drivers/flash/spi_nand_flash.c
-@@ -2422,6 +2422,179 @@ int nandflash_read(unsigned long from, unsigned long len, u32 *retlen, unsigned
+@@ -2422,5 +2422,79 @@ int nandflash_read(unsigned long from, unsigned long len, u32 *retlen, unsigned
  		return -1;
  	}	
  }
@@ -90,7 +90,7 @@ Backport of Yuzhii0718/atf-airoha commit
  
 --- a/plat/ecnt/common/drivers/flash/spi_nand_flash.h
 +++ b/plat/ecnt/common/drivers/flash/spi_nand_flash.h
-@@ -109,6 +109,8 @@ struct SPI_NAND_FLASH_INFO_T {
+@@ -109,4 +109,6 @@ struct SPI_NAND_FLASH_INFO_T {
  int nandflash_init(int rom_base);
  int nandflash_read(unsigned long from, unsigned long len, uint32_t *retlen, unsigned char *buf, SPI_NAND_FLASH_RTN_T *status);
 +int nandflash_read_range(unsigned long from, unsigned long len, unsigned char *buf);
@@ -108,7 +108,7 @@ Backport of Yuzhii0718/atf-airoha commit
  extern int nandflash_write(unsigned long to, unsigned long len, u32 *retlen, unsigned char *buf);
  extern int nandflash_erase(unsigned long offset, unsigned long len);
  extern int en7512_nand_check_block_bad(u32 offset, u32 bmt_block);
-@@ -41,13 +43,25 @@ uint32_t nand_size;
+@@ -41,10 +43,12 @@ uint32_t nand_size;
  static int nand_ubispl_is_bad_block(uint32_t pnum)
  {
 +	unsigned char bbm;
