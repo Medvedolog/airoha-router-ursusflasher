@@ -301,9 +301,9 @@ def _build_md_proven_pregnant_slot(
         ("preloader", PREGNANT_PRELOADER_OFF, len(vanilla_preloader)),
     ]
 
-    # The runtime is intentionally embedded in bytes already loaded by tcboot.
-    # It may occupy unused/padded bytes of the active kernel carrier, but it
-    # must never overwrite the executable Linux Image itself or the active FDT.
+    # The live-tail placement above already starts after active kernel/FDT.
+    # Keep these spans protected as a structural invariant of the proven
+    # TRANSITION2 wrapper.
     protected = [
         ("handoff-linux-image", kernel_off, len(patched_handoff)),
     ]
@@ -370,39 +370,20 @@ def _build_md_proven_pregnant_slot(
     out[PREGNANT_FIP_OFF:PREGNANT_FIP_OFF + len(vanilla_fip)] = vanilla_fip
     out[PREGNANT_PRELOADER_OFF:PREGNANT_PRELOADER_OFF + len(vanilla_preloader)] = vanilla_preloader
 
-    # Runtime bytes may intentionally occupy the padding tail of the active
-    # kernel data property. Refresh any existing supported kernel digest fields
-    # against the final on-flash kernel span so tcboot never sees a stale hash.
-    kernel_size = int(fit_meta["kernel_data_size"])
-    final_kernel = bytes(out[kernel_off:kernel_off + kernel_size])
-    refreshed_hash_ranges = []
-    for field in fit_meta.get("kernel_hash_fields") or []:
-        hash_off = int(field["value_offset"])
-        hash_len = int(field["value_size"])
-        algo = str(field["algorithm"])
-        digest = hashlib.sha1(final_kernel).digest() if algo == "sha1" else hashlib.sha256(final_kernel).digest()
-        if len(digest) != hash_len:
-            raise RuntimeError(f"resolved final kernel hash length mismatch: {algo}/{hash_len}")
-        out[hash_off:hash_off + hash_len] = digest
-        refreshed_hash_ranges.append((hash_off, hash_off + hash_len))
-
-    # After the proven kernel wrapper, only the declared staging windows may
-    # differ. They are raw bytes inside stock NT-FW, not required to be a FIT
-    # image node. Active kernel/FDT are protected above.
-    allowed_ranges = [(begin, begin + size) for _name, begin, size in reserved] + refreshed_hash_ranges
+    # build_transition_slot() already rebuilt the active kernel payload and its
+    # supported FIT hashes. Pregnant staging now lives strictly after active
+    # kernel/FDT, so no second kernel/hash rewrite is needed here.
+    allowed_ranges = [(begin, begin + size) for _name, begin, size in reserved]
     allowed_ranges.sort()
     cursor = 0
     for begin, end in allowed_ranges:
         if begin < cursor:
-            # Overlap is acceptable between a declared staging window and a
-            # kernel hash field only if the hash refresh is the final writer.
-            cursor = max(cursor, end)
-            continue
+            raise RuntimeError("overlapping MD pregnant staging spans")
         if bytes(out[cursor:begin]) != base[cursor:begin]:
-            raise RuntimeError("unexpected MD pregnant byte change outside declared staging/hash windows")
+            raise RuntimeError("unexpected MD pregnant byte change outside declared staging spans")
         cursor = end
     if bytes(out[cursor:]) != base[cursor:]:
-        raise RuntimeError("unexpected MD pregnant byte change after declared staging/hash windows")
+        raise RuntimeError("unexpected MD pregnant byte change after declared staging spans")
 
     if fit_meta.get("fdt_data_offset") is not None:
         fdt_off = int(fit_meta["fdt_data_offset"])
@@ -437,7 +418,7 @@ def _build_md_proven_pregnant_slot(
         "stock_fit_topology_preserved": True,
         "ntfw_staging_bounds_verified": True,
         "handoff_linux_fdt_protected": True,
-        "final_kernel_hashes_refreshed": True,
+        "transition_kernel_hashes_preserved": True,
         "handoff_linux_image_size": len(patched_handoff),
         "destructive_stage2_embedded": True,
         "stock_snapshot_hash_gates": False,
