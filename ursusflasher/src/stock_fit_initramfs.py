@@ -255,6 +255,16 @@ def _build_md_proven_pregnant_slot(
     kernel_off = int(fit_meta["kernel_data_offset"])
     kernel_size = int(fit_meta["kernel_data_size"])
 
+    # HW evidence from Fudan MD proved that bytes after FIT totalsize but still
+    # inside the NT-FW FIP entry are not a free carrier. Stock tcboot's vendor
+    # second-image parser consumes that opaque trailer even though generic FIT
+    # tools ignore it. Until a new carrier contract is used, never place pregnant
+    # payloads in this range.
+    raise RuntimeError(
+        "MD pregnant in-NT-FW tail staging is disabled: hardware proved the "
+        "FIT trailing payload is stock parser data, not free space"
+    )
+
     # Hardware-proven TRANSITION2 semantics: the FIT container and every
     # resolved stock image payload are immutable carriers. Pregnant data lives
     # only after the last occupied stock byte, aligned to NAND eraseblocks.
