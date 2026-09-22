@@ -175,9 +175,12 @@ def test_stock_kernel_hash_algo_is_optional():
     assert fields[0]["node"]=="hash@2"
 
     src=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
-    contract=src[src.index("def stock_fit_contract"):src.index("def build_transition_slot")]
-    assert '"/images/kernel@1/hash@1/algo": b"sha1\\0"' not in contract
-    assert 'props["/images/kernel@1/hash@1/value"]' not in src
+    generic=src[src.index("def stock_fit_contract"):src.index("def build_md_proven_transition_slot")]
+    assert '"/images/kernel@1/hash@1/algo": b"sha1\\0"' not in generic
+    assert 'props["/images/kernel@1/hash@1/value"]' not in generic
+    proven=src[src.index("def build_md_proven_transition_slot"):src.index("def build_md_transition_slot")]
+    assert '"/images/kernel@1/hash@1/algo": b"sha1\\0"' in proven
+    assert 'props["/images/kernel@1/hash@1/value"]' in proven
 
 
 def test_stock_fit_topology_is_derived_not_hardcoded():
