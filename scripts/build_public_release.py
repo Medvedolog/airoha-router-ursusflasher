@@ -78,6 +78,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument('--out-dir', default='dist-public')
     ap.add_argument('--version', default=None)
+    ap.add_argument('--target', choices=('all','md'), default='all')
     args = ap.parse_args()
 
     version = (ROOT / 'VERSION').read_text(encoding='utf-8').strip()
@@ -89,7 +90,7 @@ def main() -> None:
     name = public_name(version)
 
     with tempfile.TemporaryDirectory() as td:
-        tree = export_tree(Path(td) / name)
+        tree = export_tree(Path(td) / name, target=args.target)
         prune_public_tree(tree)
         zpath = out / f'{name}.zip'
         # Deterministic ZIP metadata. Files generated in the temporary export tree
