@@ -82,28 +82,85 @@ def _policy(name: str) -> Policy:
         raise RuntimeError(f"unsupported pregnant profile: {name}") from exc
 
 
-def _choose_verified_stock_backup(policy: Policy, supplied: str | Path | None = None) -> tuple[Path, dict]:
-    """Use an existing restore-grade backup; item 4 never captures another full dump."""
+def _choose_verified_stock_backup(policy: Policy, supplied: str | Path | None = None) -> tuple[Path | None, dict | None]:
+    """Optionally validate an existing restore-grade backup; never capture a new one."""
     if supplied is None:
         raw = input(pb.tr(
-            "Путь к ранее сделанному полному stock backup (каталог с mtd0..mtd16): ",
-            "Path to an existing complete stock backup (directory with mtd0..mtd16): ",
+            "Путь к ранее сделанному полному stock backup [Enter — продолжить БЕЗ backup]: ",
+            "Path to an existing complete stock backup [Enter — continue WITHOUT backup]: ",
         )).strip().strip('"')
         if not raw:
-            raise RuntimeError("existing stock backup path is required for item 4")
+            return None, None
         path = Path(raw).expanduser()
     else:
-        path = Path(supplied).expanduser()
-    if not path.is_dir():
-        raise RuntimeError(f"stock backup directory not found: {path}")
-    result = pb.verify_stock_restore_backup(path)
-    family = str(result.get("stock_family") or "").strip().lower()
-    if family and family != policy.family:
-        raise RuntimeError(
-            f"stock backup family mismatch: selected {policy.family}, backup reports {family}"
-        )
+        text = str(supplied).strip()
+        if not text:
+            return None, None
+        path = Path(text).expanduser()
+
+    try:
+        if not path.is_dir():
+            raise RuntimeError(f"stock backup directory not found: {path}")
+        result = pb.verify_stock_restore_backup(path)
+        family = str(result.get("stock_family") or "").strip().lower()
+        if family and family != policy.family:
+            raise RuntimeError(
+                f"stock backup family mismatch: selected {policy.family}, backup reports {family}"
+            )
+    except Exception as exc:
+        ui.status("WARNING", pb.tr(
+            f"Указанный backup не принят ({exc}). EXPERT продолжит БЕЗ restore-grade backup.",
+            f"The selected backup was not accepted ({exc}). EXPERT will continue WITHOUT a restore-grade backup.",
+        ))
+        return None, None
+
     ui.status("READY", f"Existing restore-grade stock backup verified: {path}")
     return path, result
+
+
+def _capture_live_partition(
+    telnet: pb.Telnet,
+    access: pb.StockAccess,
+    *,
+    number: int,
+    expected_size: int,
+    out: Path,
+) -> tuple[bytes, str, Path]:
+    """Capture only a partition needed to construct the current transaction."""
+    remote = f"/tmp/ursus-item4-mtd{number}.bin"
+    blocks = (expected_size + 131071) // 131072
+    rc, text = telnet.command_clean(
+        f"rm -f {shlex.quote(remote)}; "
+        f"dd if=/dev/mtd{number} of={shlex.quote(remote)} bs=131072 count={blocks} 2>/dev/null && "
+        f"wc -c < {shlex.quote(remote)} && sha256sum {shlex.quote(remote)}",
+        timeout=max(90, expected_size // (512 * 1024)),
+    )
+    if rc:
+        raise RuntimeError(f"failed to capture live mtd{number}")
+    sizes = [int(x) for x in __import__("re").findall(r"(?:^|\n)\s*(\d+)\s*(?:\n|$)", text)]
+    hashes = __import__("re").findall(r"\b([0-9a-fA-F]{64})\b", text)
+    if not sizes or sizes[-1] != expected_size or not hashes:
+        raise RuntimeError(f"live mtd{number} capture metadata mismatch")
+    remote_sha = hashes[-1].lower()
+    ubi.receive_remote_file(telnet, access.host, remote, out)
+    data = out.read_bytes()
+    if len(data) != expected_size or sha_bytes(data) != remote_sha:
+        raise RuntimeError(f"live mtd{number} PC copy mismatch")
+    return data, remote_sha, out
+
+
+def _remote_mtd_sha(telnet: pb.Telnet, number: int) -> str:
+    rc, text = telnet.command_clean(
+        f"sha256sum /dev/mtd{number}",
+        timeout=180,
+    )
+    if rc:
+        raise RuntimeError(f"cannot hash live mtd{number}")
+    hashes = __import__("re").findall(r"\b([0-9a-fA-F]{64})\b", text)
+    if not hashes:
+        raise RuntimeError(f"live mtd{number} SHA256 missing")
+    return hashes[-1].lower()
+
 
 
 def _payload_root(policy: Policy) -> Path:
@@ -326,34 +383,36 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True, backup
         access.family = policy.family
         writer = sat._mtd_writer_preflight(telnet)
 
-        # Reuse an operator-selected restore-grade stock backup. Iterative item-4
-        # testing must not spend minutes recapturing mtd0..mtd16 before every
-        # pre-write attempt. The validator remains authoritative for backup integrity.
+        # Backup is optional insurance only. Candidate/selector always derive
+        # from the current router, so an older valid backup can never dictate
+        # the live FIT wrapper or selector bytes.
         full_backup, backup_result = _choose_verified_stock_backup(policy, backup_path)
 
-        bootloader, bootloader_sha, bootloader_path = sat._backup_partition_bytes(
-            full_backup, policy.bootloader_mtd, "bootloader", 0x00080000
+        live_slave_path = run_dir / f"live-mtd{policy.slave_mtd}-nsb_slave.bin"
+        slave, slave_sha, slave_path = _capture_live_partition(
+            telnet, access, number=policy.slave_mtd,
+            expected_size=policy.slot_size, out=live_slave_path,
         )
-        flag, flag_sha, flag_path = sat._backup_partition_bytes(
-            full_backup, policy.flag_mtd, "flag", policy.flag_size
-        )
-        flagback, flagback_sha, flagback_path = sat._backup_partition_bytes(
-            full_backup, policy.flagback_mtd, "flagback", policy.flag_size
-        )
-        bosa, bosa_sha, bosa_path = sat._backup_partition_bytes(
-            full_backup, policy.bosa_mtd, "bosa", 0x00040000
-        )
-        ri, ri_sha, ri_path = sat._backup_partition_bytes(
-            full_backup, policy.ri_mtd, "ri", 0x00040000
-        )
-        master, master_sha, master_path = sat._backup_partition_bytes(
-            full_backup, policy.master_mtd, "nsb_master", policy.slot_size
-        )
-        slave, slave_sha, slave_path = sat._backup_partition_bytes(
-            full_backup, policy.slave_mtd, "nsb_slave", policy.slot_size
+        live_flag_path = run_dir / f"live-mtd{policy.flag_mtd}-flag.bin"
+        flag, flag_sha, flag_path = _capture_live_partition(
+            telnet, access, number=policy.flag_mtd,
+            expected_size=policy.flag_size, out=live_flag_path,
         )
         flag_state = sat.parse_flag(flag, policy)
-        flagback_state = sat.parse_flag(flagback, policy)
+        if flag_state["active"] != 0 or flag_state["curimg"] != 0:
+            raise RuntimeError(
+                f"SLOT1 fallback invariant requires live stock active=0 curimg=0, got {flag_state}"
+            )
+
+        # These hashes are evidence/telemetry for stage2 metadata. No full PC
+        # download is required. Identity bytes are read by stage2 from live
+        # bosa/ri before the destructive UBI boundary.
+        bootloader_sha = _remote_mtd_sha(telnet, policy.bootloader_mtd)
+        master_sha = _remote_mtd_sha(telnet, policy.master_mtd)
+        flagback_sha = _remote_mtd_sha(telnet, policy.flagback_mtd)
+        bosa_sha = _remote_mtd_sha(telnet, policy.bosa_mtd)
+        ri_sha = _remote_mtd_sha(telnet, policy.ri_mtd)
+        flagback_state = {"sha256": flagback_sha, "source": "live-hash-only"}
         if flag_state["active"] != 0 or flag_state["curimg"] != 0:
             raise RuntimeError(
                 f"SLOT1 fallback invariant requires stock active=0 curimg=0, got {flag_state}"
@@ -414,22 +473,20 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True, backup
             "transport": transport,
             "reboot": {"transport": "stock-root-telnet", "command": reboot_command, "uid": 0},
             "backup": {
-                "stock_family": backup_result.get("stock_family"),
-                "stock_variant": backup_result.get("stock_variant"),
-                "full_directory": str(full_backup),
-                "bootloader_source": str(bootloader_path),
-                "bootloader_sha256": bootloader_sha,
-                "master_source": str(master_path),
-                "master_sha256": master_sha,
+                "present": full_backup is not None,
+                "full_directory": str(full_backup) if full_backup else None,
+                "stock_family": backup_result.get("stock_family") if backup_result else None,
+                "stock_variant": backup_result.get("stock_variant") if backup_result else None,
+            },
+            "live_sources": {
                 "slave_source": str(slave_path),
                 "slave_sha256": slave_sha,
                 "flag_source": str(flag_path),
                 "flag_sha256": flag_sha,
-                "flagback_source": str(flagback_path),
+                "bootloader_sha256": bootloader_sha,
+                "master_sha256": master_sha,
                 "flagback_sha256": flagback_sha,
-                "bosa_source": str(bosa_path),
                 "bosa_sha256": bosa_sha,
-                "ri_source": str(ri_path),
                 "ri_sha256": ri_sha,
             },
         }
@@ -438,14 +495,34 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True, backup
         )
 
         ui.section("VANILLA PREGNANT MIGRATION", style="amber2")
-        ui.status("READY", f"{policy.model}: existing verified stock backup selected; SLOT1 remains untouched")
+        if full_backup:
+            ui.status("READY", f"{policy.model}: existing restore-grade backup verified; SLOT1 remains untouched")
+        else:
+            ui.section(pb.tr("ВНИМАНИЕ: BACKUP НЕТ", "WARNING: NO BACKUP"), style="bad")
+            ui.status("WARNING", pb.tr(
+                "ПОЛНЫЙ RESTORE-GRADE BACKUP НЕ ВЫБРАН. ВОССТАНОВЛЕНИЕ ПРИ НЕШТАТНОМ СБОЕ МОЖЕТ ПОТРЕБОВАТЬ UART/BOOTROM И ДРУГОЙ ИСТОЧНИК ЗАВОДСКИХ ДАННЫХ.",
+                "NO COMPLETE RESTORE-GRADE BACKUP IS SELECTED. RECOVERY FROM AN UNEXPECTED FAILURE MAY REQUIRE UART/BOOTROM AND ANOTHER SOURCE OF FACTORY DATA.",
+            ))
+
         ui.status("READY", f"SLOT2 candidate SHA256 {slot_meta['candidate_sha256']}")
         ui.status("READY", f"Pinned UnameOne production SHA256 {payload_meta['unameone_sha256']}")
         ui.status("READY", f"writer={writer}; transport={transport}; both frozen before destructive boundary")
         ui.status("READY", f"reboot=stock root Telnet uid=0; command={reboot_command}")
         ui.note(
-            "One authorization covers SLOT2 write/readback -> selector -> reboot -> autonomous UBI -> pinned UnameOne -> identity -> Vanilla FIP -> BL2-last -> final readback. No confirmation exists after reboot."
+            "One normal y/N covers SLOT2 write/readback -> selector -> reboot -> autonomous UBI -> pinned UnameOne -> identity -> Vanilla FIP -> BL2-last -> final readback. Without a restore-grade backup, one explicit YES risk acknowledgement is required before that y/N. No confirmation exists after reboot."
         )
+        if full_backup is None:
+            emergency = ui.prompt(pb.tr(
+                "BACKUP ОТСУТСТВУЕТ. ПРОДОЛЖЕНИЕ — НА РИСК ОПЕРАТОРА. Для продолжения введите YES: ",
+                "NO BACKUP IS AVAILABLE. CONTINUING IS AT THE OPERATOR'S RISK. Type YES to continue: ",
+            )).strip()
+            if emergency != "YES":
+                ui.status("STOP", pb.tr(
+                    "Операция отменена до записи; NAND не изменялась.",
+                    "Operation cancelled before write; NAND was not modified.",
+                ))
+                return 0
+
         answer = ui.prompt(
             pb.tr(
                 "Preflight пройден. Запустить всю показанную migration transaction? [д/Н]: ",
