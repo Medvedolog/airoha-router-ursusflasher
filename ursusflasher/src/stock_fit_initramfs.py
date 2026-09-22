@@ -324,12 +324,6 @@ def _build_md_proven_pregnant_slot(
         f"PRELOADER_SLOT_OFF=0x{PREGNANT_PRELOADER_OFF:08x}",
         f"PRELOADER_SIZE={len(vanilla_preloader)}",
         f"PRELOADER_SHA256={sha256_bytes(vanilla_preloader)}",
-        f"STOCK_BOOTLOADER_SHA256={str(evidence['bootloader_sha256']).lower()}",
-        f"STOCK_MASTER_SHA256={str(evidence['master_sha256']).lower()}",
-        f"STOCK_FLAGBACK_SHA256={str(evidence['flagback_sha256']).lower()}",
-        f"STOCK_FLAG_TAIL_SHA256={str(evidence['flag_tail_sha256']).lower()}",
-        f"STOCK_BOSA_SHA256={str(evidence['bosa_sha256']).lower()}",
-        f"STOCK_RI_SHA256={str(evidence['ri_sha256']).lower()}",
     ]
     body = ("\n".join(fields) + "\n").encode("ascii")
     manifest_sha = sha256_bytes(body)
@@ -422,7 +416,7 @@ def _build_md_proven_pregnant_slot(
         "final_kernel_hashes_refreshed": True,
         "handoff_linux_image_size": len(patched_handoff),
         "destructive_stage2_embedded": True,
-        "stock_evidence_embedded": True,
+        "stock_snapshot_hash_gates": False,
     })
     return bytes(out), meta
 
@@ -460,17 +454,9 @@ def build_pregnant_slot(
         raise RuntimeError("Vanilla FIP exceeds allowed carrier/canonical volume size")
     if not vanilla_preloader or len(vanilla_preloader) > 129024 or len(vanilla_preloader) > PREGNANT_PRELOADER_WINDOW:
         raise RuntimeError("Vanilla preloader does not fit BL2/carrier constraints")
-    required_evidence = (
-        "family", "profile", "bootloader_sha256", "master_sha256",
-        "flagback_sha256", "flag_tail_sha256", "bosa_sha256", "ri_sha256",
-    )
-    for key in required_evidence:
+    for key in ("family", "profile"):
         if key not in evidence:
-            raise RuntimeError(f"missing stock evidence field: {key}")
-    for key in required_evidence[2:]:
-        value = str(evidence[key]).lower()
-        if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
-            raise RuntimeError(f"invalid stock evidence SHA256: {key}")
+            raise RuntimeError(f"missing migration profile field: {key}")
 
     if str(evidence.get("family")) == "md":
         if handoff_linux is None:
@@ -502,23 +488,9 @@ def build_pregnant_slot(
     if len(vanilla_preloader) > PREGNANT_PRELOADER_WINDOW:
         raise RuntimeError("Vanilla preloader exceeds reserved SLOT2 window")
 
-    required_evidence = (
-        "family",
-        "profile",
-        "bootloader_sha256",
-        "master_sha256",
-        "flagback_sha256",
-        "flag_tail_sha256",
-        "bosa_sha256",
-        "ri_sha256",
-    )
-    for key in required_evidence:
+    for key in ("family", "profile"):
         if key not in evidence:
-            raise RuntimeError(f"missing stock evidence field: {key}")
-    for key in required_evidence[2:]:
-        value = str(evidence[key]).lower()
-        if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
-            raise RuntimeError(f"invalid stock evidence SHA256: {key}")
+            raise RuntimeError(f"missing migration profile field: {key}")
 
     base, wrapper = build_installer_slot(stock_slot, runtime_fit, slot_size=slot_size)
     runtime_off = int(wrapper["inner_fit_offset"])
@@ -556,12 +528,6 @@ def build_pregnant_slot(
         f"PRELOADER_SLOT_OFF=0x{PREGNANT_PRELOADER_OFF:08x}",
         f"PRELOADER_SIZE={len(vanilla_preloader)}",
         f"PRELOADER_SHA256={sha256_bytes(vanilla_preloader)}",
-        f"STOCK_BOOTLOADER_SHA256={str(evidence['bootloader_sha256']).lower()}",
-        f"STOCK_MASTER_SHA256={str(evidence['master_sha256']).lower()}",
-        f"STOCK_FLAGBACK_SHA256={str(evidence['flagback_sha256']).lower()}",
-        f"STOCK_FLAG_TAIL_SHA256={str(evidence['flag_tail_sha256']).lower()}",
-        f"STOCK_BOSA_SHA256={str(evidence['bosa_sha256']).lower()}",
-        f"STOCK_RI_SHA256={str(evidence['ri_sha256']).lower()}",
     ]
     body = ("\n".join(fields) + "\n").encode("ascii")
     manifest_sha = sha256_bytes(body)
@@ -604,6 +570,6 @@ def build_pregnant_slot(
         "preloader_size": len(vanilla_preloader),
         "preloader_sha256": sha256_bytes(vanilla_preloader),
         "destructive_stage2_embedded": True,
-        "stock_evidence_embedded": True,
+        "stock_snapshot_hash_gates": False,
     })
     return bytes(out), meta
