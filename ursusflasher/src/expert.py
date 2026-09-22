@@ -493,7 +493,7 @@ def _show_transition_action(state: ds.DeviceState) -> None:
     ui.menu_item(
         4,
         tr("Stock Nokia → Vanilla OpenWrt (pregnant migration)", "Stock Nokia → Vanilla OpenWrt (pregnant migration)"),
-        tr("ранее сделанный проверенный backup → pregnant SLOT2 → автономная UBI/UnameOne/FIP/BL2 migration; один y/N", "existing verified backup → pregnant SLOT2 → autonomous UBI/UnameOne/FIP/BL2 migration; one y/N"),
+        tr("путь к ранее сделанному backup опционален; без backup — отдельный YES риска → pregnant SLOT2 → автономная migration", "existing backup path is optional; without backup an extra risk YES is required → pregnant SLOT2 → autonomous migration"),
         write_capable=True,
         enabled=enabled,
         reason=reason,
@@ -503,8 +503,8 @@ def _show_transition_action(state: ds.DeviceState) -> None:
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     if number == 4:
         return (
-            "Путь к ранее сделанному проверенному backup → UBI-recovery pregnant SLOT2 → один y/N → readback/selector → автономная UBI → pinned UnameOne → identity → Vanilla FIP → BL2 last",
-            "Path to an existing verified backup → UBI-recovery pregnant SLOT2 → one y/N → readback/selector → autonomous UBI → pinned UnameOne → identity → Vanilla FIP → BL2 last",
+            "Путь к ранее сделанному backup [Enter — без backup] → live SLOT2/flag → pregnant SLOT2 → при отсутствии backup отдельный YES риска → обычный y/N → readback/selector → автономная UBI → pinned UnameOne → identity → Vanilla FIP → BL2 last",
+            "Existing backup path [Enter — without backup] → live SLOT2/flag → pregnant SLOT2 → without backup an extra risk YES → normal y/N → readback/selector → autonomous UBI → pinned UnameOne → identity → Vanilla FIP → BL2 last",
         )
     if number in app and not app[number].enabled:
         return "", ""
