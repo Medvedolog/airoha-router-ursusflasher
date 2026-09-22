@@ -73,7 +73,7 @@ def test_stock_wrapper_accepts_fit_smaller_than_nt_payload():
 
 def test_md_pregnant_carrier_accepts_external_image_data():
     src=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
-    assert "unique_covering_image" in src
+    assert "ntfw_staging_bounds_verified" in src
     assert 'fit_meta.get("fdt_data_offset")' in src
     assert 'props["/images/filesystem@1/data"]' not in src
     assert 'props["/images/fdt@1/data"]' not in src
@@ -127,42 +127,27 @@ def test_stock_fit_topology_is_derived_not_hardcoded():
     assert "selected_fit_nodes" in src
     assert "expected exactly one in-range HDR2/FIT boot payload" in src
     assert "stock_fdt_magic_ok" in src
-    assert "unique_covering_image" in src
+    assert "ntfw_staging_bounds_verified" in src
 
-def test_carrier_resolution_does_not_require_config_filesystem():
-    import struct
-    fit_off=0x1000
-    fit_total=0x200
-    nt_end=0x10000
-    blob=bytearray(b"\0"*nt_end)
-    props={
-        "/images/kernel-x/data-position": (0x20,4),
-        "/images/kernel-x/data-size": (0x24,4),
-        "/images/carrier-z/data-position": (0x28,4),
-        "/images/carrier-z/data-size": (0x2c,4),
-        "/configurations/cfg/kernel": (0x30,9),
-        "/configurations/default": (0x40,4),
-    }
-    struct.pack_into(">I",blob,0x20,0x400)
-    struct.pack_into(">I",blob,0x24,0x100)
-    struct.pack_into(">I",blob,0x28,0x1000)
-    struct.pack_into(">I",blob,0x2c,0x5000)
-    blob[0x30:0x39]=b"kernel-x\0"
-    blob[0x40:0x44]=b"cfg\0"
-    nodes=sfw.selected_fit_nodes(bytes(blob),props)
-    assert nodes["kernel"]=="kernel-x"
-    assert "filesystem" not in nodes
-    carrier=sfw.unique_covering_image(
-        bytes(blob),props,fit_off=fit_off,fit_total=fit_total,nt_end=nt_end,
-        begin=fit_off+0x1800,end=fit_off+0x3000,exclude_nodes=("kernel-x",)
-    )
-    assert carrier["node"]=="carrier-z"
+def test_md_staging_does_not_require_config_filesystem_or_fit_carrier():
+    wrapper=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
+    src=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
+    assert 'for role in ("fdt", "filesystem")' in wrapper
+    assert 'if key in props:' in wrapper
+    md=src[src.index("def _build_md_proven_pregnant_slot"):src.index("def build_pregnant_slot")]
+    assert "unique_covering_image(" not in md
+    assert "nt_off <= off < off + size <= nt_end" in md
+    assert '("active-kernel", int(fit_meta["kernel_data_offset"])' in md
+    assert '("active-fdt", int(fit_meta["fdt_data_offset"])' in md
+    assert "runtime_fit_off=runtime_ram_offset" in md
+    assert 'runtime_ram_offset + len(runtime_fit) > int(fit_meta["total_size"])' in md
+    assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_NTFW_STAGING_V2" in md
 
 
 def test_md_uses_hw_proven_stock_wrapper():
     sfi_source=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
     pregnant=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
-    assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_FILESYSTEM_CARRIER_V1" in sfi_source
+    assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_NTFW_STAGING_V2" in sfi_source
     assert "sfw.build_transition_slot(" in sfi_source
     assert "stock_tcboot_fdt_byte_identical" in sfi_source
     assert 'files["handoff"]' in pregnant
@@ -204,5 +189,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_carrier_resolution_does_not_require_config_filesystem(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_single_confirmation_boundary(); test_slot_layout_contract(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_md_uses_hw_proven_stock_wrapper(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
