@@ -714,5 +714,14 @@ def maximize_fresh_migration_rootfs_data(host: str, migration_status: dict) -> d
         'leb_size': leb_size,
     }
 
+
+def boot_once(host: str) -> dict:
+    """Boot the already validated initramfs/FIT from RAM without writing flash."""
+    result = _json(host, 'POST', '/api/expert/boot-once', timeout=15)
+    if result.get('result') != 'BOOT_ONCE_ARMED':
+        raise UrsusWebError(f'unexpected boot-once response: {result}')
+    return result
+
+
 def reboot(host: str) -> None:
     _json(host, 'POST', '/api/reboot', headers={'X-Ursus-Confirm': 'REBOOT'}, timeout=10)
