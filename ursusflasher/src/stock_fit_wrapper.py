@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import struct
+import zlib
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -300,7 +301,9 @@ def kernel_hash_fields(slot: bytes, props: dict[str, tuple[int, int]], kernel_no
         algo_key = fields.get("algo")
         if algo_key:
             raw = prop(slot, props, algo_key).rstrip(b"\0")
-            if raw == b"sha1":
+            if raw == b"crc32":
+                algo = "crc32"
+            elif raw == b"sha1":
                 algo = "sha1"
             elif raw == b"sha256":
                 algo = "sha256"
@@ -314,7 +317,7 @@ def kernel_hash_fields(slot: bytes, props: dict[str, tuple[int, int]], kernel_no
             algo = "sha256"
         else:
             continue
-        expected_len = 20 if algo == "sha1" else 32
+        expected_len = {"crc32": 4, "sha1": 20, "sha256": 32}[algo]
         if value_len != expected_len:
             continue
         out.append({
@@ -575,7 +578,12 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
         hash_off = int(field["value_offset"])
         hash_len = int(field["value_size"])
         algo = str(field["algorithm"])
-        digest = hashlib.sha1(kernel).digest() if algo == "sha1" else hashlib.sha256(kernel).digest()
+        if algo == "crc32":
+            digest = struct.pack(">I", zlib.crc32(kernel) & 0xFFFFFFFF)
+        elif algo == "sha1":
+            digest = hashlib.sha1(kernel).digest()
+        else:
+            digest = hashlib.sha256(kernel).digest()
         if len(digest) != hash_len:
             raise RuntimeError(f"resolved kernel hash length mismatch: {algo}/{hash_len}")
         out[hash_off:hash_off + hash_len] = digest
@@ -625,7 +633,9 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
                 "node": field["node"],
                 "algorithm": field["algorithm"],
                 "digest": (
-                    hashlib.sha1(kernel).hexdigest()
+                    f"{zlib.crc32(kernel) & 0xFFFFFFFF:08x}"
+                    if field["algorithm"] == "crc32"
+                    else hashlib.sha1(kernel).hexdigest()
                     if field["algorithm"] == "sha1"
                     else hashlib.sha256(kernel).hexdigest()
                 ),
