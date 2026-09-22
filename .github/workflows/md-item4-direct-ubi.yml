@@ -25,6 +25,7 @@ on:
       - 'START_EXPERT.sh'
       - 'ursusflasher/src/**'
       - 'ursusflasher/tools/selftest_item4_direct_ubi.py'
+      - 'ursusflasher/tools/selftest_network_faults.py'
       - 'config/**'
       - 'fw/**'
       - 'payloads/**'
@@ -55,6 +56,7 @@ jobs:
           set -euo pipefail
           python3 -m py_compile ursusflasher/src/*.py ursusflasher/tools/selftest_item4_direct_ubi.py scripts/*.py
           python3 ursusflasher/tools/selftest_item4_direct_ubi.py
+          python3 ursusflasher/tools/selftest_network_faults.py
 
       - name: Resolve the UrsusBoot release run for the pinned airoha-ursusboot commit
         id: runs

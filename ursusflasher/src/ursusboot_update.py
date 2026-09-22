@@ -1537,31 +1537,60 @@ def tftp_server_manual() -> None:
 
 
 def show_info() -> None:
-    """Diagnostic inventory only: missing/mismatched files are reported, never gated."""
+    """EXPERT item 12: read-only check of the kit files. Reports, never gates or writes."""
+    from proven_backend import tr
+
+    # 1) Whole kit: every file listed in SHA256SUMS (the public kit manifest).
+    sums = ROOT / 'SHA256SUMS'
+    bad: list[str] = []
+    checked = 0
+    if sums.is_file() and not REPO_MODE:
+        for raw in sums.read_text(encoding='utf-8').splitlines():
+            if not raw.strip():
+                continue
+            expected, rel = raw.split(None, 1)
+            rel = rel.strip().lstrip('*')
+            target = ROOT / rel
+            checked += 1
+            if not target.is_file():
+                bad.append(f'MISSING   {rel}')
+            elif sha256(target) != expected.lower():
+                bad.append(f'MISMATCH  {rel}')
+        print()
+        if bad:
+            ui.status(tr('ОШИБКА', 'ERROR'), tr(
+                f'SHA256SUMS: {len(bad)} из {checked} файлов не совпадают или отсутствуют. Перекачайте и распакуйте комплект заново.',
+                f'SHA256SUMS: {len(bad)} of {checked} files are missing or changed. Download and unpack the kit again.',
+            ))
+            for line in bad[:40]:
+                print('  ' + line)
+        else:
+            ui.status('OK', tr(f'SHA256SUMS: все {checked} файлов комплекта совпадают.',
+                               f'SHA256SUMS: all {checked} kit files match.'))
+    else:
+        ui.note(tr('SHA256SUMS нет (запуск из репозитория): проверяю только ключевые файлы.',
+                   'No SHA256SUMS (running from the repository): checking key files only.'))
+
+    # 2) Key boot files, per model, against their pinned digests.
     try:
         meta = _ursus_meta()
     except Exception:
         meta = {}
-    firmware_manifest = (ROOT / 'config' / 'FIRMWARE_BUNDLE.json') if REPO_MODE else (HERE / 'FIRMWARE_BUNDLE.json')
-    try:
-        fw_info = json.loads(firmware_manifest.read_text(encoding='utf-8')) if firmware_manifest.is_file() else {}
-    except Exception:
-        fw_info = {}
-
-    rows: list[tuple[str, Path, str | None]] = [
-        ('Production UrsusBoot alpha5-UBIUX1 FIP', PRODUCTION_PAYLOAD, (_production_meta()).get('fip_sha256')),
-        ('Emergency UrsusBoot alpha3 FIP', EMERGENCY_PAYLOAD, meta.get('emergency_fip_sha256')),
-        ('BootROM preloader', PRELOADER, meta.get('preloader_sha256')),
-        ('RAM installer FIP', RAM_INSTALLER, meta.get('ram_installer_fip_sha256')),
-        ('alpha3 BL2', BL2_IMAGE, meta.get('bl2_image_sha256')),
+    rows: list[tuple[str, Path, str | None]] = []
+    rel = ursusboot_release.load()
+    if rel:
+        print()
+        print(tr(f"UrsusBoot {rel.get('version')} из {rel.get('repo')}@{str(rel.get('commit'))[:12]}:",
+                 f"UrsusBoot {rel.get('version')} from {rel.get('repo')}@{str(rel.get('commit'))[:12]}:"))
+        for fam in ('md', 'mf'):
+            for role, info in sorted(((ursusboot_release.board(fam) or {}).get('files') or {}).items()):
+                rows.append((f'{fam.upper()} {role}', ROOT / info['path'], info.get('sha256')))
+    rows += [
+        ('MD UART/BootROM preloader (RC)', PRELOADER, meta.get('preloader_sha256')),
+        ('MD emergency UrsusBoot alpha3 FIP', EMERGENCY_PAYLOAD, meta.get('emergency_fip_sha256')),
+        ('MD RAM installer FIP', RAM_INSTALLER, meta.get('ram_installer_fip_sha256')),
+        ('MD alpha3 BL2', BL2_IMAGE, meta.get('bl2_image_sha256')),
     ]
-    for item in fw_info.get('files', []):
-        role = str(item.get('role') or item.get('path') or 'firmware')
-        rel = Path(str(item.get('path') or ''))
-        path = ROOT / rel
-        rows.append((role, path, str(item.get('sha256') or '') or None))
-
-    print('\nФайлы комплекта (диагностика; отсутствие файла не блокирует этот пункт):')
     seen: set[Path] = set()
     for label, path, expected in rows:
         key = path.resolve()
@@ -1569,16 +1598,14 @@ def show_info() -> None:
             continue
         seen.add(key)
         if not path.is_file():
-            print(f'  {label:<36} MISSING  {path}')
+            print(f'  {label:<36} MISSING  {path.name}')
             continue
-        size = path.stat().st_size
         digest = sha256(path)
-        if expected and digest.lower() != expected.lower():
-            state = 'MISMATCH'
-        else:
-            state = 'OK'
-        print(f'  {label:<36} {state:<8} {size:>9} bytes  sha256={digest}')
-    print('\n[INFO] Этот пункт ничего не записывает и не требует полного комплекта файлов.')
+        state = 'MISMATCH' if expected and digest.lower() != expected.lower() else 'OK'
+        print(f'  {label:<36} {state:<8} {path.stat().st_size:>9} bytes  sha256={digest}')
+    print()
+    ui.note(tr('Этот пункт только читает файлы на ПК; роутер не затрагивается.',
+               'This item only reads files on the PC; the router is not touched.'))
 
 
 def main(argv: list[str] | None = None) -> int:

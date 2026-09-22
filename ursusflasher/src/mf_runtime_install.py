@@ -111,10 +111,12 @@ def _open_stock_access_auto(host: str) -> pb.StockAccess:
     chipset = str(info.get("chipset") or "")
     match = bp.match_profile(model=model, soc=chipset)
     if not match or match[0] != "mf":
-        raise RuntimeError(
-            "stock device is not positively identified as Nokia XG-040G-MF / AN7583: "
-            f"model={info.get('model')} chipset={info.get('chipset')}"
-        )
+        raise RuntimeError(pb.tr(
+            "stock Web не подтвердил Nokia XG-040G-MF / AN7583 "
+            f"(model={info.get('model')} chipset={info.get('chipset')}); ничего не записано. Для XG-040G-MD выберите путь MD.",
+            "stock Web did not confirm Nokia XG-040G-MF / AN7583 "
+            f"(model={info.get('model')} chipset={info.get('chipset')}); nothing was written. For XG-040G-MD choose the MD path.",
+        ))
 
     pb._STARTUP_DEVICE_PROFILE.clear()
     pb._STARTUP_DEVICE_PROFILE.update({

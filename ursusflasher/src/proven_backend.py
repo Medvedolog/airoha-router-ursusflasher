@@ -2037,6 +2037,12 @@ class Telnet:
             accumulated += self.read(0.7, echo=echo)
             if regex.search(accumulated):
                 return accumulated
+            if getattr(self, "closed", False):
+                # EOF: recv() would return b"" forever; do not spin until the timeout.
+                raise Error(tr(
+                    f"Telnet-соединение закрыто роутером; маркер {pattern} не получен",
+                    f"Telnet connection closed by the router; marker {pattern} not received",
+                ))
         raise Error(f"тайм-аут Telnet: не найден маркер {pattern}")
 
     def command(self, command: str, timeout: int = 60, echo: bool = True) -> tuple[int, str]:
@@ -9931,8 +9937,8 @@ def require_supported_model_over_telnet(access: StockAccess, telnet: Telnet) -> 
     has_7581 = bool(re.search(r"(?i)(?:AN|EN)7581(?:DT)?", text))
     if has_7583:
         raise Error(tr(
-            "[СТОП] Telnet-проверка обнаружила чип AN/EN7583. Поддерживается только XG-040G-MD/AN7581. Backup и NAND-операции не начаты.",
-            "[STOP] The Telnet model check detected an AN/EN7583 chipset. Only XG-040G-MD/AN7581 is supported. Backup and NAND operations were not started.",
+            "[СТОП] Telnet-проверка обнаружила чип AN/EN7583 (XG-040G-MF), а выбран путь XG-040G-MD/AN7581. Backup и NAND-операции не начаты; выберите путь MF.",
+            "[STOP] The Telnet model check detected an AN/EN7583 chipset (XG-040G-MF), but the XG-040G-MD/AN7581 path was selected. Backup and NAND operations were not started; choose the MF path.",
         ))
     if has_7581:
         access.model_verified = True

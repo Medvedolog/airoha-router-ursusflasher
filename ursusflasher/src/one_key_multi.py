@@ -56,9 +56,18 @@ def _family(state: ds.DeviceState) -> str:
     match = bp.match_profile(model=state.model, soc=state.soc)
     if match:
         return match[0]
+    if state.current_system in ("UNKNOWN", "", None) and state.probe_status == ds.PROBE_FAILED:
+        raise RuntimeError(tr(
+            f"Роутер {state.host} не ответил ни по Web, ни по SSH. Проверьте кабель (LAN2/LAN3), "
+            "статический IP ПК в 192.168.1.x и что роутер загрузился; затем запустите снова. Ничего не записано.",
+            f"The router {state.host} answered neither Web nor SSH. Check the cable (LAN2/LAN3), "
+            "the PC's static IP in 192.168.1.x and that the router has booted; then run again. Nothing was written.",
+        ))
     raise RuntimeError(tr(
-        f"Не удалось однозначно определить MD/MF: model={state.model}, soc={state.soc}.",
-        f"Could not unambiguously identify MD/MF: model={state.model}, soc={state.soc}.",
+        f"Не удалось однозначно определить MD/MF: model={state.model}, soc={state.soc}. Ничего не записано; "
+        "в EXPERT модель можно выбрать вручную.",
+        f"Could not unambiguously identify MD/MF: model={state.model}, soc={state.soc}. Nothing was written; "
+        "EXPERT lets you choose the model manually.",
     ))
 
 

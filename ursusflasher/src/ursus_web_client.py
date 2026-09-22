@@ -16,6 +16,15 @@ DIAG_ROOT = KIT / "work" / "diagnostics"
 CHUNK = 0x10000
 UPLOAD_RETRIES = 2
 UPLOAD_RECONNECT_GRACE = 75.0
+# Link losses tolerated per chunk (each one reconciled against /api/status first).
+UPLOAD_CHUNK_ATTEMPTS = 5
+
+
+def _transient_web_error(exc: Exception) -> bool:
+    """HTTP 409/5xx and a truncated/invalid JSON reply are link symptoms, not verdicts."""
+    text = str(exc)
+    return ('HTTP 409' in text or 'invalid JSON' in text
+            or any(f'HTTP {code}' in text for code in (500, 502, 503, 504)))
 
 
 def _session_log(line: str) -> None:
@@ -327,14 +336,26 @@ def upload(host: str, path: Path, kind: str, *, progress=True) -> dict:
                 'X-Ursus-Offset': str(off),
                 'X-Ursus-Total': str(total),
             }
-            try:
-                last = _json(host, 'POST', chunk, headers=headers, body=data, timeout=90)
-            except (TimeoutError, OSError, http.client.HTTPException, UrsusWebError) as exc:
-                if isinstance(exc, UrsusWebError) and 'HTTP 409' not in str(exc):
-                    raise
-                _session_log(f'[WEB_UPLOAD_LINK_LOSS] kind={kind} generation={gen} offset={off} error={type(exc).__name__}:{exc}')
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    last = _json(host, 'POST', chunk, headers=headers, body=data, timeout=90)
+                    break
+                except (TimeoutError, OSError, http.client.HTTPException, UrsusWebError) as exc:
+                    if isinstance(exc, UrsusWebError) and not _transient_web_error(exc):
+                        raise
+                    _session_log(f'[WEB_UPLOAD_LINK_LOSS] kind={kind} generation={gen} offset={off} attempt={attempt} error={type(exc).__name__}:{exc}')
+                    if attempt >= UPLOAD_CHUNK_ATTEMPTS:
+                        return ask_restart(f'chunk-attempts-exhausted:{type(exc).__name__}:{exc}')
+                if progress:
+                    print()
+                    print(terms.tr(
+                        f'[СВЯЗЬ] Потеря связи на {off}/{total}; жду тот же RAM-сеанс UrsusBoot (попытка {attempt}/{UPLOAD_CHUNK_ATTEMPTS}). Flash не затрагивается.',
+                        f'[LINK] Connection lost at {off}/{total}; waiting for the same UrsusBoot RAM session (attempt {attempt}/{UPLOAD_CHUNK_ATTEMPTS}). Flash is not touched.',
+                    ))
                 deadline = time.time() + UPLOAD_RECONNECT_GRACE
-                reconciled = False
+                reconciled = None
                 session_seen = False
                 while time.time() < deadline:
                     try:
@@ -351,35 +372,25 @@ def upload(host: str, path: Path, kind: str, *, progress=True) -> dict:
                     session_seen = True
                     if received == off:
                         _session_log(f'[WEB_UPLOAD_RESUME] kind={kind} generation={gen} offset={off} action=resend-current-chunk')
-                        reconciled = True
+                        reconciled = 'resend'
                         break
-                    if received == off + len(data):
+                    if received == off + len(data) or received == total:
                         last = _upload_final_from_status(kind, st, gen, total) or {
                             'result': 'CHUNK_OK', 'generation': gen,
                             'declared_size': total, 'received': received,
                         }
-                        _session_log(f'[WEB_UPLOAD_RESUME] kind={kind} generation={gen} offset={off} action=chunk-already-acked')
-                        reconciled = True
+                        _session_log(f'[WEB_UPLOAD_RESUME] kind={kind} generation={gen} offset={off} action=chunk-already-acked received={received}')
+                        reconciled = 'acked'
                         break
-                    if received == total:
-                        final = _upload_final_from_status(kind, st, gen, total)
-                        if final is not None:
-                            last = final
-                            reconciled = True
-                            break
                     raise UrsusWebError(
                         f'upload reconcile mismatch: generation={sg!r} received={received} '
                         f'expected={off} or {off + len(data)} total={declared}'
                     )
-                if not reconciled:
+                if reconciled is None:
                     return ask_restart('reconnect-grace-expired' if not session_seen else 'session-not-reconcilable')
-                # If the current chunk was not committed, resend it once after
-                # the recovered session becomes reachable.
-                if int(last.get('received', off)) == off:
-                    try:
-                        last = _json(host, 'POST', chunk, headers=headers, body=data, timeout=90)
-                    except (TimeoutError, OSError, http.client.HTTPException, UrsusWebError) as retry_exc:
-                        return ask_restart(f'resend-after-grace:{type(retry_exc).__name__}:{retry_exc}')
+                if reconciled == 'acked':
+                    break
+                # reconciled == 'resend': the device still expects this chunk; loop and send it again.
 
             received = int(last.get('received', -1))
             declared = int(last.get('declared_size', -1))
@@ -477,6 +488,8 @@ def _poll(host: str, *, bootloader: bool, timeout: float = 420.0) -> dict:
             detail = st.get('operation_detail')
         key = (stage, pct, detail, active, complete, failed)
         if key != last_key:
+            # Progress is moving: a slow NAND is not a timeout.
+            deadline = max(deadline, time.time() + 180.0)
             try:
                 _session_log(f'[WEB_STATUS_RAW] stage={stage!r} percent={pct!r} detail={detail!r} active={active} complete={complete} failed={failed}')
                 _session_log('[URSUS_STATUS_FULL] ' + json.dumps(st, ensure_ascii=False, sort_keys=True, separators=(',', ':')))
