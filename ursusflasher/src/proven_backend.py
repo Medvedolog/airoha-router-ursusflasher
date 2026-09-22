@@ -6602,6 +6602,12 @@ def verify_stock_restore_backup(directory: Path) -> dict:
                 f"выбранный backup содержит OpenWrt all-in-UBI BL2 {preloader_label} "
                 "(FF 0x800 + preloader), а не исходный stock BL2"
             )
+    # Any (e.g. fast-scan) preloader FIP in the all-in-UBI layout, not only the known digests.
+    if stock_bl2[:0x800] == b"\xff" * 0x800 and stock_bl2[0x800:0x804] == struct.pack("<I", 0xAA640001):
+        raise Error(
+            "выбранный backup содержит OpenWrt all-in-UBI BL2 "
+            "(FF 0x800 + preloader FIP), а не исходный stock BL2"
+        )
 
     result = dict(validation)
     result["stock_restore"] = {

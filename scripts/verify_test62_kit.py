@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Verify a canonical MD direct item4 operator ZIP against the exact TEST62 artifact.
+"""Verify a canonical UrsusFlasher operator ZIP against the exact TEST62 CI artifacts.
 
-Fails (non-zero exit) unless the ZIP contains exactly the TEST62 FIP and the
-TEST62 fast BL2 from --artifacts, only the canonical launchers, runtime in
-data/, the _poll() /api/status-loss fix, backup reuse and the OpenWrt UBI
-sysupgrade route.
+Fails (non-zero exit) unless the ZIP contains, for MD (--artifacts) and, for a
+two-target kit, MF (--mf-artifacts): exactly the TEST62 UrsusBoot build and the
+fast BL2 preloader it was compiled to accept; plus only the canonical
+launchers, runtime in data/, the _poll() /api/status-loss fix, backup reuse and
+the OpenWrt UBI sysupgrade routes.
 """
 from __future__ import annotations
 
@@ -12,6 +13,7 @@ import argparse
 import hashlib
 import importlib
 import json
+import lzma
 import struct
 import sys
 import tempfile
@@ -26,6 +28,10 @@ from apply_md_test62_overlay import (  # noqa: E402
     TEST62_VERSION,
     tb_fw_payload,
 )
+import apply_mf_test62_overlay as mf  # noqa: E402
+
+MD_OLD_PRELOADER_SHA = "6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808"
+MF_OLD_PRELOADER_SHA = "778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e"
 
 LAUNCHERS = {"START_ONECLICK.cmd", "START_ONECLICK.sh", "START_EXPERT.cmd", "START_EXPERT.sh"}
 RUNTIME = (
@@ -122,13 +128,68 @@ def verify_test62(root: Path, art: Path) -> None:
     check(packed_bl2 == art_bl2, "preloader = FIP{TB_FW = TEST62 fast BL2 from artifact}",
           hashlib.sha256(packed_bl2).hexdigest())
     want = sha256(pre)
+    bl33 = (art / "u-boot.bin").read_bytes()
+    check(bytes.fromhex(want) in bl33 and bytes.fromhex(MD_OLD_PRELOADER_SHA) not in bl33
+          and MD_OLD_PRELOADER_SHA.encode() not in bl33,
+          "MD TEST62 BL33 pinned to the packaged fast preloader", want)
     manifest = json.loads((root / "data" / "FIRMWARE_BUNDLE.json").read_text(encoding="utf-8"))
     hit = [f for f in manifest["files"] if f.get("role") == "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE"]
     check(len(hit) == 1 and hit[0].get("sha256") == want and hit[0].get("provenance") == "TEST62 fast BL2",
           "FIRMWARE_BUNDLE preloader role -> TEST62 fast BL2", want)
+    check_bundles_role(root, "md", want)
     versions = {(root / "VERSION").read_text(encoding="utf-8").strip(),
                 (root / "data" / "VERSION").read_text(encoding="utf-8").strip()}
     check(len(versions) == 1 and TEST62_VERSION not in versions, "kit VERSION intact", ",".join(versions))
+
+
+def check_bundles_role(root: Path, family: str, want: str) -> None:
+    bundles = json.loads((root / "data" / "FIRMWARE_BUNDLES.json").read_text(encoding="utf-8"))
+    hit = [f for f in bundles["profiles"][family]["files"] if f.get("role") == "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE"]
+    check(len(hit) == 1 and hit[0].get("sha256") == want, f"FIRMWARE_BUNDLES {family} preloader role", want)
+
+
+def verify_mf(root: Path, art: Path) -> None:
+    pay = root / "data" / "payloads" / "mf"
+    info = (art / mf.BUILD_INFO).read_text(encoding="utf-8", errors="replace")
+    check(f"UrsusBoot {mf.MF_VERSION}" in info, "MF artifact identifies TEST62 runtime")
+    runtime = pay / "ursusboot" / mf.RUNTIME
+    check(sha256(runtime) == sha256(art / mf.RUNTIME), "MF runtime lzma == artifact", sha256(runtime))
+    bl33 = (art / "u-boot.bin").read_bytes()
+    check(lzma.decompress(runtime.read_bytes(), format=lzma.FORMAT_ALONE) == bl33,
+          "MF runtime lzma decompresses to artifact u-boot.bin")
+    check(mf.MF_VERSION.encode() in bl33 and b"Nokia XG-040G-MF" in bl33, "MF BL33 identity TEST62 / XG-040G-MF")
+    for name in (mf.RAM_FIP, mf.UART_PRELOADER):
+        check(sha256(pay / "recovery" / name) == sha256(art / name), f"MF recovery {name} == artifact")
+    old = sorted(p.name for p in pay.rglob("*TEST61*"))
+    check(not old, "no MF TEST61 payloads left", ",".join(old) or "none")
+
+    pre = pay / "proven" / mf.CANONICAL_PRELOADER
+    art_bl2 = (art / mf.FAST_BL2_NAME).read_bytes()
+    try:
+        art_bl2 = tb_fw_payload(art_bl2)
+    except RuntimeError:
+        pass
+    packed = tb_fw_payload(pre.read_bytes())
+    check(packed == art_bl2, "MF preloader = FIP{TB_FW = MF fast BL2 from artifact}", hashlib.sha256(packed).hexdigest())
+    want = sha256(pre)
+    check(bytes.fromhex(want) in bl33 and bytes.fromhex(MF_OLD_PRELOADER_SHA) not in bl33
+          and MF_OLD_PRELOADER_SHA.encode() not in bl33,
+          "MF TEST62 runtime pinned to the packaged fast preloader", want)
+    check_bundles_role(root, "mf", want)
+
+
+def verify_multi(root: Path, families: tuple[str, ...]) -> None:
+    okm = importlib.import_module("one_key_multi")
+    for fam in families:
+        for role in ("OPENWRT_UBI_SYSUPGRADE", "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE"):
+            p = Path(okm.require_role(fam, role)).resolve()
+            check(root.resolve() in p.parents, f"one_key_multi.require_role({fam}, {role})",
+                  p.relative_to(root.resolve()).as_posix())
+    if "mf" in families:
+        compat = importlib.import_module("mf_uart_test62_compat")
+        prof = compat.family_profile("mf")
+        check(prof["preloader"].name == mf.UART_PRELOADER and prof["fip"].name == mf.RAM_FIP
+              and root.resolve() in prof["fip"].parents, "MF UART recovery resolves to kit TEST62 pair")
 
 
 def verify_runtime(root: Path) -> None:
@@ -197,7 +258,8 @@ def verify_poll(uw) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--zip", required=True)
-    ap.add_argument("--artifacts", required=True)
+    ap.add_argument("--artifacts", required=True, help="MD TEST62 + fast BL2 artifact dir")
+    ap.add_argument("--mf-artifacts", default=None, help="MF TEST62 + fast BL2 artifact dir (two-target kit)")
     args = ap.parse_args()
     art = Path(args.artifacts).resolve()
     with tempfile.TemporaryDirectory() as td:
@@ -209,8 +271,15 @@ def main() -> None:
         verify_layout(root)
         verify_checksums(root)
         verify_test62(root, art)
+        families = ("md",)
+        if args.mf_artifacts:
+            verify_mf(root, Path(args.mf_artifacts).resolve())
+            families = ("md", "mf")
+        else:
+            check(not (root / "data" / "payloads" / "mf").exists(), "MD-only kit carries no MF payloads")
         verify_runtime(root)
-    print("verify_md_item4_kit: PASS")
+        verify_multi(root, families)
+    print("verify_test62_kit: PASS families=" + ",".join(families))
 
 
 if __name__ == "__main__":

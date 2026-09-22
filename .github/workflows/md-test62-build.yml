@@ -1,5 +1,9 @@
 name: MD AN7581 TEST62 + fast BL2
 
+# Builds the fast-scan AN7581 BL2 first, wraps it as the UBI preloader FIP,
+# then builds UrsusBoot TEST62 pinned to exactly that preloader (UrsusBoot
+# accepts a UBI preloader only by compiled-in SHA256).
+
 on:
   workflow_dispatch:
   push:
@@ -9,6 +13,9 @@ on:
     paths:
       - '.github/workflows/md-test62-build.yml'
       - 'scripts/hook_atf_fastpath_patch.py'
+      - 'scripts/wrap_bl2_preloader.py'
+      - 'scripts/apply_md_test62_overlay.py'
+      - 'ursusboot/scripts/pin_ubi_preloader.py'
       - 'ursusboot/scripts/build_alpha5_test62.sh'
       - 'ursusboot/patches/190-test62-buildid.patch'
       - 'ursusboot/patches/180-test61-safetyreg1.patch'
@@ -27,6 +34,8 @@ permissions:
 env:
   OPENWRT_REF: 3d1645ee26d6a2e20be71d7fa1716721bac78e53
   ATF_FASTPATH_COMMIT: 083c14faf832cb2de3d7dc8368dc8fb1c8f6a1e5
+  SOC: an7581
+  DEVICE: nokia_xg-040g-md-ubi
 
 jobs:
   build:
@@ -44,28 +53,19 @@ jobs:
           path: openwrt
           fetch-depth: 1
 
-      - name: Build TEST62 BL33/FIP
-        working-directory: kit
-        env:
-          JOBS: '2'
+      - name: Host dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends liblzma-dev
-          bash ursusboot/scripts/build_alpha5_test62.sh
-          grep -Fq 'UrsusBoot 0.1.0-alpha5-UBIUX1-TEST62' work/alpha5-test62-rebuild/out/TEST62-BUILD_INFO.txt
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib gettext git libncurses-dev libssl-dev liblzma-dev python3 python3-setuptools rsync swig unzip zlib1g-dev file wget jq time xz-utils zstd device-tree-compiler perl
 
-      - name: Host dependencies for patched BL2
-        run: |
-          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib gettext git libncurses-dev libssl-dev python3 python3-setuptools rsync swig unzip zlib1g-dev file wget jq time xz-utils zstd device-tree-compiler perl
-
-      - name: Configure MD OpenWrt
+      - name: Configure OpenWrt and build host tools/toolchain
         working-directory: openwrt
         run: |
           set -euo pipefail
-          cat > .config <<'EOF'
+          cat > .config <<EOF
           CONFIG_TARGET_airoha=y
-          CONFIG_TARGET_airoha_an7581=y
-          CONFIG_TARGET_airoha_an7581_DEVICE_nokia_xg-040g-md-ubi=y
+          CONFIG_TARGET_airoha_${SOC}=y
+          CONFIG_TARGET_airoha_${SOC}_DEVICE_${DEVICE}=y
           EOF
           make defconfig
           make download -j8
@@ -73,7 +73,7 @@ jobs:
           make -j"$(nproc)" tools/install V=s || make -j1 tools/install V=s
           make -j"$(nproc)" toolchain/install V=s || make -j1 toolchain/install V=s
 
-      - name: Build TEST62 fast BL2 (patch hooked into Build/Prepare)
+      - name: Build fast BL2 (patch hooked into Build/Prepare)
         working-directory: openwrt
         run: |
           set -euo pipefail
@@ -83,23 +83,37 @@ jobs:
           python3 ../kit/scripts/hook_atf_fastpath_patch.py --openwrt . \
             --patch "$GITHUB_WORKSPACE/kit/openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch"
           make package/boot/arm-trusted-firmware-airoha/clean
-          make -j"$(nproc)" package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee ../atf-md.log \
-            || make -j1 package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee -a ../atf-md.log
+          make -j"$(nproc)" package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee ../atf.log \
+            || make -j1 package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee -a ../atf.log
 
           # Prove that the tree which was compiled last is the patched one.
-          BL2DIR="$(find build_dir -maxdepth 2 -type d -name 'trusted-firmware-a-an7581-bl2' -print -quit)"
+          BL2DIR="$(find build_dir -maxdepth 2 -type d -name "trusted-firmware-a-${SOC}-bl2" -print -quit)"
           test -n "$BL2DIR"
           SRC="$(find "$BL2DIR" -path '*/plat/ecnt/en7523/bl2_boot_nand_ubi.c' -print -quit)"
           test -n "$SRC"
           grep -Fq 'nandflash_read_range' "$SRC"
           grep -Fq 'nandflash_read_oob' "$(dirname "$SRC")/../common/drivers/flash/spi_nand_flash.c"
-          grep -Fq 'patching file plat/ecnt/en7523/bl2_boot_nand_ubi.c' ../atf-md.log
-          BL2="staging_dir/target-aarch64_cortex-a53_musl/image/an7581-bl2.bin"
+          grep -Fq 'patching file plat/ecnt/en7523/bl2_boot_nand_ubi.c' ../atf.log
+          BL2="staging_dir/target-aarch64_cortex-a53_musl/image/${SOC}-bl2.bin"
           test -s "$BL2"
           test "$BL2" -nt "$SRC"
+          mkdir -p ../fastbl2
+          cp "$BL2" "../fastbl2/${SOC}-bl2.bin"
+          python3 ../kit/scripts/wrap_bl2_preloader.py --bl2 "../fastbl2/${SOC}-bl2.bin" --out ../fastbl2/preloader.fip | tee ../fastbl2/WRAP.txt
           ATF_SRC="$(sed -n 's/^[[:space:]]*SOURCE_VERSION:=//p' package/boot/arm-trusted-firmware-airoha/Makefile | head -n1)"
-          echo "ATF_SOURCE_VERSION=$ATF_SRC" | tee ../atf-source.txt
-          echo "ATF_FASTPATH_PATCH=PASS bl2=$BL2 sha256=$(sha256sum "$BL2" | cut -d' ' -f1)"
+          echo "ATF_SOURCE_VERSION=$ATF_SRC" | tee ../fastbl2/ATF.txt
+          echo "ATF_FASTPATH_PATCH_SHA256=$(sha256sum ../kit/openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch | cut -d' ' -f1)" | tee -a ../fastbl2/ATF.txt
+
+      - name: Build TEST62 BL33/FIP pinned to the fast preloader
+        working-directory: kit
+        env:
+          JOBS: '2'
+          URSUS_UBI_PRELOADER: ${{ github.workspace }}/fastbl2/preloader.fip
+        run: |
+          set -euo pipefail
+          bash ursusboot/scripts/build_alpha5_test62.sh
+          grep -Fq 'UrsusBoot 0.1.0-alpha5-UBIUX1-TEST62' work/alpha5-test62-rebuild/out/TEST62-BUILD_INFO.txt
+          grep -Fx "UBI_PRELOADER_SHA256=$(sha256sum "$URSUS_UBI_PRELOADER" | cut -d' ' -f1)" work/alpha5-test62-rebuild/out/TEST62-BUILD_INFO.txt
 
       - name: Assemble TEST62 artifact
         run: |
@@ -107,21 +121,30 @@ jobs:
           OUT=out-test62
           mkdir -p "$OUT"
           cp -a kit/work/alpha5-test62-rebuild/out/. "$OUT/"
-          BL2=openwrt/staging_dir/target-aarch64_cortex-a53_musl/image/an7581-bl2.bin
-          test -s "$BL2"
-          cp "$BL2" "$OUT/openwrt-airoha-an7581-nokia-xg040md-TEST62-fast-ubi-preloader.bin"
-          # BL33 inside the FIP is LZMA-compressed: check identity on raw u-boot.bin.
+          cp fastbl2/preloader.fip "$OUT/openwrt-airoha-an7581-nokia-xg040md-TEST62-fast-ubi-preloader.bin"
+          cp "fastbl2/${SOC}-bl2.bin" "$OUT/${SOC}-bl2.bin"
+          # BL33 inside the FIP is LZMA-compressed: check identity and pin on raw u-boot.bin.
           grep -aFq '0.1.0-alpha5-UBIUX1-TEST62' "$OUT/u-boot.bin"
+          python3 - "$OUT/u-boot.bin" fastbl2/preloader.fip <<'PY'
+          import hashlib, sys
+          raw = open(sys.argv[1], 'rb').read(); pre = open(sys.argv[2], 'rb').read()
+          cand = b'\xff' * 0x800 + pre; cand += b'\xff' * (0x20000 - len(cand))
+          gone = lambda h: bytes.fromhex(h) not in raw and h.encode() not in raw
+          assert hashlib.sha256(pre).digest() in raw, 'fast preloader digest not compiled in'
+          assert hashlib.sha256(cand).digest() in raw, 'fast BL2 image digest not compiled in'
+          assert gone('6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808'), 'old preloader digest survived'
+          assert gone('6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d'), 'old BL2 digest survived'
+          print('MD_TEST62_PIN=PASS')
+          PY
           test -s "$OUT/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST62-update.fip"
           sha256sum "$OUT"/*.bin "$OUT"/*.fip "$OUT"/*.lzma | sort > "$OUT/SHA256SUMS.TEST62"
-          cat >> "$OUT/TEST62-BUILD_INFO.txt" <<EOF
-          ATF_FASTPATH_COMMIT=${ATF_FASTPATH_COMMIT}
-          $(cat atf-source.txt)
-          ATF_FASTPATH_PATCH_SHA256=$(sha256sum kit/openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch | cut -d' ' -f1)
-          ATF_FASTPATH_BL2=PASS
-          LARGE_INITRAMFS_LMB_FIX=NOT_INCLUDED_IN_THIS_COMMIT
-          HW_STATUS=HW_PENDING
-          EOF
+          {
+            echo "ATF_FASTPATH_COMMIT=${ATF_FASTPATH_COMMIT}"
+            cat fastbl2/ATF.txt
+            echo "ATF_FASTPATH_BL2=PASS"
+            echo "LARGE_INITRAMFS_LMB_FIX=NOT_INCLUDED_IN_THIS_COMMIT"
+            echo "HW_STATUS=HW_PENDING"
+          } >> "$OUT/TEST62-BUILD_INFO.txt"
           cat "$OUT/TEST62-BUILD_INFO.txt"
 
       - uses: actions/upload-artifact@v4

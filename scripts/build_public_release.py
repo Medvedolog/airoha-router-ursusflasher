@@ -9,6 +9,7 @@ import zipfile
 from pathlib import Path
 from repo_common import ROOT, export_tree, write_manifest, sha256
 from apply_md_test62_overlay import apply_overlay
+from apply_mf_test62_overlay import apply_overlay as apply_mf_overlay
 
 KEEP_DOCS = {
     'INSTRUCTIONS_RU.md',
@@ -81,6 +82,7 @@ def main() -> None:
     ap.add_argument('--version', default=None)
     ap.add_argument('--target', choices=('all','md'), default='all')
     ap.add_argument('--md-test62-dir', default=None)
+    ap.add_argument('--mf-test62-dir', default=None)
     args = ap.parse_args()
 
     version = (ROOT / 'VERSION').read_text(encoding='utf-8').strip()
@@ -93,8 +95,14 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory() as td:
         tree = export_tree(Path(td) / name, target=args.target)
+        if args.target == 'all' and not (args.md_test62_dir and args.mf_test62_dir):
+            raise SystemExit('--target all needs both --md-test62-dir and --mf-test62-dir (MD and MF are equal targets)')
+        if args.target == 'md' and args.mf_test62_dir:
+            raise SystemExit('--mf-test62-dir requires --target all')
         if args.md_test62_dir:
             apply_overlay(tree, Path(args.md_test62_dir))
+        if args.mf_test62_dir:
+            apply_mf_overlay(tree, Path(args.mf_test62_dir))
         prune_public_tree(tree)
         zpath = out / f'{name}.zip'
         # Deterministic ZIP metadata. Files generated in the temporary export tree

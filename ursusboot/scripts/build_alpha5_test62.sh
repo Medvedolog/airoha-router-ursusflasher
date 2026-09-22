@@ -42,6 +42,11 @@ patch -d "$WORK/u-boot" -p1 < "$PATCH5"
 patch -d "$WORK/u-boot" -p1 < "$PATCH6"
 patch -d "$WORK/u-boot" -p1 < "$PATCH7"
 python3 "$POLICY_APPLIER" "$WORK/u-boot" "$BOARD_POLICY"
+# Optional: accept exactly the given (fast-scan) UBI preloader FIP instead of
+# the compiled-in HW-proven one; otherwise UrsusBoot rejects it by SHA256.
+if [ -n "${URSUS_UBI_PRELOADER:-}" ]; then
+    python3 "$ROOT/ursusboot/scripts/pin_ubi_preloader.py" --tree "$WORK/u-boot" --preloader "$URSUS_UBI_PRELOADER" --from md | tee "$WORK/ubi-preloader-pin.txt"
+fi
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
 [ -n "$SDK_ROOT" ] || { echo "SDK root not found" >&2; exit 1; }
 TC="$SDK_ROOT/staging_dir/toolchain-aarch64_cortex-a53_gcc-14.4.0_musl/bin"
@@ -101,4 +106,10 @@ PYQA
 sha256sum u-boot.bin u-boot.lzma ursusboot-md-0.1.0-alpha5-UBIUX1-TEST62-update.fip | tee "$OUT/SHA256SUMS"
 printf 'UrsusBoot 0.1.0-alpha5-UBIUX1-TEST62\nSOURCE_DATE_EPOCH=%s\nBUILD_UTC=2026-09-08 17:30:00 UTC\nIDENTITY1=PASS\nPROFILE=xg040-md\nSOC=AN7581\nDERIVATION=native-md\nBOARD_POLICY=%s\nPROFILE_KCONFIG=PASS\nNOAUTOFIP1=HOST\nUBIATTACH2=NO_DETACH_ON_ACTIVE_EXPECTED_UBI\nSESSIONRECOVERY1=PASS_SOURCE\nDIAGSTATE1=PASS\nATF_FASTPATH_UPSTREAM=083c14faf832cb2de3d7dc8368dc8fb1c8f6a1e5\nATF_FASTPATH_COMPONENT=BL2_PRELOADER_BUILT_BY_CI\nNT_FW_SPAN=%s\nBL33_LZMA=%s\nNT_FW_MARGIN=%s\nFIP_FILE_END=0x7b000\nFIP_PHYSICAL_END=0x7b800\nPROTECTED_ENV_OFFSET=0x7c000\nPROTECTED_ENV=UNCHANGED_BY_FIP_REPACK\n' "$RELEASE_EPOCH" "$POLICY_HEADER" "$NT_FW_SPAN" "$BL33_LZMA" "$NT_FW_MARGIN" > "$OUT/TEST62-BUILD_INFO.txt"
 echo "ALPHA5_TEST62_BUILD=PASS profile=${PROFILE} policy=${POLICY_HEADER}"
+if [ -n "${URSUS_UBI_PRELOADER:-}" ]; then
+    grep '^UBI_' "$WORK/ubi-preloader-pin.txt" >> "$OUT/TEST62-BUILD_INFO.txt"
+    PIN_SHA=$(sed -n 's/^UBI_PRELOADER_SHA256=//p' "$WORK/ubi-preloader-pin.txt")
+    grep -Fq "$PIN_SHA" "$WORK/u-boot.strings" || { echo "pinned UBI preloader digest missing from BL33" >&2; exit 1; }
+    ! grep -Fq 6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808 "$WORK/u-boot.strings" || { echo "old UBI preloader digest survived pin" >&2; exit 1; }
+fi
 echo "Artifacts: $OUT"

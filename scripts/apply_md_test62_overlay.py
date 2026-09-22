@@ -58,6 +58,33 @@ def tb_fw_payload(fip: bytes) -> bytes:
     return fip[off:off + size]
 
 
+def require_pinned(bl33: bytes, preloader: Path, label: str) -> None:
+    """UrsusBoot accepts only the preloader whose SHA256 is compiled into it."""
+    digest = sha256(preloader)
+    if bytes.fromhex(digest) not in bl33:  # the compiled-in array UrsusBoot memcmp()s against
+        raise RuntimeError(f"{label} is not pinned to the packaged UBI preloader {digest}; "
+                           "UrsusBoot would reject it (URSUS_UBI_PRELOADER_REJECT reason=sha256)")
+
+
+def set_preloader_role(tree: Path, family: str, preloader: Path, provenance: str) -> None:
+    """Point STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE at `preloader` in every manifest the host reads."""
+    rel = preloader.relative_to(tree).as_posix()
+    targets = [(tree / "data" / "FIRMWARE_BUNDLES.json", lambda m: m["profiles"][family]["files"])]
+    if family == "md":  # single-board manifest used by one_key / ursusboot_pregnant
+        targets.append((tree / "data" / "FIRMWARE_BUNDLE.json", lambda m: m["files"]))
+    for path, files_of in targets:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+        hits = [f for f in files_of(manifest) if f.get("role") == "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE"]
+        if len(hits) != 1:
+            raise RuntimeError(f"{path.name}: expected one {family} STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE")
+        if hits[0].get("path") != rel:
+            raise RuntimeError(f"{path.name}: {family} preloader path {hits[0].get('path')} != {rel}")
+        hits[0]["sha256"] = sha256(preloader)
+        hits[0]["size"] = preloader.stat().st_size
+        hits[0]["provenance"] = provenance
+        path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
+
+
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -88,6 +115,7 @@ def apply_overlay(tree: Path, artifacts: Path) -> None:
     raw_bl2 = preloader.read_bytes()
     dst_preloader.write_bytes(raw_bl2 if is_fip(raw_bl2) else wrap_tb_fw(raw_bl2))
     tb_fw_payload(dst_preloader.read_bytes())
+    require_pinned(raw.read_bytes(), dst_preloader, "MD TEST62 BL33")
     # Ship only the TEST62 candidate; a leftover TEST61 FIP must not be installable.
     for stale in payload_dir.glob("*TEST61*.fip"):
         stale.unlink()
@@ -108,31 +136,16 @@ def apply_overlay(tree: Path, artifacts: Path) -> None:
         newline="\n",
     )
 
-    manifest_path = tree / "data" / "FIRMWARE_BUNDLE.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    hits = [
-        item for item in manifest.get("files", [])
-        if item.get("role") == "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE"
-    ]
-    if len(hits) != 1:
-        raise RuntimeError("expected exactly one STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE")
-    hits[0]["sha256"] = sha256(dst_preloader)
-    hits[0]["size"] = dst_preloader.stat().st_size
-    hits[0]["provenance"] = "TEST62 fast BL2"
-    manifest_path.write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-        newline="\n",
-    )
+    set_preloader_role(tree, "md", dst_preloader, "TEST62 fast BL2")
 
     # VERSION is the UrsusFlasher kit version (shown and checked by the host);
     # the UrsusBoot TEST62 identity lives in ITEM4_TEMP_URSUSBOOT.json.
 
-    (tree / "TEST62_PROVENANCE.txt").write_text(
+    (tree / "MD_TEST62_PROVENANCE.txt").write_text(
         f"URSUSBOOT={TEST62_VERSION}\n"
         f"FIP_SHA256={sha256(dst_fip)}\n"
         f"RAW_BL33_SHA256={sha256(raw)}\n"
-        f"FAST_BL2_RAW_SHA256={sha256(preloader)}\n"
+        f"FAST_BL2_RAW_SHA256={hashlib.sha256(tb_fw_payload(dst_preloader.read_bytes())).hexdigest()}\n"
         f"FAST_BL2_PRELOADER_FIP_SHA256={sha256(dst_preloader)}\n",
         encoding="utf-8",
         newline="\n",

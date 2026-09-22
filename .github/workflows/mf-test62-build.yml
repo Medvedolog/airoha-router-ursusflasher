@@ -1,0 +1,183 @@
+name: MF AN7583 TEST62 + fast BL2
+
+# MF counterpart of "MD AN7581 TEST62 + fast BL2": fast-scan AN7583 BL2 ->
+# UBI preloader FIP -> MF UrsusBoot TEST62 runtime pinned to exactly that
+# preloader (UrsusBoot accepts a UBI preloader only by compiled-in SHA256).
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+      - claude/lucid-gauss-t0il1g
+    paths:
+      - '.github/workflows/mf-test62-build.yml'
+      - 'scripts/hook_atf_fastpath_patch.py'
+      - 'scripts/wrap_bl2_preloader.py'
+      - 'scripts/apply_md_test62_overlay.py'
+      - 'scripts/apply_mf_test62_overlay.py'
+      - 'ursusboot/scripts/pin_ubi_preloader.py'
+      - 'ursusboot/scripts/build_mf_runtime.sh'
+      - 'ursusboot/scripts/mf_runtime_enable.py'
+      - 'ursusboot/scripts/mf2_ramreadonly_transform.py'
+      - 'ursusboot/scripts/mf2_ramreadonly_transform_impl.py'
+      - 'ursusboot/scripts/mf_hwtest8_apply.py'
+      - 'ursusboot/scripts/mf2_repack_from_medve.py'
+      - 'ursusboot/scripts/mf3_persist2_validator.py'
+      - 'ursusboot/configs/**'
+      - 'ursusboot/board-policies/**'
+      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
+      - 'openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch'
+      - 'toolchains/**'
+
+permissions:
+  contents: read
+
+env:
+  OPENWRT_REF: 3d1645ee26d6a2e20be71d7fa1716721bac78e53
+  ATF_FASTPATH_COMMIT: 083c14faf832cb2de3d7dc8368dc8fb1c8f6a1e5
+  SOC: an7583
+  DEVICE: nokia_xg-040g-mf-ubi
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: kit
+          fetch-depth: 1
+      - uses: actions/checkout@v4
+        with:
+          repository: openwrt/openwrt
+          ref: ${{ env.OPENWRT_REF }}
+          path: openwrt
+          fetch-depth: 1
+      - name: Checkout pinned MedveFlasher rc35 MF donor/UART preloader
+        uses: actions/checkout@v4
+        with:
+          repository: Medvedolog/nokia-router-medveflasher
+          ref: 342cac4cb99a924f3d83eb8e4b5259490377704e
+          path: medveflasher-rc35
+
+      - name: Host dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib gettext git libncurses-dev libssl-dev liblzma-dev python3 python3-setuptools rsync swig unzip zlib1g-dev file wget jq time xz-utils zstd device-tree-compiler perl
+
+      - name: Configure OpenWrt and build host tools/toolchain
+        working-directory: openwrt
+        run: |
+          set -euo pipefail
+          cat > .config <<EOF
+          CONFIG_TARGET_airoha=y
+          CONFIG_TARGET_airoha_${SOC}=y
+          CONFIG_TARGET_airoha_${SOC}_DEVICE_${DEVICE}=y
+          EOF
+          make defconfig
+          make download -j8
+          find dl -type f -size -1024c -delete
+          make -j"$(nproc)" tools/install V=s || make -j1 tools/install V=s
+          make -j"$(nproc)" toolchain/install V=s || make -j1 toolchain/install V=s
+
+      - name: Build fast BL2 (patch hooked into Build/Prepare)
+        working-directory: openwrt
+        run: |
+          set -euo pipefail
+          python3 ../kit/scripts/hook_atf_fastpath_patch.py --openwrt . \
+            --patch "$GITHUB_WORKSPACE/kit/openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch"
+          make package/boot/arm-trusted-firmware-airoha/clean
+          make -j"$(nproc)" package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee ../atf.log \
+            || make -j1 package/boot/arm-trusted-firmware-airoha/compile V=s 2>&1 | tee -a ../atf.log
+
+          # Prove that the tree which was compiled last is the patched one.
+          BL2DIR="$(find build_dir -maxdepth 2 -type d -name "trusted-firmware-a-${SOC}-bl2" -print -quit)"
+          test -n "$BL2DIR"
+          SRC="$(find "$BL2DIR" -path '*/plat/ecnt/en7523/bl2_boot_nand_ubi.c' -print -quit)"
+          test -n "$SRC"
+          grep -Fq 'nandflash_read_range' "$SRC"
+          grep -Fq 'nandflash_read_oob' "$(dirname "$SRC")/../common/drivers/flash/spi_nand_flash.c"
+          grep -Fq 'patching file plat/ecnt/en7523/bl2_boot_nand_ubi.c' ../atf.log
+          BL2="staging_dir/target-aarch64_cortex-a53_musl/image/${SOC}-bl2.bin"
+          test -s "$BL2"
+          test "$BL2" -nt "$SRC"
+          mkdir -p ../fastbl2
+          cp "$BL2" "../fastbl2/${SOC}-bl2.bin"
+          python3 ../kit/scripts/wrap_bl2_preloader.py --bl2 "../fastbl2/${SOC}-bl2.bin" --out ../fastbl2/preloader.fip | tee ../fastbl2/WRAP.txt
+          ATF_SRC="$(sed -n 's/^[[:space:]]*SOURCE_VERSION:=//p' package/boot/arm-trusted-firmware-airoha/Makefile | head -n1)"
+          echo "ATF_SOURCE_VERSION=$ATF_SRC" | tee ../fastbl2/ATF.txt
+          echo "ATF_FASTPATH_PATCH_SHA256=$(sha256sum ../kit/openwrt/patches/atf-airoha-083c14f-ubi-scan-fastpath.patch | cut -d' ' -f1)" | tee -a ../fastbl2/ATF.txt
+
+      - name: Build MF TEST62 runtime pinned to the fast preloader
+        working-directory: kit
+        env:
+          JOBS: '2'
+          MF2_MEDVE_DIR: ${{ github.workspace }}/medveflasher-rc35
+          URSUS_UBI_PRELOADER: ${{ github.workspace }}/fastbl2/preloader.fip
+        run: |
+          set -euo pipefail
+          bash ursusboot/scripts/build_mf_runtime.sh
+          grep -Fx "UBI_PRELOADER_SHA256=$(sha256sum "$URSUS_UBI_PRELOADER" | cut -d' ' -f1)" work/mf-runtime/out/MF-RUNTIME-BUILD-INFO.txt
+
+      - name: Prove MF TEST62 binary contract
+        run: |
+          python3 - <<'PY'
+          import hashlib, lzma
+          from pathlib import Path
+          out = Path('kit/work/mf-runtime/out')
+          raw = lzma.decompress((out / 'u-boot.runtime.lzma').read_bytes(), format=lzma.FORMAT_ALONE)
+          assert raw == (out / 'u-boot.bin').read_bytes(), 'runtime lzma != u-boot.bin'
+          pre = Path('fastbl2/preloader.fip').read_bytes()
+          cand = b'\xff' * 0x800 + pre
+          cand += b'\xff' * (0x20000 - len(cand))
+          gone = lambda h: bytes.fromhex(h) not in raw and h.encode() not in raw
+          checks = {
+            'test62': b'0.1.0-TEST62' in raw,
+            'mf_identity': b'Nokia XG-040G-MF' in raw,
+            # the compiled-in arrays are what ursus_ubi_validate_preloader / BL2 candidate memcmp()
+            'fast_preloader_digest': hashlib.sha256(pre).digest() in raw,
+            'fast_bl2_image_digest': hashlib.sha256(cand).digest() in raw,
+            'old_mf_preloader_absent': gone('778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e'),
+            'old_mf_bl2_absent': gone('c655479c4d14b4f6d1a7a5eb8de80bfb204b3cdf46c9e48a5c6f3aea22d98131'),
+            'md_preloader_absent': gone('6c3b2339d036340396730a13adfe35c0d2a4dddedeffb6f9965a24e0c7908808'),
+            'md_bl2_absent': gone('6f9c928bad500de0339bbfdfa354c17a7ac044f96c913f3a01301971d6cd659d'),
+            'stockbridge_hdr3': b'URSUS_STOCKBOOT_%s_HDR3_INVALID' in raw,
+            'complete_serdes': b'URSUS_STOCKBOOT_TCBOOT_MF_ARGS pon=00 ethernet=12 wifi1=05 wifi2=05 usb1=00 usb2=02' in raw,
+            'selfupdate': b'URSUS_FIP_SELFUPDATE_ENABLED=1' in raw,
+            'ubi_migration': b'URSUS_UBI_MIGRATION_ENABLED=1' in raw,
+          }
+          for k, v in checks.items():
+              print(f'MF_RUNTIME_CHECK {k}={int(v)}')
+          bad = [k for k, v in checks.items() if not v]
+          if bad:
+              raise SystemExit('MF_RUNTIME_BINARY_CONTRACT_FAIL ' + ','.join(bad))
+          print('MF_RUNTIME_BINARY_CONTRACT=PASS bytes=' + str(len(raw)))
+          PY
+
+      - name: Assemble MF TEST62 artifact
+        run: |
+          set -euxo pipefail
+          OUT=out-mf-test62
+          mkdir -p "$OUT"
+          SRC=kit/work/mf-runtime/out
+          cp "$SRC/u-boot.runtime.lzma" "$SRC/u-boot.bin" "$SRC/ursusboot-mf-0.1.0-TEST62-runtime-ram.fip" \
+             "$SRC/ursusboot-mf-0.1.0-TEST62-uart-preloader.bin" "$SRC/MF-RUNTIME-BUILD-INFO.txt" \
+             "$SRC/MF-RUNTIME-FIP-REPACK.json" "$OUT/"
+          cp fastbl2/preloader.fip "$OUT/openwrt-airoha-an7583-nokia-xg040mf-TEST62-fast-ubi-preloader.bin"
+          cp "fastbl2/${SOC}-bl2.bin" "$OUT/${SOC}-bl2.bin"
+          {
+            echo "ATF_FASTPATH_COMMIT=${ATF_FASTPATH_COMMIT}"
+            cat fastbl2/ATF.txt
+            echo "ATF_FASTPATH_BL2=PASS"
+            echo "HW_STATUS=HW_PENDING"
+          } >> "$OUT/MF-RUNTIME-BUILD-INFO.txt"
+          (cd "$OUT" && sha256sum *.bin *.fip *.lzma | sort > SHA256SUMS.MF-TEST62)
+          cat "$OUT/MF-RUNTIME-BUILD-INFO.txt"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ursusboot-mf-TEST62-fast-bl2-${{ github.sha }}
+          path: out-mf-test62/
+          if-no-files-found: error
+          retention-days: 14
