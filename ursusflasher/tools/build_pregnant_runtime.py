@@ -511,18 +511,18 @@ def add_external_installer_ramdisk(runtime_fit: bytes, *, family: str, profile: 
     ramdisk_node = Node(
         "ursus-installer-ramdisk",
         [
-            ("description", b"Ursus autonomous installer payload\\0"),
+            ("description", b"Ursus autonomous installer payload\0"),
             ("data", ramdisk),
-            ("type", b"ramdisk\\0"),
-            ("arch", b"arm64\\0"),
-            ("os", b"linux\\0"),
-            ("compression", b"none\\0"),
+            ("type", b"ramdisk\0"),
+            ("arch", b"arm64\0"),
+            ("os", b"linux\0"),
+            ("compression", b"none\0"),
         ],
         [
             Node(
                 "hash-1",
                 [
-                    ("algo", b"sha256\\0"),
+                    ("algo", b"sha256\0"),
                     ("value", hashlib.sha256(ramdisk).digest()),
                 ],
                 [],
@@ -530,7 +530,7 @@ def add_external_installer_ramdisk(runtime_fit: bytes, *, family: str, profile: 
         ],
     )
     images.children.append(ramdisk_node)
-    config.set("ramdisk", b"ursus-installer-ramdisk\\0")
+    config.set("ramdisk", b"ursus-installer-ramdisk\0")
     out = fit.build()
 
     verify = Fdt(out)
