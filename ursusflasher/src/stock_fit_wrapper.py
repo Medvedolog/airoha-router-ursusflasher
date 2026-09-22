@@ -182,7 +182,7 @@ def _cstring(slot: bytes, props: dict[str, tuple[int, int]], key: str) -> str:
 
 
 def selected_fit_nodes(slot: bytes, props: dict[str, tuple[int, int]]) -> dict:
-    """Resolve the active FIT config and its referenced image nodes dynamically."""
+    """Resolve the active FIT config without assuming optional references."""
     config_names = sorted({
         key[len("/configurations/"):].split("/", 1)[0]
         for key in props
@@ -192,26 +192,87 @@ def selected_fit_nodes(slot: bytes, props: dict[str, tuple[int, int]]) -> dict:
     if "/configurations/default" in props:
         default = _cstring(slot, props, "/configurations/default")
     if not default:
-        usable = []
-        for name in config_names:
-            base = f"/configurations/{name}"
-            if all(f"{base}/{role}" in props for role in ("kernel", "fdt", "filesystem")):
-                usable.append(name)
+        usable = [
+            name for name in config_names
+            if f"/configurations/{name}/kernel" in props
+        ]
         if len(usable) != 1:
             raise RuntimeError(f"cannot resolve one active stock FIT configuration: {usable}")
         default = usable[0]
 
     base = f"/configurations/{default}"
-    refs = {}
-    for role in ("kernel", "fdt", "filesystem"):
+    kernel_key = f"{base}/kernel"
+    if kernel_key not in props:
+        raise RuntimeError("active stock FIT config lacks kernel reference")
+    kernel = _cstring(slot, props, kernel_key)
+    if not kernel:
+        raise RuntimeError("active stock FIT kernel reference is empty")
+
+    out = {"config": default, "kernel": kernel}
+    for role in ("fdt", "filesystem"):
         key = f"{base}/{role}"
-        if key not in props:
-            raise RuntimeError(f"active stock FIT config lacks {role} reference")
-        refs[role] = _cstring(slot, props, key)
-        if not refs[role]:
-            raise RuntimeError(f"active stock FIT {role} reference is empty")
-    refs["config"] = default
-    return refs
+        if key in props:
+            value = _cstring(slot, props, key)
+            if value:
+                out[role] = value
+    return out
+
+
+def image_nodes(props: dict[str, tuple[int, int]]) -> list[str]:
+    return sorted({
+        key[len("/images/"):].split("/", 1)[0]
+        for key in props
+        if key.startswith("/images/") and "/" in key[len("/images/"):]
+    })
+
+
+def image_ranges(
+    slot: bytes,
+    props: dict[str, tuple[int, int]],
+    *,
+    fit_off: int,
+    fit_total: int,
+    nt_end: int,
+) -> list[dict]:
+    """Return every image node with a valid, in-range payload span."""
+    out = []
+    for node in image_nodes(props):
+        try:
+            off, size = image_data_range(
+                slot, props, node,
+                fit_off=fit_off, fit_total=fit_total, nt_end=nt_end,
+            )
+        except RuntimeError:
+            continue
+        out.append({"node": node, "offset": off, "size": size, "end": off + size})
+    return out
+
+
+def unique_covering_image(
+    slot: bytes,
+    props: dict[str, tuple[int, int]],
+    *,
+    fit_off: int,
+    fit_total: int,
+    nt_end: int,
+    begin: int,
+    end: int,
+    exclude_nodes: tuple[str, ...] = (),
+) -> dict:
+    """Find the unique image payload that physically contains a required span."""
+    candidates = [
+        item for item in image_ranges(
+            slot, props, fit_off=fit_off, fit_total=fit_total, nt_end=nt_end
+        )
+        if item["node"] not in exclude_nodes
+        and int(item["offset"]) <= begin < end <= int(item["end"])
+    ]
+    if len(candidates) != 1:
+        summary = [(x["node"], hex(int(x["offset"])), hex(int(x["end"]))) for x in candidates]
+        raise RuntimeError(
+            f"required carrier span {begin:#x}..{end:#x} is not covered by exactly one stock FIT image: {summary}"
+        )
+    return candidates[0]
 
 
 def kernel_hash_fields(slot: bytes, props: dict[str, tuple[int, int]], kernel_node: str) -> list[dict]:
@@ -271,32 +332,32 @@ def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[di
     props, meta = fit_props(stock_slot, fit_off, nt_size)
     nodes = selected_fit_nodes(stock_slot, props)
     kernel_node = str(nodes["kernel"])
-    fdt_node = str(nodes["fdt"])
-    fs_node = str(nodes["filesystem"])
-
     nt_end = nt_off + nt_size
+
     kernel_off, kernel_len = image_data_range(
         stock_slot, props, kernel_node,
         fit_off=fit_off, fit_total=meta["total_size"], nt_end=nt_end,
     )
-    fdt_off, fdt_len = image_data_range(
-        stock_slot, props, fdt_node,
-        fit_off=fit_off, fit_total=meta["total_size"], nt_end=nt_end,
-    )
-    fs_off, fs_len = image_data_range(
-        stock_slot, props, fs_node,
-        fit_off=fit_off, fit_total=meta["total_size"], nt_end=nt_end,
-    )
 
-    # Properties below are telemetry unless they are directly needed to patch
-    # the existing node in place. Stock topology/data are preserved otherwise.
+    fdt_node = nodes.get("fdt")
+    fdt_off = fdt_len = None
+    fdt_magic_ok = None
+    if fdt_node:
+        try:
+            fdt_off, fdt_len = image_data_range(
+                stock_slot, props, str(fdt_node),
+                fit_off=fit_off, fit_total=meta["total_size"], nt_end=nt_end,
+            )
+            fdt_magic_ok = stock_slot[fdt_off:fdt_off + min(fdt_len,4)] == bytes.fromhex("d00dfeed")
+        except RuntimeError:
+            fdt_node = None
+            fdt_off = fdt_len = None
+
     kbase = f"/images/{kernel_node}"
     compression_key = f"{kbase}/compression"
     if compression_key in props:
-        stock_compression_raw = prop(stock_slot, props, compression_key)
-        stock_compression = stock_compression_raw.rstrip(b"\0").decode("ascii", "replace")
+        stock_compression = prop(stock_slot, props, compression_key).rstrip(b"\0").decode("ascii", "replace")
     else:
-        stock_compression_raw = b""
         stock_compression = "none"
 
     def optional_u32(key: str):
@@ -304,11 +365,6 @@ def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[di
             return None
         raw = prop(stock_slot, props, key)
         return struct.unpack(">I", raw)[0] if len(raw) == 4 else None
-
-    load = optional_u32(f"{kbase}/load")
-    entry = optional_u32(f"{kbase}/entry")
-    fdt_data = stock_slot[fdt_off:fdt_off + fdt_len]
-    fs_data = stock_slot[fs_off:fs_off + fs_len]
 
     hdr2_nt_size = struct.unpack_from("<I", stock_slot, nt_off + 0x08)[0] if nt_off + 0x0c <= len(stock_slot) else None
     hdr2_kernel_size = struct.unpack_from("<I", stock_slot, nt_off + 0x50)[0] if nt_off + 0x54 <= len(stock_slot) else None
@@ -318,24 +374,24 @@ def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[di
         "config_node": nodes["config"],
         "kernel_node": kernel_node,
         "fdt_node": fdt_node,
-        "filesystem_node": fs_node,
+        "filesystem_node": nodes.get("filesystem"),
         "kernel_data_offset": kernel_off,
         "kernel_data_size": kernel_len,
-        "filesystem_data_offset": fs_off,
-        "filesystem_data_size": fs_len,
         "fdt_data_offset": fdt_off,
         "fdt_data_size": fdt_len,
         "fit_trailing_payload_size": (nt_size - 0x100) - meta["total_size"],
-        "kernel_load": load,
-        "kernel_entry": entry,
+        "kernel_load": optional_u32(f"{kbase}/load"),
+        "kernel_entry": optional_u32(f"{kbase}/entry"),
         "stock_kernel_compression": stock_compression,
         "compression_key": compression_key if compression_key in props else None,
         "kernel_hash_fields": kernel_hash_fields(stock_slot, props, kernel_node),
-        "stock_fdt_magic_ok": fdt_data.startswith(bytes.fromhex("d00dfeed")),
-        "stock_filesystem_squashfs_magic": fs_data.startswith(b"hsqs"),
+        "stock_fdt_magic_ok": fdt_magic_ok,
         "hdr2_nt_size": hdr2_nt_size,
         "hdr2_kernel_size": hdr2_kernel_size,
         "hdr2_filesystem_size": hdr2_filesystem_size,
+        "image_ranges": image_ranges(
+            stock_slot, props, fit_off=fit_off, fit_total=meta["total_size"], nt_end=nt_end
+        ),
     })
     return props, meta
 
@@ -398,8 +454,8 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
         "fit_trailing_payload_size": fit_meta["fit_trailing_payload_size"],
         "config_node": fit_meta["config_node"],
         "kernel_node": fit_meta["kernel_node"],
-        "fdt_node": fit_meta["fdt_node"],
-        "filesystem_node": fit_meta["filesystem_node"],
+        "fdt_node": fit_meta.get("fdt_node"),
+        "filesystem_node": fit_meta.get("filesystem_node"),
         "kernel_data_size": kernel_size,
         "transition_linux_image_size": len(linux_image),
         "transition_kernel_padding": kernel_size - len(linux_image),
@@ -407,10 +463,8 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
         "kernel_entry": fit_meta["kernel_entry"],
         "stock_kernel_compression": fit_meta["stock_kernel_compression"],
         "transition_kernel_compression": "none",
-        "filesystem_data_size": fit_meta["filesystem_data_size"],
-        "fdt_data_size": fit_meta["fdt_data_size"],
-        "stock_fdt_magic_ok": fit_meta["stock_fdt_magic_ok"],
-        "stock_filesystem_squashfs_magic": fit_meta["stock_filesystem_squashfs_magic"],
+        "fdt_data_size": fit_meta.get("fdt_data_size"),
+        "stock_fdt_magic_ok": fit_meta.get("stock_fdt_magic_ok"),
         "hdr2_nt_size": fit_meta["hdr2_nt_size"],
         "hdr2_kernel_size": fit_meta["hdr2_kernel_size"],
         "hdr2_filesystem_size": fit_meta["hdr2_filesystem_size"],
@@ -430,6 +484,9 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
             for field in hash_fields
         ],
         "outer_fip_hdr2_byte_identical": bytes(out[:nt_off + 0x100]) == stock_slot[:nt_off + 0x100],
-        "stock_fdt_byte_identical": bytes(out[int(fit_meta["fdt_data_offset"]):int(fit_meta["fdt_data_offset"]) + int(fit_meta["fdt_data_size"])]) == stock_slot[int(fit_meta["fdt_data_offset"]):int(fit_meta["fdt_data_offset"]) + int(fit_meta["fdt_data_size"])],
-        "stock_filesystem_byte_identical": bytes(out[int(fit_meta["filesystem_data_offset"]):int(fit_meta["filesystem_data_offset"]) + int(fit_meta["filesystem_data_size"])]) == stock_slot[int(fit_meta["filesystem_data_offset"]):int(fit_meta["filesystem_data_offset"]) + int(fit_meta["filesystem_data_size"])],
+        "stock_fdt_byte_identical": (
+            True if fit_meta.get("fdt_data_offset") is None
+            else bytes(out[int(fit_meta["fdt_data_offset"]):int(fit_meta["fdt_data_offset"]) + int(fit_meta["fdt_data_size"])])
+            == stock_slot[int(fit_meta["fdt_data_offset"]):int(fit_meta["fdt_data_offset"]) + int(fit_meta["fdt_data_size"])]
+        ),
     }
