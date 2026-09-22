@@ -37,8 +37,9 @@ def test_item4_reuses_existing_verified_backup():
     assert 'run_dir / "full-stock-backup"' not in run
     assert "_choose_verified_stock_backup(policy, backup_path)" in run
     assert "pb.verify_stock_restore_backup(path)" in helper
-    assert "existing stock backup path is required for item 4" in helper
-    assert "Path to an existing complete stock backup" in helper
+    assert "continue WITHOUT backup" in helper
+    assert "return None, None" in helper
+    assert "existing stock backup path is required for item 4" not in helper
     assert "--backup" in source
 
 def test_slot_layout_contract():
