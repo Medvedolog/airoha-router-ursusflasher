@@ -393,7 +393,7 @@ def capability_report(state: ds.DeviceState) -> None:
         a = app[number]
         title = terms.action_title(a.key)
         if number == 4:
-            title = tr("Установить чистый OpenWrt через временный UrsusBoot Recovery", "Install clean OpenWrt via temporary UrsusBoot Recovery")
+            title = tr("Установить чистый OpenWrt с UrsusBoot Recovery", "Install clean OpenWrt with UrsusBoot Recovery")
         yes = tr("ДА", "YES") if a.enabled else tr("НЕТ", "NO")
         marker = "!" if a.write_capable else " "
         print(f" {marker} {number:2d}  {title:<42} {yes}")
@@ -493,8 +493,8 @@ def _show_transition_action(state: ds.DeviceState) -> None:
     reason = "" if enabled else tr("сейчас доступно только для подтверждённой Nokia stock XG-040G-MD", "currently available only for confirmed Nokia stock XG-040G-MD")
     ui.menu_item(
         4,
-        tr("Stock Nokia → Vanilla OpenWrt (pregnant migration)", "Stock Nokia → Vanilla OpenWrt (pregnant migration)"),
-        tr("временный UrsusBoot → Reset/Recovery → автономный pregnant ITB → после установки штатный OpenWrt Recovery/U-Boot с Fudan-патчем", "temporary UrsusBoot → Reset/Recovery → autonomous pregnant ITB → standard OpenWrt Recovery/U-Boot with Fudan patch after install"),
+        tr("Stock Nokia → OpenWrt UBI с UrsusBoot Recovery", "Stock Nokia → OpenWrt UBI with UrsusBoot Recovery"),
+        tr("UrsusBoot → Reset/Recovery → штатный STOCK→UBI backend → OpenWrt; UrsusBoot остаётся Recovery до отдельного перехода на Vanilla", "UrsusBoot → Reset/Recovery → native STOCK→UBI backend → OpenWrt; UrsusBoot remains Recovery until a separate Vanilla switch"),
         write_capable=True,
         enabled=enabled,
         reason=reason,
@@ -504,8 +504,8 @@ def _show_transition_action(state: ds.DeviceState) -> None:
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     if number == 4:
         return (
-            "Полный backup → один y/N → временный UrsusBoot в mtd0/readback → Reset/Recovery → autonomous ITB в RAM → UBI → pinned UnameOne → identity → Vanilla FIP → Vanilla BL2 last; UrsusBoot в финале удаляется",
-            "Full backup → one y/N → temporary UrsusBoot in mtd0/readback → Reset/Recovery → autonomous ITB in RAM → UBI → pinned UnameOne → identity → Vanilla FIP → Vanilla BL2 last; UrsusBoot is removed in the final state",
+            "Полный backup → один y/N → UrsusBoot в mtd0/readback → Reset/Recovery → production FIT + UBI preloader в RAM → штатный STOCK→UBI backend → OpenWrt; UrsusBoot Recovery сохраняется",
+            "Full backup → one y/N → UrsusBoot in mtd0/readback → Reset/Recovery → production FIT + UBI preloader in RAM → native STOCK→UBI backend → OpenWrt; UrsusBoot Recovery is retained",
         )
     if number in app and not app[number].enabled:
         return "", ""
@@ -580,7 +580,7 @@ def main() -> int:
         if number == 4:
             profile = _transition_profile(state)
             if profile != "xg040-md":
-                ui.status(tr("СТОП", "STOP"), tr("Новый временный UrsusBoot → autonomous pregnant путь сейчас открыт только для подтверждённой Nokia stock XG-040G-MD.", "The new temporary UrsusBoot → autonomous pregnant path is currently enabled only for confirmed Nokia stock XG-040G-MD."))
+                ui.status(tr("СТОП", "STOP"), tr("Прямой UrsusBoot STOCK→UBI путь сейчас открыт только для подтверждённой Nokia stock XG-040G-MD.", "The direct UrsusBoot STOCK→UBI path is currently enabled only for confirmed Nokia stock XG-040G-MD."))
                 ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
             network_guidance.show(host)
