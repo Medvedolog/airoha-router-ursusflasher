@@ -85,7 +85,7 @@ def test_stock_kernel_hash_algo_is_optional():
     import struct
     blob=bytearray(b"\0"*128)
     props={
-        "/images/kernel@1/hash@7/value": (16,20),
+        "/images/kernel-any/hash@7/value": (16,20),
     }
     blob[16:36]=b"x"*20
     fields=sfw.kernel_hash_fields(bytes(blob),props,"kernel-any")
@@ -98,8 +98,8 @@ def test_stock_kernel_hash_algo_is_optional():
     }]
 
     props256={
-        "/images/kernel@1/hash@2/algo": (40,7),
-        "/images/kernel@1/hash@2/value": (64,32),
+        "/images/kernel-any/hash@2/algo": (40,7),
+        "/images/kernel-any/hash@2/value": (64,32),
     }
     blob[40:47]=b"sha256\0"
     blob[64:96]=b"y"*32
