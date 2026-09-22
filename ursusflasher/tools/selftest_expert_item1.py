@@ -21,10 +21,20 @@ def test_expert_can_skip_full_backup():
         assert "[y/N]" not in block
         assert "EXPERT backup: Enter" in block
 
-    assert "def main(*, skip_full_backup: bool = False)" in one_key
+    assert "def main(*, skip_full_backup: bool = False, router_host: str | None = None)" in one_key
     assert "install_ursus_from_stock(stock_host, skip_full_backup=skip_full_backup)" in one_key
     assert "skip_full_backup=skip_full_backup" in install
     assert "full_stock_backup_skipped" in install
+    guidance = (SRC / "network_guidance.py").read_text(encoding="utf-8")
+    assert "def choose_router_host(" in guidance
+    assert "192.168.1.254" in guidance
+    assert "Wi-Fi" in guidance and "VPN" in guidance
+    assert "LAN2/LAN3" in guidance
+    for source in (expert, multi):
+        main = source[source.index("def main()"): ]
+        assert "choose_router_host(default_host)" in main
+        assert main.index("choose_router_host(default_host)") < main.index("probe_device_state(host)")
+        assert "router_host=host" in main
     assert "EXPERT: skip the full restore-grade backup for this run? [y/N]" not in multi
     helper=multi[multi.index("def _ask_skip_full_backup"):multi.index("def _project_root")]
     assert "[y/N]" not in helper
