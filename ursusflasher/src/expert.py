@@ -509,7 +509,7 @@ def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApp
     if number in app and not app[number].enabled:
         return "", ""
     if number == 1:
-        return ("Полный переход: резервная копия → UrsusBoot → комплектная OpenWrt; транспорт выбирается по текущей системе", "Full workflow: backup → UrsusBoot → bundled OpenWrt; transport follows the current system")
+        return ("Полный переход: EXPERT позволяет пропустить полный mtd0..mtd16 backup; live mtd0 capture → UrsusBoot → комплектная OpenWrt", "Full workflow: EXPERT may skip the full mtd0..mtd16 backup; live mtd0 capture → UrsusBoot → bundled OpenWrt")
     if number == 2:
         text = _bootloader_menu_detail(state, app[2]); return text, text
     if number == 3:
