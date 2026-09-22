@@ -251,7 +251,14 @@ def _build_md_proven_pregnant_slot(
     nt_off, nt_size = sfw.fip_nt_fw(stock_slot, slot_size=slot_size, nt_fw_uuid=nt_uuid)
     props, fit_meta = sfw.stock_fit_contract(stock_slot, nt_off, nt_size)
     fit_off = int(fit_meta["fit_offset"])
-    fs_off, fs_size = props["/images/filesystem@1/data"]
+    fs_off, fs_size = sfw.image_data_range(
+        stock_slot,
+        props,
+        "filesystem@1",
+        fit_off=fit_off,
+        fit_total=int(fit_meta["total_size"]),
+        nt_end=nt_off + nt_size,
+    )
     fs_end = fs_off + fs_size
 
     reserved = [
