@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import console_ui as ui
 import one_key
@@ -49,6 +50,57 @@ def _manual_recovery(host: str) -> dict:
             ))
 
 
+def _select_backup_policy() -> tuple[bool, Path | None]:
+    candidates = []
+    try:
+        candidates = sorted(
+            (
+                p for p in boot_install.FULL_BACKUPS.iterdir()
+                if p.is_dir() and (p / "BACKUP_COMPLETE").is_file()
+            ),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+    except FileNotFoundError:
+        pass
+
+    choice = ui.prompt(pb.tr(
+        "Backup: Enter — снять новый полный mtd0..mtd16; e — использовать существующий проверенный backup: ",
+        "Backup: Enter — create a new full mtd0..mtd16 backup; e — use an existing verified backup: ",
+    )).strip().lower()
+    if choice not in ("e", "existing", "с", "существующий"):
+        return False, None
+
+    default = candidates[0] if candidates else None
+    prompt = (
+        pb.tr(f"Путь к существующему backup [{default}]: ", f"Existing backup path [{default}]: ")
+        if default is not None
+        else pb.tr("Путь к существующему backup: ", "Existing backup path: ")
+    )
+    raw = ui.prompt(prompt).strip().strip('"')
+    path = Path(raw) if raw else default
+    if path is None:
+        raise RuntimeError(pb.tr("Не указан существующий backup.", "No existing backup was selected."))
+    path = path.expanduser().resolve()
+    if not path.is_dir():
+        raise RuntimeError(pb.tr(f"Каталог backup не найден: {path}", f"Backup directory not found: {path}"))
+
+    validation = pb.verify_stock_restore_backup(path)
+    family = str(validation.get("stock_restore", {}).get("device_family") or "").lower()
+    if family != "md":
+        raise RuntimeError(pb.tr(
+            f"Выбранный backup относится к {family or 'unknown'}, нужен Nokia XG-040G-MD.",
+            f"The selected backup belongs to {family or 'unknown'}; Nokia XG-040G-MD is required.",
+        ))
+    all_flash_sha = str(validation.get("stock_restore", {}).get("all_flash_sha256") or "")
+    ui.status("PASS", pb.tr(
+        f"Существующий stock backup прошёл restore-validator: {path} · all_flash {all_flash_sha}",
+        f"Existing stock backup passed the restore validator: {path} · all_flash {all_flash_sha}",
+    ))
+    pb._write_session_only(f"[ITEM4_DIRECT_UBI] existing_full_backup={path} validator=PASS family=md all_flash_sha256={all_flash_sha}")
+    return True, path
+
+
 def run_expert(*, host: str, profile: str) -> int:
     if profile != "xg040-md":
         raise RuntimeError(
@@ -72,6 +124,8 @@ def run_expert(*, host: str, profile: str) -> int:
         "Item 4 uses the native UrsusBoot STOCK->UBI migration backend. No pregnant initramfs or bootm is used. "
         "After OpenWrt installation, UrsusBoot remains the working Recovery bootloader. Switching to the Vanilla OpenWrt U-Boot is a separate operation.",
     ))
+    reuse_backup, _backup_path = _select_backup_policy()
+
     answer = ui.prompt(pb.tr(
         "Preflight payload пройден. Установить UrsusBoot, затем перевести Nokia STOCK в OpenWrt UBI? [y/N]: ",
         "Payload preflight passed. Install UrsusBoot, then migrate Nokia STOCK to OpenWrt UBI? [y/N]: ",
@@ -86,7 +140,7 @@ def run_expert(*, host: str, profile: str) -> int:
         recovery_after=True,
         recovery_host=host,
         route="stock",
-        skip_full_backup=False,
+        skip_full_backup=reuse_backup,
     )
     if rc:
         raise RuntimeError(f"UrsusBoot installation failed rc={rc}")
