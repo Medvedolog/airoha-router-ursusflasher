@@ -7,7 +7,7 @@ import json
 import shutil
 from pathlib import Path
 
-from build_pregnant_runtime import patch_fit
+from build_pregnant_runtime import add_external_installer_ramdisk, patch_fit
 
 ROOT = Path(__file__).resolve().parents[2]
 OVERLAY = ROOT / "openwrt" / "pregnant-overlay"
@@ -75,6 +75,20 @@ def build_family(
     runtime_blob, surgery = patch_fit(recovery.read_bytes(), OVERLAY, family)
     runtime.write_bytes(runtime_blob)
 
+    production_blob = production.read_bytes()
+    fip_blob = fip.read_bytes()
+    preloader_blob = preloader.read_bytes()
+    autonomous_blob, autonomous = add_external_installer_ramdisk(
+        runtime_blob,
+        family=family,
+        profile=profile,
+        production=production_blob,
+        vanilla_fip=fip_blob,
+        preloader=preloader_blob,
+    )
+    autonomous_itb = out / "pregnant-autonomous.itb"
+    autonomous_itb.write_bytes(autonomous_blob)
+
     prod_out = out / production.name
     fip_out = out / "vanilla-bl31-uboot.fip"
     pre_out = out / "vanilla-preloader.bin"
@@ -106,8 +120,10 @@ def build_family(
             "preloader_status": boot_profile["preloader"].get("status"),
             "bl2_written_last": True,
         },
+        "autonomous": autonomous,
         "files": {
             "runtime": file_spec(runtime, source="patched official OpenWrt UBI-recovery FIT"),
+            "pregnant_itb": file_spec(autonomous_itb, source="runtime FIT + external installer ramdisk"),
             "production": file_spec(prod_out, source="repository fw/ exact pinned UnameOne child"),
             "fip": file_spec(fip_out, source="pinned proven Vanilla boot chain"),
             "preloader": file_spec(pre_out, source="pinned proven Vanilla boot chain"),
@@ -117,6 +133,7 @@ def build_family(
     print(
         f"PREGNANT_PAYLOAD_{family.upper()}=PASS "
         f"runtime={payload['files']['runtime']['sha256']} "
+        f"pregnant_itb={payload['files']['pregnant_itb']['sha256']} size={payload['files']['pregnant_itb']['size']} "
         f"production={payload['files']['production']['sha256']} "
         f"fip={payload['files']['fip']['sha256']} preloader={payload['files']['preloader']['sha256']}"
     )
