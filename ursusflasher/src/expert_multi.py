@@ -273,7 +273,8 @@ def main() -> int:
 
     root = HERE.parent
     version = base.ui.package_version(root)
-    host = os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
+    default_host = os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
+    host = base.network_guidance.choose_router_host(default_host)
     while True:
         state = ds.probe_device_state(host)
         app = action_applicability(state)
@@ -320,7 +321,7 @@ def main() -> int:
                 base.ui.status(tr("СТОП", "STOP"), tr("Vanilla pregnant migration доступна только из подтверждённой Nokia stock MD/MF.", "Vanilla pregnant migration is available only from confirmed Nokia stock MD/MF."))
                 base.ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
-            base.network_guidance.show()
+            base.network_guidance.show(host)
             base.run_action(lambda: stock_ab_pregnant.run_expert(host=host, profile=profile), write_may_happen=True)
             continue
 
@@ -343,9 +344,9 @@ def main() -> int:
                     "EXPERT backup: Enter — full mtd0..mtd16; s — skip it and keep only the mandatory live mtd0 capture: ",
                 )).strip().lower()
                 skip_backup = choice in ("s", "skip", "п", "пропустить")
-            base.run_action(lambda: base.one_key.main(skip_full_backup=skip_backup), write_may_happen=True)
+            base.run_action(lambda: base.one_key.main(skip_full_backup=skip_backup, router_host=host), write_may_happen=True)
         elif number == 2:
-            base.network_guidance.show()
+            base.network_guidance.show(host)
             fresh_state = base._interactive_diagnostic_state(ds.probe_device_state(host))
             fresh_action = action_applicability(fresh_state)[2]
             if not fresh_action.enabled:
@@ -357,7 +358,7 @@ def main() -> int:
             print("  " + tr("Метод: ", "Method: ") + _menu_detail(2, fresh_state, {2: fresh_action})[0 if os.environ.get("NOKIA_LANG") != "en" else 1])
             base.run_action(lambda: run_bootloader_install_or_update(host, fresh_state), write_may_happen=True)
         elif number == 3:
-            base.network_guidance.show()
+            base.network_guidance.show(host)
             fresh_state = ds.probe_device_state(host)
             fresh_action = action_applicability(fresh_state)[3]
             if not fresh_action.enabled:
@@ -366,17 +367,17 @@ def main() -> int:
                 continue
             base.run_action(lambda: base.run_custom_openwrt(host, fresh_state, fresh_action), write_may_happen=True)
         elif number == 5:
-            base.network_guidance.show()
+            base.network_guidance.show(host)
             base.run_action(lambda: _run_ursus_recovery(state), write_may_happen=True)
         elif number == 6:
-            base.network_guidance.show()
+            base.network_guidance.show(host)
             base.run_action(lambda: base.stock_restore.restore_nokia(base._interactive_diagnostic_state(state)), write_may_happen=True)
         elif number == 7:
             base.run_action(lambda: _run_backup(state))
         elif number == 8:
             base.run_action(base.validate_backup)
         elif number == 9:
-            base.network_guidance.show()
+            base.network_guidance.show(host)
             base.ui.rule(tr("ВОССТАНОВЛЕНИЕ ЗАВОДСКОГО ЗАГРУЗЧИКА NOKIA", "RESTORE NOKIA FACTORY BOOTLOADER"), style="bad")
             base.ui.status(tr("ВНИМАНИЕ", "WARNING"), tr(
                 "Будет восстановлена заводская загрузочная область Nokia для выбранной модели.",
