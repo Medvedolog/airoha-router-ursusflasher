@@ -330,6 +330,44 @@ def kernel_hash_fields(slot: bytes, props: dict[str, tuple[int, int]], kernel_no
     return out
 
 
+def kernel_hash_nodes(props: dict[str, tuple[int, int]], kernel_node: str) -> set[str]:
+    """Return every kernel hash node with a value that U-Boot may verify."""
+    prefix = f"/images/{kernel_node}/"
+    out: set[str] = set()
+    for key in props:
+        if not key.startswith(prefix):
+            continue
+        node, _, name = key[len(prefix):].partition("/")
+        if node.startswith("hash") and name == "value":
+            out.add(node)
+    return out
+
+
+def assert_no_stale_kernel_hashes(
+    props: dict[str, tuple[int, int]], kernel_node: str, refreshed: set[str]
+) -> None:
+    """Refuse to replace a kernel while preserving any digest of the old bytes."""
+    stale = kernel_hash_nodes(props, kernel_node) - refreshed
+    if stale:
+        raise RuntimeError(
+            "refusing to build a TRANSITION slot with stale kernel digests: "
+            f"{kernel_node} hash node(s) {sorted(stale)} could not be recomputed "
+            "(unsupported algo, missing algo metadata, or unexpected value length); "
+            "U-Boot would reject the image at boot"
+        )
+
+
+def kernel_digest(algo: str, kernel: bytes) -> bytes:
+    """Compute a FIT kernel digest using U-Boot byte order."""
+    if algo == "crc32":
+        return struct.pack(">I", zlib.crc32(kernel) & 0xFFFFFFFF)
+    if algo == "sha1":
+        return hashlib.sha1(kernel).digest()
+    if algo == "sha256":
+        return hashlib.sha256(kernel).digest()
+    raise RuntimeError(f"unsupported kernel hash algorithm: {algo}")
+
+
 def stock_fit_contract(stock_slot: bytes, nt_off: int, nt_size: int) -> tuple[dict[str, tuple[int, int]], dict]:
     fit_off = nt_off + 0x100
     props, meta = fit_props(stock_slot, fit_off, nt_size)
@@ -458,6 +496,7 @@ def build_md_proven_transition_slot(
     hash_off, hash_len = props["/images/kernel@1/hash@1/value"]
     if hash_len != 20:
         raise RuntimeError("MD proven kernel@1 SHA1 field length is not 20")
+    assert_no_stale_kernel_hashes(props, "kernel@1", {"hash@1"})
 
     kernel = linux_image + (b"\0" * (kernel_size - len(linux_image)))
     out = bytearray(stock_slot)
@@ -574,16 +613,16 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
         allowed.append((comp_off, comp_off + comp_len))
 
     hash_fields = list(fit_meta.get("kernel_hash_fields") or [])
+    assert_no_stale_kernel_hashes(
+        props,
+        str(fit_meta["kernel_node"]),
+        {str(field["node"]) for field in hash_fields},
+    )
     for field in hash_fields:
         hash_off = int(field["value_offset"])
         hash_len = int(field["value_size"])
         algo = str(field["algorithm"])
-        if algo == "crc32":
-            digest = struct.pack(">I", zlib.crc32(kernel) & 0xFFFFFFFF)
-        elif algo == "sha1":
-            digest = hashlib.sha1(kernel).digest()
-        else:
-            digest = hashlib.sha256(kernel).digest()
+        digest = kernel_digest(algo, kernel)
         if len(digest) != hash_len:
             raise RuntimeError(f"resolved kernel hash length mismatch: {algo}/{hash_len}")
         out[hash_off:hash_off + hash_len] = digest
@@ -632,13 +671,7 @@ def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: i
             {
                 "node": field["node"],
                 "algorithm": field["algorithm"],
-                "digest": (
-                    f"{zlib.crc32(kernel) & 0xFFFFFFFF:08x}"
-                    if field["algorithm"] == "crc32"
-                    else hashlib.sha1(kernel).hexdigest()
-                    if field["algorithm"] == "sha1"
-                    else hashlib.sha256(kernel).hexdigest()
-                ),
+                "digest": kernel_digest(str(field["algorithm"]), kernel).hex(),
                 "algo_present": field["algo_present"],
             }
             for field in hash_fields
