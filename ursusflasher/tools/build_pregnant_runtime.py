@@ -450,6 +450,110 @@ def patch_fit(blob: bytes, overlay_root: Path, family: str):
     }
 
 
+
+def build_payload_cpio(files: dict[str, bytes], manifest: bytes) -> bytes:
+    entries: list[Entry] = []
+    ino = 100000
+    entries.append(new_entry("installer", b"", stat.S_IFDIR | 0o755, ino)); ino += 1
+    entries.append(new_entry("installer/PAYLOAD.env", manifest, stat.S_IFREG | 0o600, ino)); ino += 1
+    for name in ("production.itb", "vanilla.fip", "preloader.bin"):
+        data = files[name]
+        entries.append(new_entry("installer/" + name, data, stat.S_IFREG | 0o600, ino))
+        ino += 1
+    entries.append(new_entry("TRAILER!!!", b"", 0, ino))
+    return b"".join(build_entry(entry) for entry in entries)
+
+
+def add_external_installer_ramdisk(runtime_fit: bytes, *, family: str, profile: str,
+                                   production: bytes, vanilla_fip: bytes,
+                                   preloader: bytes) -> tuple[bytes, dict]:
+    if family not in ("md", "mf"):
+        raise ValueError(f"unsupported family {family}")
+    if not production or not vanilla_fip or not preloader:
+        raise ValueError("installer payload child is empty")
+
+    fields = [
+        "URSUS_PREGNANT_RAMDISK_V1",
+        "PAYLOAD_MODE=EMBEDDED_RAMDISK",
+        f"FAMILY={family}",
+        f"PROFILE={profile}",
+        f"PRODUCTION_SIZE={len(production)}",
+        f"PRODUCTION_SHA256={hashlib.sha256(production).hexdigest()}",
+        f"FIP_SIZE={len(vanilla_fip)}",
+        f"FIP_SHA256={hashlib.sha256(vanilla_fip).hexdigest()}",
+        f"PRELOADER_SIZE={len(preloader)}",
+        f"PRELOADER_SHA256={hashlib.sha256(preloader).hexdigest()}",
+    ]
+    body = ("\\n".join(fields) + "\\n").encode("ascii")
+    manifest = body + f"META_SHA256={hashlib.sha256(body).hexdigest()}\\n".encode("ascii")
+    ramdisk = build_payload_cpio(
+        {
+            "production.itb": production,
+            "vanilla.fip": vanilla_fip,
+            "preloader.bin": preloader,
+        },
+        manifest,
+    )
+
+    fit = Fdt(runtime_fit)
+    images = fit.node("/images")
+    configs = fit.node("/configurations")
+    if any(child.name == "ursus-installer-ramdisk" for child in images.children):
+        raise ValueError("installer ramdisk already present")
+
+    default_name = cstr(configs.get("default"))
+    if not default_name:
+        raise ValueError("FIT has no default configuration")
+    config = next((child for child in configs.children if child.name == default_name), None)
+    if config is None:
+        raise ValueError(f"default configuration {default_name!r} missing")
+
+    ramdisk_node = Node(
+        "ursus-installer-ramdisk",
+        [
+            ("description", b"Ursus autonomous installer payload\\0"),
+            ("data", ramdisk),
+            ("type", b"ramdisk\\0"),
+            ("arch", b"arm64\\0"),
+            ("os", b"linux\\0"),
+            ("compression", b"none\\0"),
+        ],
+        [
+            Node(
+                "hash-1",
+                [
+                    ("algo", b"sha256\\0"),
+                    ("value", hashlib.sha256(ramdisk).digest()),
+                ],
+                [],
+            )
+        ],
+    )
+    images.children.append(ramdisk_node)
+    config.set("ramdisk", b"ursus-installer-ramdisk\\0")
+    out = fit.build()
+
+    verify = Fdt(out)
+    vimages = [node for _path, node in verify.walk() if cstr(node.get("type")) == "ramdisk"]
+    if len(vimages) != 1 or vimages[0].name != "ursus-installer-ramdisk":
+        raise AssertionError("autonomous installer ramdisk missing after FIT rebuild")
+    vconfigs = verify.node("/configurations")
+    vdefault = cstr(vconfigs.get("default"))
+    vconfig = next(child for child in vconfigs.children if child.name == vdefault)
+    if cstr(vconfig.get("ramdisk")) != "ursus-installer-ramdisk":
+        raise AssertionError("default FIT config does not reference installer ramdisk")
+    if vimages[0].get("data") != ramdisk:
+        raise AssertionError("installer ramdisk bytes changed")
+
+    return out, {
+        "mode": "EMBEDDED_RAMDISK",
+        "ramdisk_size": len(ramdisk),
+        "ramdisk_sha256": hashlib.sha256(ramdisk).hexdigest(),
+        "fit_size": len(out),
+        "fit_sha256": hashlib.sha256(out).hexdigest(),
+        "kernel_load_unchanged": True,
+    }
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build UrsusFlasher pregnant UBI-recovery runtime by fixed-window newc/FIT surgery")
     parser.add_argument("--input", type=Path, required=True)
