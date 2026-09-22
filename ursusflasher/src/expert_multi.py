@@ -54,10 +54,10 @@ def _family_or_prompt(state: ds.DeviceState) -> str:
 
 def _ask_skip_full_backup() -> bool:
     answer = base.ui.prompt(tr(
-        "EXPERT: пропустить полный restore-grade backup для этого запуска? [y/N]: ",
-        "EXPERT: skip the full restore-grade backup for this run? [y/N]: ",
+        "EXPERT backup: Enter — полный mtd0..mtd16; s — пропустить и сохранить только обязательный live mtd0: ",
+        "EXPERT backup: Enter — full mtd0..mtd16; s — skip it and keep only the mandatory live mtd0 capture: ",
     )).strip().lower()
-    return answer in ("y", "yes", "д", "да")
+    return answer in ("s", "skip", "п", "пропустить")
 
 
 def _project_root() -> Path:
