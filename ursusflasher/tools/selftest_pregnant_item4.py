@@ -121,6 +121,18 @@ def test_postwrite_readback_reconnect_never_rewrites():
     assert 'access, telnet, got_flag = _readback_sha_with_reconnect(' in run
 
 
+def test_postwrite_readback_reconnect_does_not_require_web():
+    src=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
+    reopen=src[src.index("def _reopen_verified_stock_root"):src.index("def _readback_sha_with_reconnect")]
+    retry=src[src.index("def _readback_sha_with_reconnect"):src.index("def run(")]
+    assert "ubi.open_root_auto" not in reopen
+    assert "pb.login_root_family(access, policy.family, allow_service_provisioning=False)" in reopen
+    assert "current_access = current_telnet = None" not in retry
+    assert "_reopen_verified_stock_root(host, policy, current_access)" in retry
+    assert "close_web" in retry
+    assert "_write_partition" not in retry
+
+
 def test_stock_wrapper_accepts_fit_smaller_than_nt_payload():
     src=(SRC/"stock_fit_wrapper.py").read_text(encoding="utf-8")
     assert "total != nt_size - 0x100" not in src
@@ -392,5 +404,5 @@ def test_pinned_boot_chain_manifest():
     assembly=(ROOT/"ursusflasher"/"tools"/"assemble_pregnant_payload.py").read_text()
     assert "VANILLA_BOOT_CHAIN_PROFILES.json" in assembly
 
-test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_kernel_hash_refresh_is_fail_closed_and_crc32_big_endian(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_runtime_uses_exact_live_tail_span(); test_stage2_discovers_dynamic_manifest_and_offsets(); test_md_uses_hw_proven_stock_wrapper(); test_md_proven_wrapper_matches_hw_transition2_mutation_surface(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
+test_shipped_route(); test_confirmation_boundary(); test_item4_reuses_existing_verified_backup(); test_slot_layout_contract(); test_no_stock_snapshot_hash_gates(); test_runtime_safety_contract(); test_postwrite_readback_reconnect_does_not_require_web(); test_stock_wrapper_accepts_fit_smaller_than_nt_payload(); test_md_pregnant_carrier_accepts_external_image_data(); test_stock_kernel_hash_algo_is_optional(); test_kernel_hash_refresh_is_fail_closed_and_crc32_big_endian(); test_stock_fit_topology_is_derived_not_hardcoded(); test_md_staging_does_not_require_config_filesystem_or_fit_carrier(); test_runtime_ram_bound_uses_ntfw_not_fit_totalsize(); test_runtime_overlap_policy_matches_handoff_design(); test_md_runtime_uses_exact_live_tail_span(); test_stage2_discovers_dynamic_manifest_and_offsets(); test_md_uses_hw_proven_stock_wrapper(); test_md_proven_wrapper_matches_hw_transition2_mutation_surface(); test_md_handoff_is_networkless_and_returns_to_stock_ab(); test_pinned_unameone_manifest(); test_pinned_boot_chain_manifest()
 print("selftest_pregnant_item4: PASS")
