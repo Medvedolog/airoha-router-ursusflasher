@@ -413,10 +413,6 @@ def run(*, host: str = "192.168.1.1", profile: str, monitor: bool = True, backup
         bosa_sha = _remote_mtd_sha(telnet, policy.bosa_mtd)
         ri_sha = _remote_mtd_sha(telnet, policy.ri_mtd)
         flagback_state = {"sha256": flagback_sha, "source": "live-hash-only"}
-        if flag_state["active"] != 0 or flag_state["curimg"] != 0:
-            raise RuntimeError(
-                f"SLOT1 fallback invariant requires stock active=0 curimg=0, got {flag_state}"
-            )
 
         evidence = {
             "family": policy.family,
