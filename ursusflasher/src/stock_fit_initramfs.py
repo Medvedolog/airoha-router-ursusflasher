@@ -242,13 +242,12 @@ def _build_md_proven_pregnant_slot(
 ) -> tuple[bytes, dict]:
     """Build MD SLOT2 on the hardware-proven stock tcboot wrapper.
 
-    tcboot sees the original Nokia FIP/HDR2/FIT topology and original fdt@1.
-    Only kernel@1 data/compression/SHA1 follow the proven TRANSITION2 handoff.
-    The stock filesystem@1 data span is a carrier only; hardware logs prove
+    tcboot sees the original Nokia FIP/HDR2/FIT topology and original active FDT.
+    Only the active kernel payload plus existing compression/hash metadata are changed.
+    The stock active filesystem data span is a carrier only; hardware logs prove
     tcboot does not load it before starting the handoff kernel.
     """
-    nt_uuid = bytes.fromhex("d6d0eea7fcead54b97829934f234b6e4")
-    nt_off, nt_size = sfw.fip_nt_fw(stock_slot, slot_size=slot_size, nt_fw_uuid=nt_uuid)
+    nt_off, nt_size = sfw.fip_nt_fw(stock_slot, slot_size=slot_size)
     props, fit_meta = sfw.stock_fit_contract(stock_slot, nt_off, nt_size)
     fit_off = int(fit_meta["fit_offset"])
     fs_off = int(fit_meta["filesystem_data_offset"])
@@ -265,7 +264,7 @@ def _build_md_proven_pregnant_slot(
     for name, off, size in reserved:
         if off % 0x20000 or size % 0x20000 or not (fs_off <= off < off + size <= fs_end):
             raise RuntimeError(
-                f"MD pregnant carrier region {name} is outside stock filesystem@1 data: "
+                f"MD pregnant carrier region {name} is outside active stock filesystem data: "
                 f"region={off:#x}+{size:#x} filesystem={fs_off:#x}..{fs_end:#x}"
             )
     for i, (name_a, off_a, size_a) in enumerate(reserved):
@@ -287,7 +286,7 @@ def _build_md_proven_pregnant_slot(
         stock_slot,
         patched_handoff,
         slot_size=slot_size,
-        nt_fw_uuid=nt_uuid,
+        nt_fw_uuid=None,
     )
 
     fields = [
