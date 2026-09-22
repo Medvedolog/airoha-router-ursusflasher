@@ -23,6 +23,7 @@ from apply_md_test62_overlay import (  # noqa: E402
     FAST_BL2_NAME,
     FIP_NAME,
     TEST62_VERSION,
+    tb_fw_payload,
 )
 
 LAUNCHERS = {"START_ONECLICK.cmd", "START_ONECLICK.sh", "START_EXPERT.cmd", "START_EXPERT.sh"}
@@ -88,14 +89,22 @@ def verify_test62(root: Path, art: Path) -> None:
     check(temp.get("raw_bl33_sha256") == sha256(art / "u-boot.bin"), "ITEM4_TEMP raw_bl33_sha256")
 
     pre = ub / CANONICAL_PRELOADER
-    want = sha256(art / FAST_BL2_NAME)
-    check(sha256(pre) == want, "TEST62 fast BL2 preloader == artifact", want)
+    art_bl2 = (art / FAST_BL2_NAME).read_bytes()
+    try:
+        art_bl2 = tb_fw_payload(art_bl2)
+    except RuntimeError:
+        pass  # artifact carries the raw BL2
+    packed_bl2 = tb_fw_payload(pre.read_bytes())
+    check(packed_bl2 == art_bl2, "preloader = FIP{TB_FW = TEST62 fast BL2 from artifact}",
+          hashlib.sha256(packed_bl2).hexdigest())
+    want = sha256(pre)
     manifest = json.loads((root / "data" / "FIRMWARE_BUNDLE.json").read_text(encoding="utf-8"))
     hit = [f for f in manifest["files"] if f.get("role") == "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE"]
     check(len(hit) == 1 and hit[0].get("sha256") == want and hit[0].get("provenance") == "TEST62 fast BL2",
-          "FIRMWARE_BUNDLE preloader role -> TEST62 fast BL2")
-    for v in (root / "VERSION", root / "data" / "VERSION"):
-        check(v.read_text(encoding="utf-8").strip() == TEST62_VERSION, f"{v.relative_to(root)}")
+          "FIRMWARE_BUNDLE preloader role -> TEST62 fast BL2", want)
+    versions = {(root / "VERSION").read_text(encoding="utf-8").strip(),
+                (root / "data" / "VERSION").read_text(encoding="utf-8").strip()}
+    check(len(versions) == 1 and TEST62_VERSION not in versions, "kit VERSION intact", ",".join(versions))
 
 
 def verify_runtime(root: Path) -> None:

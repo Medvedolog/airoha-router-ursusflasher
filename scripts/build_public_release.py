@@ -94,8 +94,6 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as td:
         tree = export_tree(Path(td) / name, target=args.target)
         if args.md_test62_dir:
-            if args.target != 'md':
-                raise SystemExit('--md-test62-dir requires --target md')
             apply_overlay(tree, Path(args.md_test62_dir))
         prune_public_tree(tree)
         zpath = out / f'{name}.zip'
