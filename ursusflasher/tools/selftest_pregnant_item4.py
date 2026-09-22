@@ -438,7 +438,7 @@ def test_autonomous_fit_contract():
     assert '"type", b"ramdisk\\0"' in builder
     assert '"ramdisk", b"ursus-installer-ramdisk\\0"' in builder
     assert "pregnant-autonomous.itb" in payload
-    assert "kernel_load_unchanged" in builder
+    assert "kernel_unchanged" in builder\n    assert "autonomous FIT exceeds UrsusBoot 64 MiB staging" in builder
     assert "URSUS_PREGNANT_RAMDISK_V1" in stage2
     assert "/installer/production.itb" in stage2
     assert "/installer/vanilla.fip" in stage2
