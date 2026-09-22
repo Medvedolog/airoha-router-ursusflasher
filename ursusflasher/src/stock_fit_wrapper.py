@@ -510,6 +510,43 @@ def build_md_proven_transition_slot(
     }
 
 
+def build_md_transition_slot(
+    stock_slot: bytes,
+    linux_image: bytes,
+    *,
+    slot_size: int,
+    nt_fw_uuid: bytes | None = None,
+) -> tuple[bytes, dict]:
+    """Prefer the exact hardware-proven TRANSITION2 shape when present.
+
+    Node names are not an applicability gate: non-matching stock revisions fall
+    back to the generic structural builder.
+    """
+    nt_off, nt_size = fip_nt_fw(stock_slot, slot_size=slot_size, nt_fw_uuid=nt_fw_uuid)
+    fit_off = nt_off + 0x100
+    props, _meta = fit_props(stock_slot, fit_off, nt_size)
+    proven = {
+        "/configurations/default": b"conf@1\0",
+        "/configurations/conf@1/kernel": b"kernel@1\0",
+        "/configurations/conf@1/fdt": b"fdt@1\0",
+        "/configurations/conf@1/filesystem": b"filesystem@1\0",
+        "/images/kernel@1/hash@1/algo": b"sha1\0",
+    }
+    if all(key in props and prop(stock_slot, props, key) == value for key, value in proven.items()):
+        return build_md_proven_transition_slot(
+            stock_slot,
+            linux_image,
+            slot_size=slot_size,
+            nt_fw_uuid=nt_fw_uuid,
+        )
+    return build_transition_slot(
+        stock_slot,
+        linux_image,
+        slot_size=slot_size,
+        nt_fw_uuid=nt_fw_uuid,
+    )
+
+
 def build_transition_slot(stock_slot: bytes, linux_image: bytes, *, slot_size: int, nt_fw_uuid: bytes | None = None) -> tuple[bytes, dict]:
     validate_linux_image(linux_image)
     nt_off, nt_size = fip_nt_fw(stock_slot, slot_size=slot_size, nt_fw_uuid=nt_fw_uuid)
