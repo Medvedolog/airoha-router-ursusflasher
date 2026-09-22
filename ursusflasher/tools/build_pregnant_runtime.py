@@ -507,6 +507,16 @@ def add_external_installer_ramdisk(runtime_fit: bytes, *, family: str, profile: 
     config = next((child for child in configs.children if child.name == default_name), None)
     if config is None:
         raise ValueError(f"default configuration {default_name!r} missing")
+    kernel_name = cstr(config.get("kernel"))
+    kernel_node = next((child for child in images.children if child.name == kernel_name), None)
+    if kernel_node is None:
+        raise ValueError(f"default kernel {kernel_name!r} missing")
+    kernel_before = {
+        "data": kernel_node.get("data"),
+        "load": kernel_node.get("load"),
+        "entry": kernel_node.get("entry"),
+        "compression": kernel_node.get("compression"),
+    }
 
     ramdisk_node = Node(
         "ursus-installer-ramdisk",
@@ -544,6 +554,17 @@ def add_external_installer_ramdisk(runtime_fit: bytes, *, family: str, profile: 
         raise AssertionError("default FIT config does not reference installer ramdisk")
     if vimages[0].get("data") != ramdisk:
         raise AssertionError("installer ramdisk bytes changed")
+    vkernel = verify.node("/images/" + kernel_name)
+    kernel_after = {
+        "data": vkernel.get("data"),
+        "load": vkernel.get("load"),
+        "entry": vkernel.get("entry"),
+        "compression": vkernel.get("compression"),
+    }
+    if kernel_after != kernel_before:
+        raise AssertionError("autonomous ramdisk changed kernel bytes/load/entry/compression")
+    if len(out) > 64 * 1024 * 1024:
+        raise ValueError(f"autonomous FIT exceeds UrsusBoot 64 MiB staging: {len(out)}")
 
     return out, {
         "mode": "EMBEDDED_RAMDISK",
@@ -551,7 +572,8 @@ def add_external_installer_ramdisk(runtime_fit: bytes, *, family: str, profile: 
         "ramdisk_sha256": hashlib.sha256(ramdisk).hexdigest(),
         "fit_size": len(out),
         "fit_sha256": hashlib.sha256(out).hexdigest(),
-        "kernel_load_unchanged": True,
+        "kernel_unchanged": True,
+        "ursusboot_staging_limit": 64 * 1024 * 1024,
     }
 
 def main() -> int:
