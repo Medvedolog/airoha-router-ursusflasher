@@ -164,6 +164,17 @@ def test_stock_kernel_hash_algo_is_optional():
         "algo_present":False,
     }]
 
+    propscrc={
+        "/images/kernel-any/hash-1/algo": (96,6),
+        "/images/kernel-any/hash-1/value": (104,4),
+    }
+    blob[96:102]=b"crc32\0"
+    blob[104:108]=b"z"*4
+    fields=sfw.kernel_hash_fields(bytes(blob),propscrc,"kernel-any")
+    assert fields[0]["algorithm"]=="crc32"
+    assert fields[0]["node"]=="hash-1"
+    assert fields[0]["value_size"]==4
+
     props256={
         "/images/kernel-any/hash@2/algo": (40,7),
         "/images/kernel-any/hash@2/value": (64,32),
