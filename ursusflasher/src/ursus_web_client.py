@@ -401,21 +401,62 @@ def _poll(host: str, *, bootloader: bool, timeout: float = 420.0) -> dict:
         try:
             st = status(host)
             transport_failures = 0
-        except (TimeoutError, OSError, http.client.HTTPException) as exc:
+        except (TimeoutError, OSError, http.client.HTTPException, UrsusWebError) as exc:
             # Destructive UBI/MTD stages execute synchronously inside U-Boot and may
-            # temporarily starve lwIP/HTTP while NAND erase/write/readback is active.
-            # A single status socket timeout is therefore transport silence, not an
-            # operation failure. Keep polling until the global operation deadline.
+            # temporarily starve lwIP/HTTP. During a running operation even an HTTP
+            # 404/invalid JSON from /api/status is transport/API-surface loss, not
+            # proof that the flash transaction failed.
             transport_failures += 1
             now = time.time()
             try:
                 _session_log(f'[WEB_STATUS_RETRY] count={transport_failures} error={type(exc).__name__}:{exc}')
             except Exception:
                 pass
+
+            # /api/log is an independent evidence channel. If status disappears
+            # while U-Boot continues the autonomous transaction, accept only an
+            # explicit firmware-side COMPLETE/FAILED marker from the device log.
+            try:
+                log_text = _text(host, '/api/log', timeout=5)
+            except Exception:
+                log_text = ''
+            if log_text:
+                complete_markers = (
+                    'UBI: 100% - COMPLETE',
+                    'URSUS_UBI_MIGRATION_COMPLETE',
+                    'URSUS_UBI_UPDATE_COMPLETE',
+                    'URSUS_FIP_UPDATE_COMPLETE',
+                )
+                failed_markers = (
+                    'URSUS_UBI_MIGRATION_FAILED',
+                    'URSUS_UBI_UPDATE_FAILED',
+                    'URSUS_FIP_UPDATE_FAILED',
+                )
+                if any(marker in log_text for marker in failed_markers):
+                    tail = log_text[-4000:]
+                    _session_log('[WEB_STATUS_FALLBACK] device_log=FAILED')
+                    raise UrsusWebError(f'operation failed according to UrsusBoot device log: {tail}')
+                if any(marker in log_text for marker in complete_markers):
+                    _session_log('[WEB_STATUS_FALLBACK] device_log=COMPLETE')
+                    print(terms.tr(
+                        '[ГОТОВО] /api/status временно недоступен, но журнал UrsusBoot подтверждает COMPLETE.',
+                        '[DONE] /api/status is temporarily unavailable, but the UrsusBoot device log proves COMPLETE.'
+                    ))
+                    return {
+                        'product': 'UrsusBoot',
+                        'operation_active': False,
+                        'operation_complete': True,
+                        'operation_failed': False,
+                        'operation_stage': 'COMPLETE',
+                        'operation_percent': 100,
+                        'operation_detail': 'COMPLETE proven by /api/log fallback',
+                        'status_source': 'api-log-fallback',
+                    }
+
             if now - last_transport_notice >= 5.0:
                 print(terms.tr(
-                    '[ЖДУ] UrsusBoot занят операцией с NAND; Web может временно не отвечать. Продолжаю ждать, операция не считается ошибкой.',
-                    '[WAIT] UrsusBoot is busy with NAND; Web may be temporarily unresponsive. Waiting continues and this is not treated as an operation failure.'
+                    '[ЖДУ] UrsusBoot занят операцией с NAND; Web/API может временно не отвечать. Продолжаю ждать, операция не считается ошибкой.',
+                    '[WAIT] UrsusBoot is busy with NAND; Web/API may be temporarily unavailable. Waiting continues and this is not treated as an operation failure.'
                 ))
                 last_transport_notice = now
             time.sleep(1.0)
