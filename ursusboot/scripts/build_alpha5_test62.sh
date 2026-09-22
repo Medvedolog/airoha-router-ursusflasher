@@ -67,6 +67,13 @@ done
 make -j"${JOBS:-$(nproc)}"
 gcc -O2 -Wall -Wextra lzma1ext_noeopm.c -llzma -o "$WORK/lzma1ext_noeopm"
 "$WORK/lzma1ext_noeopm" u-boot.bin u-boot.lzma 1048576
+NT_FW_OFF=$((0x27800))
+CERT_FIRST=$((0x77800))
+NT_FW_SPAN=$((CERT_FIRST - NT_FW_OFF))
+BL33_LZMA=$(stat -c %s u-boot.lzma)
+NT_FW_MARGIN=$((NT_FW_SPAN - BL33_LZMA))
+printf 'NT_FW_SPAN=%u\nBL33_LZMA=%u\nNT_FW_MARGIN=%d\n' "$NT_FW_SPAN" "$BL33_LZMA" "$NT_FW_MARGIN"
+[ "$NT_FW_MARGIN" -ge 0 ] || { echo "TEST62 NT_FW overflow: compressed BL33 does not fit before certificate block" >&2; exit 1; }
 python3 repack_persistent_fip.py "$DONOR" u-boot.lzma ursusboot-md-0.1.0-alpha5-UBIUX1-TEST62-update.fip
 cp u-boot u-boot.bin u-boot.map u-boot.sym System.map u-boot.lzma ursusboot-md-0.1.0-alpha5-UBIUX1-TEST62-update.fip "$OUT/"
 EXPECTED_VERSION="0.1.0-alpha5-UBIUX1-TEST62"
@@ -86,10 +93,12 @@ for _ in range(32):
     if u==b'\0'*16: break
     if u==bytes.fromhex('d6d0eea7fcead54b97829934f234b6e4'): nt=(off,size)
     pos+=40
-assert nt and nt[0]+nt[1] <= 0x77800, nt
-print(f'FIP_BOUNDARY_QA=PASS size={len(d)} nt_end=0x{nt[0]+nt[1]:x} margin={0x77800-(nt[0]+nt[1])}')
+assert nt and nt[0] == 0x27800, nt
+assert nt[0]+nt[1] <= 0x77800, nt
+assert len(d) == 0x7b800, hex(len(d))
+print(f'FIP_BOUNDARY_QA=PASS fip_end=0x{len(d):x} cert_first=0x77800 protected_env=0x7c000 nt_off=0x{nt[0]:x} nt_size={nt[1]} nt_margin={0x77800-(nt[0]+nt[1])}')
 PYQA
 sha256sum u-boot.bin u-boot.lzma ursusboot-md-0.1.0-alpha5-UBIUX1-TEST62-update.fip | tee "$OUT/SHA256SUMS"
-printf 'UrsusBoot 0.1.0-alpha5-UBIUX1-TEST62\nSOURCE_DATE_EPOCH=%s\nBUILD_UTC=2026-09-08 17:30:00 UTC\nIDENTITY1=PASS\nPROFILE=xg040-md\nSOC=AN7581\nDERIVATION=native-md\nBOARD_POLICY=%s\nPROFILE_KCONFIG=PASS\nNOAUTOFIP1=HOST\nUBIATTACH2=NO_DETACH_ON_ACTIVE_EXPECTED_UBI\nSESSIONRECOVERY1=PASS_SOURCE\nDIAGSTATE1=PASS\nATF_FASTPATH_UPSTREAM=083c14faf832cb2de3d7dc8368dc8fb1c8f6a1e5\nATF_FASTPATH_COMPONENT=BL2_PRELOADER_BUILT_BY_CI\n' "$RELEASE_EPOCH" "$POLICY_HEADER" > "$OUT/TEST62-BUILD_INFO.txt"
+printf 'UrsusBoot 0.1.0-alpha5-UBIUX1-TEST62\nSOURCE_DATE_EPOCH=%s\nBUILD_UTC=2026-09-08 17:30:00 UTC\nIDENTITY1=PASS\nPROFILE=xg040-md\nSOC=AN7581\nDERIVATION=native-md\nBOARD_POLICY=%s\nPROFILE_KCONFIG=PASS\nNOAUTOFIP1=HOST\nUBIATTACH2=NO_DETACH_ON_ACTIVE_EXPECTED_UBI\nSESSIONRECOVERY1=PASS_SOURCE\nDIAGSTATE1=PASS\nATF_FASTPATH_UPSTREAM=083c14faf832cb2de3d7dc8368dc8fb1c8f6a1e5\nATF_FASTPATH_COMPONENT=BL2_PRELOADER_BUILT_BY_CI\nNT_FW_SPAN=%s\nBL33_LZMA=%s\nNT_FW_MARGIN=%s\nFIP_END=0x7b800\nPROTECTED_ENV_OFFSET=0x7c000\nPROTECTED_ENV=UNCHANGED_BY_FIP_REPACK\n' "$RELEASE_EPOCH" "$POLICY_HEADER" "$NT_FW_SPAN" "$BL33_LZMA" "$NT_FW_MARGIN" > "$OUT/TEST62-BUILD_INFO.txt"
 echo "ALPHA5_TEST62_BUILD=PASS profile=${PROFILE} policy=${POLICY_HEADER}"
 echo "Artifacts: $OUT"
