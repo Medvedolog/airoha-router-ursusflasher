@@ -258,35 +258,34 @@ def _build_md_proven_pregnant_slot(
         ("fip", PREGNANT_FIP_OFF, PREGNANT_FIP_WINDOW),
         ("preloader", PREGNANT_PRELOADER_OFF, PREGNANT_PRELOADER_WINDOW),
     ]
-    carrier_begin = min(off for _name, off, _size in reserved)
-    carrier_end = max(off + size for _name, off, size in reserved)
-    carrier = sfw.unique_covering_image(
-        stock_slot,
-        props,
-        fit_off=fit_off,
-        fit_total=int(fit_meta["total_size"]),
-        nt_end=nt_off + nt_size,
-        begin=carrier_begin,
-        end=carrier_end,
-        exclude_nodes=(str(fit_meta["kernel_node"]),),
-    )
-    carrier_off = int(carrier["offset"])
-    carrier_size = int(carrier["size"])
-    carrier_end_actual = int(carrier["end"])
+    nt_end = nt_off + nt_size
+    protected = [
+        ("active-kernel", int(fit_meta["kernel_data_offset"]), int(fit_meta["kernel_data_size"])),
+    ]
+    if fit_meta.get("fdt_data_offset") is not None:
+        protected.append(
+            ("active-fdt", int(fit_meta["fdt_data_offset"]), int(fit_meta["fdt_data_size"]))
+        )
 
     for name, off, size in reserved:
-        if off % 0x20000 or size % 0x20000 or not (carrier_off <= off < off + size <= carrier_end_actual):
+        if off % 0x20000 or size % 0x20000 or not (nt_off <= off < off + size <= nt_end):
             raise RuntimeError(
-                f"MD pregnant carrier region {name} is outside resolved stock FIT carrier: "
-                f"region={off:#x}+{size:#x} carrier={carrier_off:#x}..{carrier_end_actual:#x}"
+                f"MD pregnant staging region {name} is outside stock NT-FW payload: "
+                f"region={off:#x}+{size:#x} ntfw={nt_off:#x}..{nt_end:#x}"
             )
+        for protected_name, protected_off, protected_size in protected:
+            if _pregnant_overlap(off, size, protected_off, protected_size):
+                raise RuntimeError(
+                    f"MD pregnant staging region {name} overlaps {protected_name}: "
+                    f"region={off:#x}+{size:#x} protected={protected_off:#x}+{protected_size:#x}"
+                )
     for i, (name_a, off_a, size_a) in enumerate(reserved):
         for name_b, off_b, size_b in reserved[i + 1:]:
             if _pregnant_overlap(off_a, size_a, off_b, size_b):
                 raise RuntimeError(f"MD pregnant carrier regions overlap: {name_a}/{name_b}")
 
     if len(runtime_fit) > PREGNANT_RUNTIME_WINDOW:
-        raise RuntimeError("pregnant runtime exceeds resolved MD carrier window")
+        raise RuntimeError("pregnant runtime exceeds reserved MD runtime window")
     runtime_ram_offset = PREGNANT_RUNTIME_OFF - fit_off
     if runtime_ram_offset < 0 or runtime_ram_offset + len(runtime_fit) > int(fit_meta["total_size"]):
         raise RuntimeError("pregnant runtime is outside tcboot-loaded stock FIT memory")
@@ -350,15 +349,16 @@ def _build_md_proven_pregnant_slot(
         vanilla_preloader + b"\0" * (PREGNANT_PRELOADER_WINDOW - len(vanilla_preloader))
     )
 
-    # After the proven kernel wrapper, only the declared filesystem carrier
-    # windows may differ. Stock FIP/HDR2, FIT structure and fdt@1 remain exact.
+    # After the proven kernel wrapper, only the declared staging windows may
+    # differ. They are raw bytes inside stock NT-FW, not required to be a FIT
+    # image node. Active kernel/FDT are protected above.
     cursor = 0
     for _name, begin, size in sorted(reserved, key=lambda row: row[1]):
         if bytes(out[cursor:begin]) != base[cursor:begin]:
-            raise RuntimeError("unexpected MD pregnant byte change outside filesystem carrier")
+            raise RuntimeError("unexpected MD pregnant byte change outside declared staging windows")
         cursor = begin + size
     if bytes(out[cursor:]) != base[cursor:]:
-        raise RuntimeError("unexpected MD pregnant byte change after filesystem carrier")
+        raise RuntimeError("unexpected MD pregnant byte change after declared staging windows")
 
     if fit_meta.get("fdt_data_offset") is not None:
         fdt_off = int(fit_meta["fdt_data_offset"])
@@ -368,7 +368,7 @@ def _build_md_proven_pregnant_slot(
 
     meta = dict(wrapper)
     meta.update({
-        "wrapper_contract": "STOCK_FIP_HDR2_PROVEN_HANDOFF_FILESYSTEM_CARRIER_V1",
+        "wrapper_contract": "STOCK_FIP_HDR2_PROVEN_HANDOFF_NTFW_STAGING_V2",
         "candidate_sha256": sha256_bytes(bytes(out)),
         "runtime_offset": PREGNANT_RUNTIME_OFF,
         "runtime_size": len(runtime_fit),
@@ -389,10 +389,8 @@ def _build_md_proven_pregnant_slot(
         "preloader_sha256": sha256_bytes(vanilla_preloader),
         "stock_tcboot_fdt_byte_identical": True,
         "stock_fit_topology_preserved": True,
-        "carrier_node": carrier["node"],
-        "carrier_data_offset": carrier_off,
-        "carrier_data_size": carrier_size,
-        "carrier_node_preserved_except_declared_windows": True,
+        "ntfw_staging_bounds_verified": True,
+        "active_kernel_fdt_protected": True,
         "handoff_linux_image_size": len(patched_handoff),
         "destructive_stage2_embedded": True,
         "stock_evidence_embedded": True,
