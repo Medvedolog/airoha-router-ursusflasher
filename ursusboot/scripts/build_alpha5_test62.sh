@@ -16,7 +16,8 @@ PATCH2="$ROOT/ursusboot/patches/140-test57-diagcap-resetnet1.patch"
 PATCH3="$ROOT/ursusboot/patches/150-test58-buildid.patch"
 PATCH4="$ROOT/ursusboot/patches/160-test59-corrective.patch"
 PATCH5="$ROOT/ursusboot/patches/170-test60-configtrim1.patch"
-PATCH6="$ROOT/ursusboot/patches/180-test61-safetyreg1.patch"\nPATCH7="$ROOT/ursusboot/patches/190-test62-buildid.patch"
+PATCH6="$ROOT/ursusboot/patches/180-test61-safetyreg1.patch"
+PATCH7="$ROOT/ursusboot/patches/190-test62-buildid.patch"
 OUT="$WORK/out"
 RELEASE_EPOCH=1788888600  # 2026-09-08 17:30:00 UTC
 for x in tar make gcc perl python3 sha256sum patch; do command -v "$x" >/dev/null; done
@@ -38,7 +39,8 @@ patch -d "$WORK/u-boot" -p1 < "$PATCH2"
 patch -d "$WORK/u-boot" -p1 < "$PATCH3"
 patch -d "$WORK/u-boot" -p1 < "$PATCH4"
 patch -d "$WORK/u-boot" -p1 < "$PATCH5"
-patch -d "$WORK/u-boot" -p1 < "$PATCH6"\npatch -d "$WORK/u-boot" -p1 < "$PATCH7"
+patch -d "$WORK/u-boot" -p1 < "$PATCH6"
+patch -d "$WORK/u-boot" -p1 < "$PATCH7"
 python3 "$POLICY_APPLIER" "$WORK/u-boot" "$BOARD_POLICY"
 SDK_ROOT=$(find "$WORK/sdk" -mindepth 1 -maxdepth 1 -type d -name 'openwrt-sdk-*' | head -n1)
 [ -n "$SDK_ROOT" ] || { echo "SDK root not found" >&2; exit 1; }
