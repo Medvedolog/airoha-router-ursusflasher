@@ -242,7 +242,7 @@ def test_md_runtime_uses_exact_live_tail_span():
 def test_md_uses_hw_proven_stock_wrapper():
     sfi_source=(SRC/"stock_fit_initramfs.py").read_text(encoding="utf-8")
     pregnant=(SRC/"stock_ab_pregnant.py").read_text(encoding="utf-8")
-    assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_NTFW_STAGING_V2" in sfi_source
+    assert "STOCK_FIP_HDR2_PROVEN_HANDOFF_DYNAMIC_TAIL_V3" in sfi_source
     assert "sfw.build_transition_slot(" in sfi_source
     assert "stock_tcboot_fdt_byte_identical" in sfi_source
     assert 'files["handoff"]' in pregnant
