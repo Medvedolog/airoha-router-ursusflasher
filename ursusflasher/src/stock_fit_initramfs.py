@@ -254,30 +254,42 @@ def _build_md_proven_pregnant_slot(
     nt_end = nt_off + nt_size
     kernel_off = int(fit_meta["kernel_data_offset"])
     kernel_size = int(fit_meta["kernel_data_size"])
-    active_end = max(fit_off + int(fit_meta["total_size"]), kernel_off + kernel_size)
-    if fit_meta.get("fdt_data_offset") is not None:
-        active_end = max(
-            active_end,
-            int(fit_meta["fdt_data_offset"]) + int(fit_meta["fdt_data_size"]),
-        )
 
-    # Follow the hardware-proven TRANSITION2 rule: preserve the active stock
-    # kernel/FDT wrapper and use only trailing NT-FW bytes for additional data.
-    # Runtime placement is derived from the live SLOT2 layout, never a sample
-    # address. Keep the fixed manifest boundary so stage2 can find metadata.
-    runtime_off = (active_end + 0x1FFFF) & ~0x1FFFF
-    runtime_capacity = PREGNANT_META_OFF - runtime_off
-    if runtime_capacity <= 0 or len(runtime_fit) > runtime_capacity:
-        raise RuntimeError(
-            "pregnant runtime does not fit the live NT-FW tail before manifest: "
-            f"active_end={active_end:#x} runtime_off={runtime_off:#x} "
-            f"runtime_size={len(runtime_fit):#x} capacity={max(runtime_capacity, 0):#x}"
-        )
-    if not (nt_off <= runtime_off < runtime_off + len(runtime_fit) <= nt_end):
-        raise RuntimeError(
-            "derived pregnant runtime span is outside stock NT-FW payload: "
-            f"runtime={runtime_off:#x}+{len(runtime_fit):#x} ntfw={nt_off:#x}..{nt_end:#x}"
-        )
+    # Hardware-proven TRANSITION2 semantics: the FIT container and every
+    # resolved stock image payload are immutable carriers. Pregnant data lives
+    # only after the last occupied stock byte, aligned to NAND eraseblocks.
+    occupied = [(nt_off, fit_off + int(fit_meta["total_size"]))]
+    for image in fit_meta.get("image_ranges") or []:
+        occupied.append((int(image["offset"]), int(image["end"])))
+    occupied_end = max(end for _begin, end in occupied)
+    cursor = (occupied_end + 0x1FFFF) & ~0x1FFFF
+
+    def alloc(name: str, size: int) -> tuple[str, int, int]:
+        nonlocal cursor
+        if size <= 0:
+            raise RuntimeError(f"pregnant payload {name} is empty")
+        off = cursor
+        end = off + size
+        if end > nt_end:
+            raise RuntimeError(
+                f"pregnant payloads do not fit free NT-FW tail: {name} "
+                f"needs {off:#x}..{end:#x}, ntfw ends at {nt_end:#x}"
+            )
+        cursor = (end + 0x1FFFF) & ~0x1FFFF
+        return name, off, size
+
+    runtime_region = alloc("runtime", len(runtime_fit))
+    meta_region = alloc("manifest", PREGNANT_META_SIZE)
+    production_region = alloc("production", len(production_itb))
+    fip_region = alloc("fip", len(vanilla_fip))
+    preloader_region = alloc("preloader", len(vanilla_preloader))
+    reserved = [runtime_region, meta_region, production_region, fip_region, preloader_region]
+
+    runtime_off = runtime_region[1]
+    meta_off = meta_region[1]
+    production_off = production_region[1]
+    fip_off = fip_region[1]
+    preloader_off = preloader_region[1]
 
     runtime_ram_offset = runtime_off - fit_off
     loaded_nt_payload_size = nt_size - (fit_off - nt_off)
@@ -292,14 +304,6 @@ def _build_md_proven_pregnant_slot(
         runtime_fit_off=runtime_ram_offset,
         runtime_fit_size=len(runtime_fit),
     )
-
-    reserved = [
-        ("runtime", runtime_off, len(runtime_fit)),
-        ("manifest", PREGNANT_META_OFF, PREGNANT_META_SIZE),
-        ("production", PREGNANT_PRODUCTION_OFF, len(production_itb)),
-        ("fip", PREGNANT_FIP_OFF, len(vanilla_fip)),
-        ("preloader", PREGNANT_PRELOADER_OFF, len(vanilla_preloader)),
-    ]
 
     # The live-tail placement above already starts after active kernel/FDT.
     # Keep these spans protected as a structural invariant of the proven
@@ -341,17 +345,17 @@ def _build_md_proven_pregnant_slot(
         f"FAMILY={evidence['family']}",
         f"PROFILE={evidence['profile']}",
         f"SLOT_SIZE=0x{slot_size:08x}",
-        f"META_SLOT_OFF=0x{PREGNANT_META_OFF:08x}",
+        f"META_SLOT_OFF=0x{meta_off:08x}",
         f"RUNTIME_FIT_SLOT_OFF=0x{runtime_off:08x}",
         f"RUNTIME_FIT_SIZE={len(runtime_fit)}",
         f"RUNTIME_FIT_SHA256={sha256_bytes(runtime_fit)}",
-        f"PRODUCTION_SLOT_OFF=0x{PREGNANT_PRODUCTION_OFF:08x}",
+        f"PRODUCTION_SLOT_OFF=0x{production_off:08x}",
         f"PRODUCTION_SIZE={len(production_itb)}",
         f"PRODUCTION_SHA256={sha256_bytes(production_itb)}",
-        f"FIP_SLOT_OFF=0x{PREGNANT_FIP_OFF:08x}",
+        f"FIP_SLOT_OFF=0x{fip_off:08x}",
         f"FIP_SIZE={len(vanilla_fip)}",
         f"FIP_SHA256={sha256_bytes(vanilla_fip)}",
-        f"PRELOADER_SLOT_OFF=0x{PREGNANT_PRELOADER_OFF:08x}",
+        f"PRELOADER_SLOT_OFF=0x{preloader_off:08x}",
         f"PRELOADER_SIZE={len(vanilla_preloader)}",
         f"PRELOADER_SHA256={sha256_bytes(vanilla_preloader)}",
     ]
@@ -363,12 +367,12 @@ def _build_md_proven_pregnant_slot(
 
     out = bytearray(base)
     out[runtime_off:runtime_off + len(runtime_fit)] = runtime_fit
-    out[PREGNANT_META_OFF:PREGNANT_META_OFF + PREGNANT_META_SIZE] = (
+    out[meta_off:meta_off + PREGNANT_META_SIZE] = (
         manifest + b"\0" * (PREGNANT_META_SIZE - len(manifest))
     )
-    out[PREGNANT_PRODUCTION_OFF:PREGNANT_PRODUCTION_OFF + len(production_itb)] = production_itb
-    out[PREGNANT_FIP_OFF:PREGNANT_FIP_OFF + len(vanilla_fip)] = vanilla_fip
-    out[PREGNANT_PRELOADER_OFF:PREGNANT_PRELOADER_OFF + len(vanilla_preloader)] = vanilla_preloader
+    out[production_off:production_off + len(production_itb)] = production_itb
+    out[fip_off:fip_off + len(vanilla_fip)] = vanilla_fip
+    out[preloader_off:preloader_off + len(vanilla_preloader)] = vanilla_preloader
 
     # build_transition_slot() already rebuilt the active kernel payload and its
     # supported FIT hashes. Pregnant staging now lives strictly after active
@@ -393,14 +397,18 @@ def _build_md_proven_pregnant_slot(
 
     meta = dict(wrapper)
     meta.update({
-        "wrapper_contract": "STOCK_FIP_HDR2_PROVEN_HANDOFF_DYNAMIC_TAIL_V3",
+        "wrapper_contract": "STOCK_FIP_HDR2_PROVEN_HANDOFF_FREE_TAIL_V4",
         "candidate_sha256": sha256_bytes(bytes(out)),
         "runtime_offset": runtime_off,
+        "manifest_offset": meta_off,
+        "production_offset": production_off,
+        "fip_offset": fip_off,
+        "preloader_offset": preloader_off,
+        "occupied_stock_end": occupied_end,
         "runtime_size": len(runtime_fit),
         "runtime_sha256": sha256_bytes(runtime_fit),
         "runtime_ram_source_offset": runtime_ram_offset,
         "runtime_ram_loaded_payload_size": loaded_nt_payload_size,
-        "runtime_tail_capacity": runtime_capacity,
         "runtime_ram_destination": "0x92000000",
         "manifest_offset": PREGNANT_META_OFF,
         "manifest_size": len(manifest),
