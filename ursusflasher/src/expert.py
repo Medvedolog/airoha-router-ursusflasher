@@ -25,6 +25,7 @@ import stock_restore
 import stock_ab_pregnant
 import ursus_web_client as uw
 import ursusboot_install
+import ursusboot_pregnant
 import ursusboot_update
 
 
@@ -392,7 +393,7 @@ def capability_report(state: ds.DeviceState) -> None:
         a = app[number]
         title = terms.action_title(a.key)
         if number == 4:
-            title = tr("Stock Nokia → Vanilla OpenWrt (pregnant migration)", "Stock Nokia → Vanilla OpenWrt (pregnant migration)")
+            title = tr("Установить чистый OpenWrt через временный UrsusBoot Recovery", "Install clean OpenWrt via temporary UrsusBoot Recovery")
         yes = tr("ДА", "YES") if a.enabled else tr("НЕТ", "NO")
         marker = "!" if a.write_capable else " "
         print(f" {marker} {number:2d}  {title:<42} {yes}")
@@ -488,12 +489,12 @@ def _transition_profile(state: ds.DeviceState) -> str | None:
 
 def _show_transition_action(state: ds.DeviceState) -> None:
     profile = _transition_profile(state)
-    enabled = profile in ("xg040-md", "xg040-mf")
-    reason = "" if enabled else tr("доступно только для подтверждённой Nokia stock MD/MF", "available only for confirmed Nokia stock MD/MF")
+    enabled = profile == "xg040-md"
+    reason = "" if enabled else tr("сейчас доступно только для подтверждённой Nokia stock XG-040G-MD", "currently available only for confirmed Nokia stock XG-040G-MD")
     ui.menu_item(
         4,
         tr("Stock Nokia → Vanilla OpenWrt (pregnant migration)", "Stock Nokia → Vanilla OpenWrt (pregnant migration)"),
-        tr("путь к ранее сделанному backup опционален; без backup — отдельный YES риска → pregnant SLOT2 → автономная migration", "existing backup path is optional; without backup an extra risk YES is required → pregnant SLOT2 → autonomous migration"),
+        tr("временный UrsusBoot → Reset/Recovery → автономный pregnant ITB → после установки штатный OpenWrt Recovery/U-Boot с Fudan-патчем", "temporary UrsusBoot → Reset/Recovery → autonomous pregnant ITB → standard OpenWrt Recovery/U-Boot with Fudan patch after install"),
         write_capable=True,
         enabled=enabled,
         reason=reason,
@@ -503,8 +504,8 @@ def _show_transition_action(state: ds.DeviceState) -> None:
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     if number == 4:
         return (
-            "Путь к ранее сделанному backup [Enter — без backup] → live SLOT2/flag → pregnant SLOT2 → при отсутствии backup отдельный YES риска → обычный y/N → readback/selector → автономная UBI → pinned UnameOne → identity → Vanilla FIP → BL2 last",
-            "Existing backup path [Enter — without backup] → live SLOT2/flag → pregnant SLOT2 → without backup an extra risk YES → normal y/N → readback/selector → autonomous UBI → pinned UnameOne → identity → Vanilla FIP → BL2 last",
+            "Полный backup → один y/N → временный UrsusBoot в mtd0/readback → Reset/Recovery → autonomous ITB в RAM → UBI → pinned UnameOne → identity → Vanilla FIP → Vanilla BL2 last; UrsusBoot в финале удаляется",
+            "Full backup → one y/N → temporary UrsusBoot in mtd0/readback → Reset/Recovery → autonomous ITB in RAM → UBI → pinned UnameOne → identity → Vanilla FIP → Vanilla BL2 last; UrsusBoot is removed in the final state",
         )
     if number in app and not app[number].enabled:
         return "", ""
@@ -578,12 +579,12 @@ def main() -> int:
 
         if number == 4:
             profile = _transition_profile(state)
-            if profile not in ("xg040-md", "xg040-mf"):
-                ui.status(tr("СТОП", "STOP"), tr("Vanilla pregnant migration доступна только из подтверждённой Nokia stock MD/MF.", "Vanilla pregnant migration is available only from confirmed Nokia stock MD/MF."))
+            if profile != "xg040-md":
+                ui.status(tr("СТОП", "STOP"), tr("Новый временный UrsusBoot → autonomous pregnant путь сейчас открыт только для подтверждённой Nokia stock XG-040G-MD.", "The new temporary UrsusBoot → autonomous pregnant path is currently enabled only for confirmed Nokia stock XG-040G-MD."))
                 ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
                 continue
             network_guidance.show(host)
-            run_action(lambda: stock_ab_pregnant.run_expert(host=host, profile=profile), write_may_happen=True)
+            run_action(lambda: ursusboot_pregnant.run_expert(host=host, profile=profile), write_may_happen=True)
             continue
 
         selected = app[number]
