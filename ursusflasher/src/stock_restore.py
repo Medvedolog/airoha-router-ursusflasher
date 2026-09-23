@@ -214,6 +214,7 @@ def _arm_one_shot_recovery_boot_once(host: str, expected_bootcmd: str, local_ip:
 def _boot_family_recovery_once(host: str, local_ip: str, router_ip: str, family: str, image: Path) -> None:
     """One verified production-OpenWrt -> U-Boot -> RAM recovery handoff."""
     family = _require_family(family)
+    print(tr(f"[ШАГ] Проверяю, что установленная OpenWrt стабильно отвечает на {host} (до 120 с)...", f"[STEP] Checking that installed OpenWrt answers steadily at {host} (up to 120 s)..."))
     if proven.wait_for_stable_openwrt(host, 120, expected_mode="production") != "production":
         raise proven.Error(tr(
             "установленная OpenWrt не стала устойчиво доступна; recovery handoff не выполнялся",
@@ -241,6 +242,7 @@ def _boot_family_recovery_once(host: str, local_ip: str, router_ip: str, family:
             f"bootcmd changed before recovery handoff: {normal_bootcmd or '[empty]'}",
         ))
 
+    print(tr(f"[ШАГ] OpenWrt {board}, bootcmd штатный. Запускаю TFTP-сервер для recovery-initramfs ({image.name}, {image.stat().st_size} байт)...", f"[STEP] OpenWrt {board}, stock bootcmd. Starting the TFTP server for the recovery initramfs ({image.name}, {image.stat().st_size} bytes)..."))
     bootfile = f"ursus-stock-recovery-{family}.itb"
     ready = threading.Event()
     result = proven.TftpResult()
@@ -258,14 +260,25 @@ def _boot_family_recovery_once(host: str, local_ip: str, router_ip: str, family:
     proven._write_session_only(
         f"[RESTORE] one-shot family={family} recovery={image.name} bootfile={bootfile} server={local_ip} router={router_ip}"
     )
+    print(tr(f"[ШАГ] TFTP готов на {local_ip}:69. Записываю одноразовый bootcmd: следующая загрузка возьмёт initramfs по TFTP в RAM, затем bootcmd сам вернётся к штатному...", f"[STEP] TFTP is ready at {local_ip}:69. Writing a one-shot bootcmd: the next boot fetches the initramfs over TFTP into RAM, then bootcmd restores itself..."))
     _arm_one_shot_recovery_boot_once(host, expected_normal_bootcmd, local_ip, router_ip, bootfile)
+    print(tr(f"[OK] Одноразовый bootcmd записан и прочитан обратно. Перезагружаю роутер...", f"[OK] One-shot bootcmd written and read back. Rebooting the router..."))
+
     try:
         proven.ssh_run(host, "sync; reboot -f", timeout=30, allow_disconnect=True, quiet=True)
     except proven.Error:
         pass
 
+    print(tr("[ЖДУ] Роутер перезагружается; U-Boot должен забрать initramfs по TFTP (до 360 с)...",
+             "[WAIT] The router reboots; U-Boot should fetch the initramfs over TFTP (up to 360 s)..."))
+    last = -1
     while thread.is_alive() and not result.error:
-        thread.join(0.5)
+        thread.join(5)
+        got = int(getattr(result, "bytes_transferred", 0) or 0)
+        if got and got != last:
+            print(tr(f"[ПЕРЕДАЧА] initramfs: {got}/{image.stat().st_size} байт",
+                     f"[TRANSFER] initramfs: {got}/{image.stat().st_size} bytes"))
+            last = got
     if result.error:
         raise proven.Error(tr(
             f"recovery-initramfs TFTP завершился ошибкой после one-shot bootcmd: {result.error}. Автоматический повтор запрещён.",
@@ -276,6 +289,7 @@ def _boot_family_recovery_once(host: str, local_ip: str, router_ip: str, family:
             f"recovery-initramfs передан не полностью: {result.bytes_transferred}/{image.stat().st_size}. Автоматический повтор запрещён.",
             f"recovery-initramfs transfer was incomplete: {result.bytes_transferred}/{image.stat().st_size}. Automatic retry is forbidden.",
         ))
+    print(tr(f"[ЖДУ] initramfs передан полностью. Жду, пока recovery-система загрузится из RAM и ответит по SSH (до 480 с)...", f"[WAIT] The initramfs was transferred in full. Waiting for the recovery system to boot from RAM and answer over SSH (up to 480 s)..."))
     if proven.wait_for_stable_openwrt(router_ip, 480, expected_mode="recovery") != "recovery":
         mode = proven.wait_for_stable_openwrt(router_ip, 90, expected_mode="production")
         detail = tr(
@@ -413,6 +427,8 @@ def _restore_from_ursusboot_after_inputs(host, local_ip, restore_port, backup_di
                                            image=image, image_sha=image_sha):
         ui.status(tr("СТОП", "STOP"), tr("Восстановление отменено; persistent write не начинался.", "Restore cancelled; no persistent write was started."))
         return
+    print(tr(f"[ШАГ] UrsusBoot {st.get('version') or ''} ({family.upper()}) найден. Передаю recovery-initramfs в RAM: {image.name}...",
+             f"[STEP] UrsusBoot {st.get('version') or ''} ({family.upper()}) found. Uploading the recovery initramfs to RAM: {image.name}..."))
     uw.upload(host, image, "initramfs")
     st = uw.status(host)
     if not st.get("expert_valid"):
@@ -420,7 +436,11 @@ def _restore_from_ursusboot_after_inputs(host, local_ip, restore_port, backup_di
             f"UrsusBoot не принял recovery-initramfs: {st.get('expert_reason') or st.get('expert_reason_class')}; запись не начиналась",
             f"UrsusBoot rejected the recovery initramfs: {st.get('expert_reason') or st.get('expert_reason_class')}; nothing was written",
         ))
+    print(tr("[OK] UrsusBoot принял initramfs. Запускаю его один раз из RAM (flash не изменяется)...",
+             "[OK] UrsusBoot accepted the initramfs. Booting it once from RAM (flash is not changed)..."))
     uw.boot_once(host)
+    print(tr("[ЖДУ] recovery-система загружается и должна ответить по SSH (до 480 с)...",
+             "[WAIT] The recovery system is booting and must answer over SSH (up to 480 s)..."))
     if proven.wait_for_stable_openwrt(host, 480, expected_mode="recovery") != "recovery":
         raise proven.Error(tr(
             "recovery-initramfs из UrsusBoot не подтверждена; запись не начиналась. Роутер вернётся в UrsusBoot/OpenWrt после перезагрузки.",

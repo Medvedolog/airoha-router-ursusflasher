@@ -1767,18 +1767,13 @@ def verify_backup(directory: Path, *, require_md_slot_layout: bool = True) -> di
         if _layout_matches(sizes, layout):
             selected = layout
             break
-    if selected is None and family == "md":
-        # Revision-tolerant MD match: pin the observed slot sizes instead of a
+    if selected is None and family in ("md", "mf"):
+        # Revision-tolerant MD/MF match: pin the observed slot sizes instead of a
         # table entry, so the dump <-> /proc/mtd cross-check below stays exact.
+        # (The old rc12 "MF normal install blocked pending HW gate" refusal is
+        # gone: MF install and stock restore are hardware-proven paths.)
         selected = {number: sizes[number] for number in (2, 3, 4, 5)}
     if require_md_slot_layout and selected is None:
-        if family == "mf":
-            raise Error(tr(
-                f"Backup распознан как Nokia XG-040G-MF ({variant}), но normal OpenWrt install в rc12 остаётся заблокирован до отдельного HW gate. "
-                + _slot_layout_diagnostic(sizes),
-                f"The backup is recognized as Nokia XG-040G-MF ({variant}), but normal OpenWrt install remains blocked in rc12 pending a separate HW gate. "
-                + _slot_layout_diagnostic(sizes),
-            ))
         raise Error(tr(
             "неподдерживаемые размеры stock-слотов: " + _slot_layout_diagnostic(sizes),
             "unsupported stock slot sizes: " + _slot_layout_diagnostic(sizes),
@@ -8275,11 +8270,19 @@ def serve_restore_payload(host: str, local_ip: str, port: int, source: Path, rem
 def perform_stock_restore_over_ssh(router_ip: str, local_ip: str, restore_port: int,
                                    backup_dir: Path, payload_dir: Path, manifest: dict) -> None:
     stage_header("R1", "Проверка системы восстановления", "Recovery-system checks")
-    backup_ri_sha, _ = raw_sha256(Path(verify_backup(backup_dir)["files"]["7"]))
+    print(tr(f"[ШАГ] Проверяю backup: {backup_dir}", f"[STEP] Checking the backup: {backup_dir}"))
+    # Stock restore writes the canonical mtd16 image: vendor slot sizes only identify the family.
+    backup_ri_sha, _ = raw_sha256(Path(verify_backup(backup_dir, require_md_slot_layout=False)["files"]["7"]))
+    print(tr(f"[OK] Backup целый; ri SHA256 {backup_ri_sha}", f"[OK] Backup is complete; ri SHA256 {backup_ri_sha}"))
     expected_family = str(manifest.get("source_validation", {}).get("device_family", "")).lower()
     if expected_family not in ("md", "mf"):
         raise Error(tr("backup family MD/MF не определён", "backup MD/MF family is not determined"))
+    print(tr(
+        f"[ШАГ] Проверяю recovery-систему на {router_ip}: модель {expected_family.upper()}, ri роутера = ri backup, транспорт передачи...",
+        f"[STEP] Checking the recovery system at {router_ip}: model {expected_family.upper()}, router ri = backup ri, transfer transport...",
+    ))
     transport = transition_preflight_for_restore(router_ip, backup_ri_sha, expected_family)
+    print(tr(f"[OK] Recovery-система подтверждена; транспорт: {transport}", f"[OK] Recovery system confirmed; transport: {transport}"))
     print()
     print(tr("ПЕРЕД НАЧАЛОМ ПРОВЕРЬТЕ:", "CHECK BEFORE STARTING:"))
     print(tr("  • Стабильное питание до окончательной перезагрузки.", "  • Stable power until the final reboot."))
