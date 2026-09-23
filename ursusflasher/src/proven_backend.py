@@ -113,6 +113,43 @@ MF_UBI_PRELOADER_SIZE = 118333
 MF_UBI_PRELOADER_SHA = "778d10a65276085b70bec005248fc87ec208b43b0239502f15ade20fe528301e"
 MF_UBI_FIP_SIZE = 319568
 MF_UBI_FIP_SHA = "99b6c20a7cb46a56692eaeb9f086f70fc7e987a641396653e6a8fb5c03e07aa7"
+MF_RECOVERY_BL31_COMPRESSED_SHA = "6d97815b5cdf905eff874062f9364ebe41a2a11f4b25944a82aea4fcbdd71e35"
+MF_RECOVERY_BL33_COMPRESSED_SHA = "3bb4cf1aa950dd212e1b5781abf55c239ff61326d5ca0c19e9f2c010285f5bb1"
+# Release override: the kit's pinned airoha-ursusboot release ships a
+# Fudan-capable (FM25G01B/FM25G02B) RECOVERY_SAFE RAM U-Boot per board, built
+# with the RC18 contract and packed into the RC18 FIP (same BL31). When present
+# it replaces the RC18 BL33, which only knows Fudan FM25S01A.
+RECOVERY_SAFE_FROM_RELEASE = {"md": False, "mf": False}
+
+
+def _apply_release_recovery_safe() -> None:
+    global RECOVERY_FIP, RECOVERY_FIP_SHA, RECOVERY_FIP_SIZE, BACKUP_RECOVERY_FIP
+    global BACKUP_RECOVERY_BL31_COMPRESSED_SHA, BACKUP_RECOVERY_BL33_COMPRESSED_SHA
+    global MF_RECOVERY_FIP, MF_RECOVERY_FIP_NAME, MF_RECOVERY_FIP_SHA, MF_RECOVERY_FIP_SIZE
+    global MF_RECOVERY_BL31_COMPRESSED_SHA, MF_RECOVERY_BL33_COMPRESSED_SHA
+    try:
+        import ursusboot_release as _ubr
+    except Exception:
+        return
+    for fam in ("md", "mf"):
+        b = _ubr.board(fam) or {}
+        entry = (b.get("files") or {}).get("recovery_safe_fip") or {}
+        path = _ubr.path(fam, "recovery_safe_fip")
+        bl31, bl33 = b.get("recovery_safe_bl31_sha256"), b.get("recovery_safe_bl33_sha256")
+        if not (path and entry.get("sha256") and entry.get("size") and bl31 and bl33):
+            continue
+        if fam == "md":
+            RECOVERY_FIP = BACKUP_RECOVERY_FIP = path
+            RECOVERY_FIP_SHA, RECOVERY_FIP_SIZE = entry["sha256"], int(entry["size"])
+            BACKUP_RECOVERY_BL31_COMPRESSED_SHA, BACKUP_RECOVERY_BL33_COMPRESSED_SHA = bl31, bl33
+        else:
+            MF_RECOVERY_FIP, MF_RECOVERY_FIP_NAME = path, path.name
+            MF_RECOVERY_FIP_SHA, MF_RECOVERY_FIP_SIZE = entry["sha256"], int(entry["size"])
+            MF_RECOVERY_BL31_COMPRESSED_SHA, MF_RECOVERY_BL33_COMPRESSED_SHA = bl31, bl33
+        RECOVERY_SAFE_FROM_RELEASE[fam] = True
+
+
+_apply_release_recovery_safe()
 MF_UBI_SYSUPGRADE_SIZE = 9191705
 MF_UBI_SYSUPGRADE_SHA = "db881b8053cdfbdf49dd6c2336dee3ddfa489966456a3e75556c5a0f6cc7663b"
 MF_UBI_BOARD = "nokia,xg-040g-mf-ubi"
@@ -1116,6 +1153,8 @@ def _load_mf_snapshot_metadata() -> dict:
         "preloader": (MF_RECOVERY_PRELOADER_NAME, MF_RECOVERY_PRELOADER_SIZE, MF_RECOVERY_PRELOADER_SHA),
         "fip": (MF_RECOVERY_FIP_NAME, MF_RECOVERY_FIP_SIZE, MF_RECOVERY_FIP_SHA),
     }
+    if RECOVERY_SAFE_FROM_RELEASE["mf"]:
+        expected.pop("fip")  # snapshot metadata describes the RC18 FIP the release replaced
     for key, (name, size, digest) in expected.items():
         entry = artifacts.get(key, {})
         if entry.get("file") != name or int(entry.get("size", -1)) != size or entry.get("sha256") != digest:
@@ -1457,11 +1496,11 @@ def verify_kit() -> None:
     _verify_exact_artifact(RECOVERY_SCP_CLIENT, 6072, RECOVERY_SCP_CLIENT_SHA, "pinned AArch64 nokia-scp")
     _verify_exact_artifact(RECOVERY_PRELOADER, 113447, RECOVERY_PRELOADER_SHA, "AN7581 preloader")
     _verify_exact_artifact(RECOVERY_FIP, RECOVERY_FIP_SIZE, RECOVERY_FIP_SHA, "AN7581 RC18 RECOVERY_SAFE BL31+U-Boot FIP")
-    _verify_recovery_safe_fip(RECOVERY_FIP, "a81dbbe98acb1dabc2afcbf72e73ad87e24efa8dd88e559612a024c28ece920e", "df4803b9f70bb35050555947268fc35d61f1724814a1ea59b480689f056fa123", "AN7581 RC18 RECOVERY_SAFE FIP")
+    _verify_recovery_safe_fip(RECOVERY_FIP, BACKUP_RECOVERY_BL31_COMPRESSED_SHA, BACKUP_RECOVERY_BL33_COMPRESSED_SHA, "AN7581 RC18 RECOVERY_SAFE FIP")
     _load_mf_snapshot_metadata()
     _verify_exact_artifact(MF_RECOVERY_PRELOADER, MF_RECOVERY_PRELOADER_SIZE, MF_RECOVERY_PRELOADER_SHA, "AN7583 preloader")
     _verify_exact_artifact(MF_RECOVERY_FIP, MF_RECOVERY_FIP_SIZE, MF_RECOVERY_FIP_SHA, "AN7583 RC18 RECOVERY_SAFE BL31+U-Boot FIP")
-    _verify_recovery_safe_fip(MF_RECOVERY_FIP, "6d97815b5cdf905eff874062f9364ebe41a2a11f4b25944a82aea4fcbdd71e35", "3bb4cf1aa950dd212e1b5781abf55c239ff61326d5ca0c19e9f2c010285f5bb1", "AN7583 RC18 RECOVERY_SAFE FIP")
+    _verify_recovery_safe_fip(MF_RECOVERY_FIP, MF_RECOVERY_BL31_COMPRESSED_SHA, MF_RECOVERY_BL33_COMPRESSED_SHA, "AN7583 RC18 RECOVERY_SAFE FIP")
     try:
         capability_manifest = json.loads(FIRMWARE_CAPABILITIES.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError) as exc:
@@ -9095,8 +9134,8 @@ def _bootrom_backup_safety_selftest() -> None:
         raise Error("post-restore reboot selftest accepted a U-Boot prompt as reboot evidence")
     if not _uboot_reboot_evidence(b"Secure key does not exist\r\nHWCONF is 1f\r\nAN7583DRAMC V0.6"):
         raise Error("post-restore reboot selftest rejected known AN7583 boot evidence")
-    _verify_recovery_safe_fip(RECOVERY_FIP, "a81dbbe98acb1dabc2afcbf72e73ad87e24efa8dd88e559612a024c28ece920e", "df4803b9f70bb35050555947268fc35d61f1724814a1ea59b480689f056fa123", "AN7581 RC18 RECOVERY_SAFE FIP")
-    _verify_recovery_safe_fip(MF_RECOVERY_FIP, "6d97815b5cdf905eff874062f9364ebe41a2a11f4b25944a82aea4fcbdd71e35", "3bb4cf1aa950dd212e1b5781abf55c239ff61326d5ca0c19e9f2c010285f5bb1", "AN7583 RC18 RECOVERY_SAFE FIP")
+    _verify_recovery_safe_fip(RECOVERY_FIP, BACKUP_RECOVERY_BL31_COMPRESSED_SHA, BACKUP_RECOVERY_BL33_COMPRESSED_SHA, "AN7581 RC18 RECOVERY_SAFE FIP")
+    _verify_recovery_safe_fip(MF_RECOVERY_FIP, MF_RECOVERY_BL31_COMPRESSED_SHA, MF_RECOVERY_BL33_COMPRESSED_SHA, "AN7583 RC18 RECOVERY_SAFE FIP")
 
 
 def _stock_slot_tolerance_selftest() -> None:

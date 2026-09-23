@@ -91,8 +91,8 @@ def verify_kit() -> None:
     pb._verify_exact_artifact(pb.MF_RECOVERY_FIP, pb.MF_RECOVERY_FIP_SIZE, pb.MF_RECOVERY_FIP_SHA, "AN7583 recovery-safe FIP")
     pb._verify_recovery_safe_fip(
         pb.MF_RECOVERY_FIP,
-        "6d97815b5cdf905eff874062f9364ebe41a2a11f4b25944a82aea4fcbdd71e35",
-        "3bb4cf1aa950dd212e1b5781abf55c239ff61326d5ca0c19e9f2c010285f5bb1",
+        pb.MF_RECOVERY_BL31_COMPRESSED_SHA,
+        pb.MF_RECOVERY_BL33_COMPRESSED_SHA,
         "AN7583 recovery-safe FIP",
     )
     pb._verify_exact_artifact(

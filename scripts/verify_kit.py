@@ -32,7 +32,7 @@ SRC_NAME = {
     "update_fip": "ursusboot-update.fip", "u_boot_bin": "u-boot.bin",
     "install_mtd0": "ursusboot-install-mtd0.bin", "ubi_preloader": "ursusboot-ubi-preloader.fip",
     "runtime_lzma": "u-boot.runtime.lzma", "runtime_ram_fip": "ursusboot-runtime-ram.fip",
-    "uart_preloader": "ursusboot-uart-preloader.bin", "vanilla_fip": "vanilla-u-boot.fip",
+    "uart_preloader": "ursusboot-uart-preloader.bin", "vanilla_fip": "vanilla-u-boot.fip", "recovery_safe_fip": "recovery-safe-u-boot.fip",
 }
 
 
@@ -170,6 +170,26 @@ def verify_host(root: Path, rel: dict) -> None:
         check(needle in route, "STOCK->UBI route", needle)
     for needle in ('verify_stock_restore_backup', 'skip_full_backup=reuse_backup'):
         check(needle in route, "backup reuse", needle)
+    # BootROM/UART recovery (items 5-9, MedveFlasher-style restore) uses the release's
+    # Fudan-capable RECOVERY_SAFE RAM U-Boot, and every runtime check pins it.
+    pb = importlib.import_module("proven_backend")
+    for fam, fip_attr, sha_attr, size_attr, bl31_attr, bl33_attr in (
+            ("md", "RECOVERY_FIP", "RECOVERY_FIP_SHA", "RECOVERY_FIP_SIZE",
+             "BACKUP_RECOVERY_BL31_COMPRESSED_SHA", "BACKUP_RECOVERY_BL33_COMPRESSED_SHA"),
+            ("mf", "MF_RECOVERY_FIP", "MF_RECOVERY_FIP_SHA", "MF_RECOVERY_FIP_SIZE",
+             "MF_RECOVERY_BL31_COMPRESSED_SHA", "MF_RECOVERY_BL33_COMPRESSED_SHA")):
+        b = rel["boards"][fam]
+        f = b["files"]["recovery_safe_fip"]
+        check(pb.RECOVERY_SAFE_FROM_RELEASE[fam]
+              and Path(getattr(pb, fip_attr)).resolve() == (root / f["path"]).resolve()
+              and getattr(pb, sha_attr) == f["sha256"] and getattr(pb, size_attr) == f["size"]
+              and getattr(pb, bl31_attr) == b["recovery_safe_bl31_sha256"]
+              and getattr(pb, bl33_attr) == b["recovery_safe_bl33_sha256"],
+              f"{fam} BootROM/UART RAM U-Boot -> release RECOVERY_SAFE (Fudan FM25G02B)", f["path"])
+        pb._verify_recovery_safe_fip(getattr(pb, fip_attr), getattr(pb, bl31_attr), getattr(pb, bl33_attr), fam)
+    check(pb.BACKUP_RECOVERY_FIP == pb.RECOVERY_FIP, "md UART backup (item 7) uses the same RAM U-Boot",
+          Path(pb.BACKUP_RECOVERY_FIP).name)
+    pb._load_mf_snapshot_metadata()
     verify_poll(importlib.import_module("ursus_web_client"))
     verify_item4(root, rel, "md")
     verify_item4(root, rel, "mf")

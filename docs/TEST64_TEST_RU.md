@@ -1,6 +1,6 @@
 # TEST64 — аппаратный тест MD и MF: Nokia STOCK → OpenWrt UBI → Vanilla U-Boot
 
-UrsusBoot `0.1.0-alpha5-t65` (коротко **t65**; t64 + сброс окружения при замене на Vanilla) собран в `Medvedolog/airoha-ursusboot` на
+UrsusBoot `0.1.0-alpha5-t66` (коротко **t66**: t64 + сброс окружения при замене на Vanilla + RAM U-Boot для UART с поддержкой Fudan FM25G02B) собран в `Medvedolog/airoha-ursusboot` на
 закреплённом коммите (см. `data/URSUSBOOT_RELEASE.json`). В комплекте:
 
 - быстрый BL2: при загрузке он сканирует UBI сразу, без полного прохода по NAND;
@@ -52,6 +52,19 @@ MD (AN7581) и MF (AN7583) тестируются одинаково: кажды
 Если на шаге 3 ответить «нет», OpenWrt остаётся установленным, а UrsusBoot остаётся
 загрузчиком-Recovery. Это тоже корректный результат: вернуться к пункту 4 или
 сделать замену из WebFailsafe («Заменить UrsusBoot на Vanilla U-Boot») можно позже.
+
+## UART-восстановление на плате с Fudan FM25G02B (t66)
+
+RAM U-Boot для BootROM/UART (пункты 5–9) теперь собирается из того же OpenWrt с
+поддержкой FM25G01B/FM25G02B, с безопасным окружением RC18 (без автозагрузки).
+Первая проверка ничего не пишет: пункт **7** через USB-UART на MD с FM25G02B.
+
+| Проверка | Ожидается |
+|---|---|
+| UART после XMODEM | `U-Boot 2026.07-OpenWrt`, приглашение без автозагрузки |
+| NAND | `Fudan Micro SPI NAND was found` (а не ошибка определения) |
+| Окружение | `medveflasher_recovery_safe=rc18`, `bootdelay=-1` |
+| Сеть | TFTP работает (снятие копии идёт) |
 
 ## Если после t64 роутер остановился на `AN7581>`
 
