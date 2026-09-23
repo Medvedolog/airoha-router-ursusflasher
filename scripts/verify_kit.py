@@ -115,6 +115,9 @@ def verify_release(root: Path, pin: dict, dists: dict[str, Path]) -> dict:
         check(van.is_file() and sha256(van) == b["vanilla_fip_sha256"] == dist_prov["vanilla_fip_sha256"]
               and bytes.fromhex(b["vanilla_fip_sha256"]) in bl33,
               f"{fam} Vanilla FIP == pinned in UrsusBoot == PROVENANCE", b["vanilla_fip_sha256"])
+        # t64 HW: Vanilla inherited UrsusBoot's saved env and stopped at its prompt.
+        check(b"URSUS_VANILLA_ENV_RESET_OK" in bl33,
+              f"{fam} UrsusBoot resets the UBI environment when it installs Vanilla", "")
     versions = {(root / "VERSION").read_text().strip(), (root / "data" / "VERSION").read_text().strip()}
     check(len(versions) == 1 and pin["version"] not in versions, "kit VERSION intact", ",".join(versions))
     return rel

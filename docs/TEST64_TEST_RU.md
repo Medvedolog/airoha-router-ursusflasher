@@ -1,6 +1,6 @@
 # TEST64 — аппаратный тест MD и MF: Nokia STOCK → OpenWrt UBI → Vanilla U-Boot
 
-UrsusBoot `0.1.0-alpha5-t64` (коротко **t64**) собран в `Medvedolog/airoha-ursusboot` на
+UrsusBoot `0.1.0-alpha5-t65` (коротко **t65**; t64 + сброс окружения при замене на Vanilla) собран в `Medvedolog/airoha-ursusboot` на
 закреплённом коммите (см. `data/URSUSBOOT_RELEASE.json`). В комплекте:
 
 - быстрый BL2: при загрузке он сканирует UBI сразу, без полного прохода по NAND;
@@ -42,8 +42,8 @@ MD (AN7581) и MF (AN7583) тестируются одинаково: кажды
 | 1 | Лог перехода | `URSUS_UBI_PRELOADER_VALID ... sha256=` = `ubi_preloader_sha256` |
 | 2 | Лог перехода | `URSUS_UBI_MIGRATION_BL2_VERIFIED ... sha256=` = `ubi_bl2_image_sha256` |
 | 3 | Лог Vanilla | `URSUS_UBI_INSTALLED_BL2 OK`, `URSUS_UPDATE_ARMED kind=VANILLA layout=UBI` |
-| 4 | Лог Vanilla | `URSUS_UPDATE_COMMIT_OK layout=UBI kind=VANILLA backup=fip.old` и `URSUS_VANILLA_REPLACE_COMPLETE` |
-| 5 | UART после перезагрузки | быстрый BL2, затем `U-Boot 2026.07` **без** `UrsusBoot` |
+| 4 | Лог Vanilla | `URSUS_VANILLA_ENV_RESET_OK`, `URSUS_UPDATE_COMMIT_OK layout=UBI kind=VANILLA backup=fip.old` и `URSUS_VANILLA_REPLACE_COMPLETE ... env=RESET` |
+| 5 | UART после перезагрузки | быстрый BL2, затем `U-Boot 2026.07-OpenWrt` **без** `UrsusBoot`, без остановки на `AN7581>` (в t64 было `bootmenu option 0 was not found`) |
 | 6 | Загрузка | OpenWrt стартует с UBI без вмешательства; время загрузки (засеките) |
 | 7 | UrsusFlasher | `OpenWrt booted through Vanilla U-Boot; UBI fip = the pinned Vanilla FIP` |
 | 8 | OpenWrt, по желанию | `sha256sum` тома `fip` = `vanilla_fip_sha256`; том `fip.old` существует |
@@ -52,6 +52,21 @@ MD (AN7581) и MF (AN7583) тестируются одинаково: кажды
 Если на шаге 3 ответить «нет», OpenWrt остаётся установленным, а UrsusBoot остаётся
 загрузчиком-Recovery. Это тоже корректный результат: вернуться к пункту 4 или
 сделать замену из WebFailsafe («Заменить UrsusBoot на Vanilla U-Boot») можно позже.
+
+## Если после t64 роутер остановился на `AN7581>`
+
+В t64 Vanilla загружала окружение UrsusBoot и останавливалась на
+`bootmenu option 0 was not found`. В консоли UART:
+
+```
+env default -a -f
+saveenv
+saveenv
+reset
+```
+
+Затронуто только окружение загрузчика; OpenWrt, `ri`, `bosa` и `rootfs_data` не меняются.
+В t65 это делает сама замена на Vanilla.
 
 ## Что прислать
 
