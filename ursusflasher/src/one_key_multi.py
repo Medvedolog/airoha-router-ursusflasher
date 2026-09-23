@@ -62,6 +62,19 @@ def _family(state: ds.DeviceState) -> str:
             f"The router {state.host} answered neither Web nor SSH. Check the cable (LAN2/LAN3), "
             "the PC's static IP in 192.168.1.x and that the router has booted; then run again. Nothing was written.",
         ))
+    web_error = str(state.evidence.get("stock_web_error") or "")
+    if web_error:
+        # The model is read from the stock Web UI; say why that login failed.
+        raise RuntimeError(tr(
+            f"Не удалось определить MD/MF: вход в штатный Web UI Nokia ({state.host}) не удался. Ничего не записано.\n"
+            f"{web_error}\n"
+            "Обычно это открытая вкладка браузера с веб-мордой Nokia или незакрытая сессия прошлого запуска: "
+            "выйдите из веб-морды (или закройте вкладку), подождите 5 минут либо перезагрузите роутер и запустите снова.",
+            f"Could not identify MD/MF: login to the Nokia stock Web UI ({state.host}) failed. Nothing was written.\n"
+            f"{web_error}\n"
+            "Usually a browser tab with the Nokia Web UI is still logged in, or a previous run left a session open: "
+            "log out of the Web UI (or close the tab), wait 5 minutes or reboot the router, then run again.",
+        ))
     raise RuntimeError(tr(
         f"Не удалось однозначно определить MD/MF: model={state.model}, soc={state.soc}. Ничего не записано; "
         "в EXPERT модель можно выбрать вручную.",
