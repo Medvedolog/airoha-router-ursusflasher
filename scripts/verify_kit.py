@@ -170,6 +170,11 @@ def verify_host(root: Path, rel: dict) -> None:
         check(needle in route, "STOCK->UBI route", needle)
     for needle in ('verify_stock_restore_backup', 'skip_full_backup=reuse_backup'):
         check(needle in route, "backup reuse", needle)
+    # ONE-KEY "Vanilla OpenWrt" must be the item 4 route, not the retired SLOT2 pregnant
+    # initramfs path whose payloads the kit no longer ships (MF hardware session, 0.2.63).
+    okm_src = (data / "one_key_multi.py").read_text(encoding="utf-8")
+    check("ursusboot_pregnant.run_expert(" in okm_src and "stock_ab_pregnant" not in okm_src,
+          "ONE-KEY Vanilla mode -> item 4 route (UrsusBoot -> UBI -> Vanilla)", "")
     # BootROM/UART recovery (items 5-9, MedveFlasher-style restore) uses the release's
     # Fudan-capable RECOVERY_SAFE RAM U-Boot, and every runtime check pins it.
     pb = importlib.import_module("proven_backend")

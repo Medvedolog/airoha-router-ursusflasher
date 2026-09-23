@@ -17,7 +17,6 @@ import mf_runtime_install
 import network_guidance
 import one_key as md_one_key
 import proven_backend as pb
-import stock_ab_pregnant
 import ursus_web_client as uw
 
 choose_language = md_one_key.choose_language
@@ -153,8 +152,8 @@ def _choose_stock_install_mode() -> str:
         "  2  Vanilla OpenWrt",
     ))
     print(tr(
-        "     Без постоянного UrsusBoot: после миграции используется штатный OpenWrt U-Boot/FIP.",
-        "     No persistent UrsusBoot: after migration the standard OpenWrt U-Boot/FIP is used.",
+        "     OpenWrt на UBI со штатным OpenWrt U-Boot (закреплённый Vanilla FIP); WebFailsafe UrsusBoot после перехода нет.",
+        "     OpenWrt on UBI with the standard OpenWrt U-Boot (pinned Vanilla FIP); no UrsusBoot WebFailsafe after the switch.",
     ))
     while True:
         choice = ui.prompt(tr("Режим [1]: ", "Mode [1]: ")).strip() or "1"
@@ -263,14 +262,13 @@ def main(*, skip_full_backup: bool = False) -> int:
         install_mode = _choose_stock_install_mode()
         if install_mode == "vanilla":
             ui.note(tr(
-                "Vanilla использует полный stock backup, SLOT2 pregnant initramfs и одну общую авторизацию; после перехода постоянного UrsusBoot в NAND не остаётся.",
-                "Vanilla uses a complete stock backup, SLOT2 pregnant initramfs and one transaction authorization; no persistent UrsusBoot remains in NAND after migration.",
+                "Vanilla — тот же путь, что EXPERT пункт 4: полный stock backup → UrsusBoot → штатный переход на OpenWrt UBI "
+                "с быстрым BL2 → (одно подтверждение) замена UrsusBoot на закреплённый Vanilla OpenWrt U-Boot. UrsusBoot остаётся в UBI fip.old.",
+                "Vanilla is the same path as EXPERT item 4: complete stock backup → UrsusBoot → native migration to OpenWrt UBI "
+                "with the fast BL2 → (one confirmation) the pinned Vanilla OpenWrt U-Boot replaces UrsusBoot. UrsusBoot stays in UBI fip.old.",
             ))
-            return stock_ab_pregnant.run(
-                host=HOST,
-                profile=f"xg040-{family}",
-                monitor=True,
-            )
+            import ursusboot_pregnant
+            return ursusboot_pregnant.run_expert(host=HOST, profile=f"xg040-{family}")
 
     verify_family_payloads(family)
     already_authorized = False
