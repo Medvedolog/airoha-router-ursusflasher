@@ -115,6 +115,8 @@ jobs:
         run: |
           set -euo pipefail
           DIGEST="$(awk '{print $1; exit}' "dist-public/${ASSET}.sha256.txt")"
+          URSUSBOOT_VERSION="$(jq -r .version config/URSUSBOOT_PIN.json)"
+          URSUSBOOT_COMMIT="$(jq -r .commit config/URSUSBOOT_PIN.json | cut -c1-12)"
           cat > dist-public/RELEASE_NOTES_RU.md <<EOF
           # UrsusFlasher ${RELEASE} — Nokia XG-040G-MD и XG-040G-MF
 
@@ -155,15 +157,16 @@ jobs:
           | \`1\` Установить OpenWrt | маршрут ONE-CLICK; на Nokia STOCK EXPERT может явно пропустить полный backup только для этого запуска; один \`[y/N]\` остаётся перед direct \`mtd0\` write |
           | \`2\` Установить или обновить UrsusBoot | обновить загрузчик на уже работающем роутере |
           | \`3\` Записать свою прошивку OpenWrt | поставить собственный образ вместо комплектного |
-          | \`4\` Stock Nokia → OpenWrt UBI → Vanilla U-Boot | MD и MF: UrsusBoot TEST64 + быстрый BL2 → OpenWrt на UBI → закреплённый Vanilla U-Boot |
+          | \`4\` Stock Nokia → OpenWrt UBI → Vanilla U-Boot | MD и MF: UrsusBoot ${URSUSBOOT_VERSION} + быстрый BL2 → OpenWrt на UBI → закреплённый Vanilla U-Boot (env сбрасывается автоматически) |
           | \`5\` Восстановить загрузчик | роутер не включается; нужен USB-UART 3,3 В |
+          | \`6\` Вернуть Nokia stock | из проверенного полного backup; способ на выбор: автоматически, из OpenWrt по SSH, из UrsusBoot Recovery (без UART) или через USB-UART |
           | \`7\` Создать полную копию flash | снять резервную копию до любых записей |
           | \`8\` Проверить резервную копию | убедиться, что копия пригодна для восстановления |
           | \`10\` Состояние устройства | посмотреть, что за роутер и что с ним сейчас можно |
           | \`11\` Flash-память и разметка | разделы и сбойные блоки, только чтение |
           | \`12\` Проверить файлы комплекта | сверить сам архив перед работой |
 
-          Пункты \`6\` и \`9\` в этой сборке ещё не реализованы.
+          Пункт \`9\` в этой сборке ещё не реализован.
 
           ## Перед первой записью
 
@@ -175,7 +178,7 @@ jobs:
 
           Подробности — в приложенных \`INSTRUCTIONS_RU.md\` и \`EMERGENCY_URSUSBOOT_RU.md\`.
 
-          > **UrsusBoot TEST64** из \`Medvedolog/airoha-ursusboot\` на закреплённом коммите, MD и MF,
+          > **UrsusBoot ${URSUSBOOT_VERSION}** из \`Medvedolog/airoha-ursusboot\` (коммит \`${URSUSBOOT_COMMIT}\`), MD и MF,
           > с быстрым UBI BL2. Хэши preloader и BL2 — в \`PUBLIC_TEST_RELEASE.txt\` внутри архива.
           > Аппаратная приёмка MD и MF пройдена (\`TEST64_TEST_RU.md\`).
 

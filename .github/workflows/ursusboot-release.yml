@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - main
       - feature/ursusboot-modular-airoha
       - claude/lucid-gauss-t0il1g
     paths:
