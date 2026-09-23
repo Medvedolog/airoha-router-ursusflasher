@@ -246,6 +246,7 @@ def _upload_state(kind: str, st: dict) -> tuple[str, int, int]:
         'fip': 'ursus_fip',
         'preloader': 'ubi_preloader',
         'initramfs': 'initramfs',
+        'vanilla-fip': 'vanilla_fip',
     }[kind]
     return (str(st.get(prefix + '_generation') or ''),
             int(st.get(prefix + '_upload_received') or 0),
@@ -260,6 +261,7 @@ def _upload_final_from_status(kind: str, st: dict, gen: str, total: int) -> dict
         'fip': bool(st.get('ursus_fip_valid')),
         'preloader': bool(st.get('ubi_preloader_valid')) and bool(st.get('ubi_bl2_candidate_valid')),
         'initramfs': bool(st.get('expert_valid')),
+        'vanilla-fip': bool(st.get('vanilla_fip_valid')),
     }[kind]
     return {
         'result': 'VALID' if valid else 'REJECTED',
@@ -283,6 +285,7 @@ def upload(host: str, path: Path, kind: str, *, progress=True) -> dict:
         'fip': ('/api/ursus-fip-begin', '/api/ursus-fip-chunk'),
         'preloader': ('/api/ubi-preloader-begin', '/api/ubi-preloader-chunk'),
         'initramfs': ('/api/initramfs-begin', '/api/initramfs-chunk'),
+        'vanilla-fip': ('/api/vanilla-fip-begin', '/api/vanilla-fip-chunk'),
     }
     if kind not in endpoints:
         raise ValueError(kind)
@@ -509,8 +512,9 @@ def _poll(host: str, *, bootloader: bool, timeout: float = 420.0) -> dict:
     raise UrsusWebError('timed out waiting for UrsusBoot flash operation')
 
 
-def update_bootloader(host: str, fip: Path, *, confirm=True) -> dict:
-    operation = 'update-ursusboot'
+def _fip_operation(host: str, fip: Path, *, confirm: bool, kind: str, endpoint: str, confirm_token: str,
+                   operation: str, what_ru: str, what_en: str) -> dict:
+    """Shared UrsusBoot FIP transaction driver: upload -> VALID -> confirm -> start -> _poll."""
     before = status(host)
     diag = begin_diagnostics(host, operation, status_snapshot=before)
     operation_started = False
@@ -518,18 +522,18 @@ def update_bootloader(host: str, fip: Path, *, confirm=True) -> dict:
         st = before
         print(terms.tr(f"[ИНФО] UrsusBoot {st.get('version')}; разметка: {terms.layout_label(st.get('current_layout'))}",
                        f"[INFO] UrsusBoot {st.get('version')}; layout: {terms.layout_label(st.get('current_layout'))}"))
-        ack = upload(host, fip, 'fip')
+        ack = upload(host, fip, kind)
         if ack.get('result') != 'VALID':
-            raise UrsusWebError(f'FIP rejected: {ack}')
-        print(terms.tr('[ГОТОВО] FIP UrsusBoot проверен загрузчиком.', '[READY] UrsusBoot FIP validated by the bootloader.'))
+            raise UrsusWebError(f'{what_en} rejected: {ack}')
+        print(terms.tr(f'[ГОТОВО] {what_ru} проверен загрузчиком.', f'[READY] {what_en} validated by the bootloader.'))
         if confirm:
-            answer = input(terms.tr('Записать FIP UrsusBoot? [y/N]: ', 'Write the UrsusBoot FIP? [y/N]: ')).strip().lower()
+            answer = input(terms.tr(f'Записать {what_ru}? [y/N]: ', f'Write the {what_en}? [y/N]: ')).strip().lower()
             if answer not in ('y', 'yes', 'д', 'да'):
                 print(terms.tr('Запись отменена до изменения флеш-памяти.', 'Cancelled before flash write.'))
                 st = status(host)
                 finish_diagnostics(diag, host, operation, 'CANCELLED', status_snapshot=st)
                 return st
-        _json(host, 'POST', '/api/update-ursusboot', headers={'X-Ursus-Confirm': 'UPDATE-URSUSBOOT'}, timeout=20)
+        _json(host, 'POST', endpoint, headers={'X-Ursus-Confirm': confirm_token}, timeout=20)
         operation_started = True
         st = _poll(host, bootloader=True)
         finish_diagnostics(diag, host, operation, 'SUCCESS', status_snapshot=st)
@@ -538,6 +542,22 @@ def update_bootloader(host: str, fip: Path, *, confirm=True) -> dict:
         finish_diagnostics(diag, host, operation, 'FAILED', error=repr(exc),
                            transaction_state=None if operation_started else 'NOT_STARTED')
         raise
+
+
+def update_bootloader(host: str, fip: Path, *, confirm=True) -> dict:
+    return _fip_operation(host, fip, confirm=confirm, kind='fip', endpoint='/api/update-ursusboot',
+                          confirm_token='UPDATE-URSUSBOOT', operation='update-ursusboot',
+                          what_ru='FIP UrsusBoot', what_en='UrsusBoot FIP')
+
+
+def replace_with_vanilla(host: str, fip: Path, *, confirm=True) -> dict:
+    """One-way: pinned Vanilla OpenWrt U-Boot FIP into UBI fip (UrsusBoot kept as fip.old)."""
+    st = _fip_operation(host, fip, confirm=confirm, kind='vanilla-fip', endpoint='/api/replace-with-vanilla',
+                        confirm_token='REPLACE-URSUSBOOT-WITH-VANILLA', operation='replace-with-vanilla',
+                        what_ru='Vanilla FIP', what_en='Vanilla FIP')
+    if st.get('bootloader_update_complete') and str(st.get('bootloader_update_kind') or 'VANILLA') != 'VANILLA':
+        raise UrsusWebError(f"replacement finished with unexpected kind: {st.get('bootloader_update_kind')}")
+    return st
 
 def update_firmware(host: str, image: Path, *, confirm=True, preloader: Path | None = None, keep_settings: bool = True) -> dict:
     operation = 'update-openwrt'

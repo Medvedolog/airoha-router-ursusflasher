@@ -44,10 +44,10 @@ def action_applicability(state: ds.DeviceState):
 def _show_transition_action_unconditionally(_state: ds.DeviceState) -> None:
     base.base.ui.menu_item(
         4,
-        base.tr("Stock Nokia → OpenWrt UBI с UrsusBoot Recovery", "Stock Nokia → OpenWrt UBI with UrsusBoot Recovery"),
+        base.tr("Stock Nokia → OpenWrt UBI → Vanilla U-Boot", "Stock Nokia → OpenWrt UBI → Vanilla U-Boot"),
         base.tr(
-            "Ставит UrsusBoot (MD — в mtd0, MF — постоянный runtime), затем его Recovery переводит заводскую прошивку на OpenWrt UBI с быстрым BL2. UrsusBoot остаётся загрузчиком Recovery.",
-            "Installs UrsusBoot (MD: in mtd0, MF: persistent runtime), then its Recovery migrates the factory firmware to OpenWrt UBI with the fast BL2. UrsusBoot stays as the Recovery bootloader.",
+            "Ставит UrsusBoot (MD — в mtd0, MF — постоянный runtime), его Recovery переводит заводскую прошивку на OpenWrt UBI с быстрым BL2, затем (одно подтверждение) UrsusBoot заменяется закреплённым Vanilla OpenWrt U-Boot.",
+            "Installs UrsusBoot (MD: in mtd0, MF: persistent runtime), its Recovery migrates the factory firmware to OpenWrt UBI with the fast BL2, then (one confirmation) the pinned Vanilla OpenWrt U-Boot replaces UrsusBoot.",
         ),
         write_capable=True,
         enabled=True,
@@ -91,8 +91,8 @@ def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApp
         )
     if number == 4:
         return (
-            "Ставит UrsusBoot (MD — в mtd0, MF — постоянный runtime), затем его Recovery переводит заводскую прошивку на OpenWrt UBI с быстрым BL2. UrsusBoot остаётся загрузчиком Recovery.",
-            "Installs UrsusBoot (MD: in mtd0, MF: persistent runtime), then its Recovery migrates the factory firmware to OpenWrt UBI with the fast BL2. UrsusBoot stays as the Recovery bootloader.",
+            "Ставит UrsusBoot (MD — в mtd0, MF — постоянный runtime), его Recovery переводит заводскую прошивку на OpenWrt UBI с быстрым BL2, затем (одно подтверждение) UrsusBoot заменяется закреплённым Vanilla OpenWrt U-Boot.",
+            "Installs UrsusBoot (MD: in mtd0, MF: persistent runtime), its Recovery migrates the factory firmware to OpenWrt UBI with the fast BL2, then (one confirmation) the pinned Vanilla OpenWrt U-Boot replaces UrsusBoot.",
         )
     if number == 7 and state.current_system != "NOKIA_STOCK":
         return (

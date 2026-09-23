@@ -30,6 +30,8 @@ LAYOUT = {
         # Own name: openwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin is the proven RC
         # preloader that UART repair (items 5/9) and the bootrom backup require by SHA256.
         "ubi_preloader": ("ursusboot-ubi-preloader.fip", "data/payloads/md/ursusboot/ursusboot-md-{v}-ubi-preloader.fip"),
+        # TEST64+: the one Vanilla OpenWrt U-Boot FIP this UrsusBoot may install (item 4 last leg).
+        "vanilla_fip": ("vanilla-u-boot.fip", "data/payloads/md/vanilla/vanilla-u-boot-md-{v}.fip"),
     },
     "mf": {
         "runtime_lzma": ("u-boot.runtime.lzma", "data/payloads/mf/ursusboot/u-boot.runtime.lzma"),
@@ -37,13 +39,14 @@ LAYOUT = {
         "runtime_ram_fip": ("ursusboot-runtime-ram.fip", "data/payloads/mf/recovery/ursusboot-mf-{v}-runtime-ram.fip"),
         "uart_preloader": ("ursusboot-uart-preloader.bin", "data/payloads/mf/recovery/ursusboot-mf-{v}-uart-preloader.bin"),
         "ubi_preloader": ("ursusboot-ubi-preloader.fip", "data/payloads/mf/ursusboot/ursusboot-mf-{v}-ubi-preloader.fip"),
+        "vanilla_fip": ("vanilla-u-boot.fip", "data/payloads/mf/vanilla/vanilla-u-boot-mf-{v}.fip"),
     },
 }
 BOARD_PROFILE = {"md": "xg040-md", "mf": "xg040-mf"}
 # Superseded UrsusBoot builds that must not remain installable next to the release.
 STALE = {
-    "md": ("data/payloads/md/ursusboot", ("*TEST61*.fip", "*TEST62*.fip", "*TEST61*-u-boot.bin")),
-    "mf": ("data/payloads/mf/recovery", ("*TEST61*", "*TEST62*")),
+    "md": ("data/payloads/md/ursusboot", ("*TEST61*.fip", "*TEST62*.fip", "*TEST63*.fip", "*TEST61*-u-boot.bin", "*TEST63*-u-boot.bin", "*TEST63*.bin")),
+    "mf": ("data/payloads/mf/recovery", ("*TEST61*", "*TEST62*", "*TEST63*")),
 }
 
 
@@ -100,6 +103,12 @@ def load_board(fam: str, dist: Path, pin: dict) -> dict:
             raise RuntimeError(f"{fam}: UrsusBoot is not built for the packaged preloader ({digest})")
     if prov["version"].encode() not in bl33:
         raise RuntimeError(f"{fam}: u-boot.bin does not identify {prov['version']}")
+    # UrsusBoot memcmp()s the uploaded Vanilla FIP against this compiled-in array.
+    van = dist / "vanilla-u-boot.fip"
+    if not van.is_file() or not prov.get("vanilla_fip_sha256"):
+        raise RuntimeError(f"{fam}: release has no pinned Vanilla FIP (TEST64+ required)")
+    if sha256(van) != prov["vanilla_fip_sha256"] or bytes.fromhex(prov["vanilla_fip_sha256"]) not in bl33:
+        raise RuntimeError(f"{fam}: Vanilla FIP is not the one pinned into this UrsusBoot")
     return prov
 
 
@@ -151,6 +160,8 @@ def apply_release(tree: Path, md_dist: Path, mf_dist: Path, pin_path: Path) -> d
             "ubi_bl2_image_sha256": provs[fam]["ubi_bl2_image_sha256"],
             "atf_source_version": provs[fam]["atf_source_version"],
             "openwrt_ref": provs[fam]["openwrt_ref"],
+            "vanilla_fip_sha256": provs[fam]["vanilla_fip_sha256"],
+            "vanilla_uboot_variant": provs[fam].get("vanilla_uboot_variant", ""),
             "files": files,
         }
 
@@ -179,6 +190,7 @@ def apply_release(tree: Path, md_dist: Path, mf_dist: Path, pin_path: Path) -> d
         f"URSUSBOOT_REPO={pin['repo']}\nURSUSBOOT_COMMIT={pin['commit']}\nURSUSBOOT_VERSION={version}\n"
         + "".join(f"{fam.upper()}_UBI_PRELOADER_SHA256={b['ubi_preloader_sha256']}\n"
                   f"{fam.upper()}_UBI_BL2_IMAGE_SHA256={b['ubi_bl2_image_sha256']}\n"
+                  f"{fam.upper()}_VANILLA_FIP_SHA256={b['vanilla_fip_sha256']}\n"
                   for fam, b in release["boards"].items()),
         encoding="utf-8", newline="\n")
     return release

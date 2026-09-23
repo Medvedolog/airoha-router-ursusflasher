@@ -25,12 +25,12 @@ RELEASE_PAYLOADS = (
 )
 
 # Operator-facing documents only. Historical TEST57-TEST60 notes remain in the
-# repository for provenance but do not belong in a TEST63 hardware kit.
+# repository for provenance but do not belong in a TEST64 hardware kit.
 RELEASE_DOCS = (
     'INSTRUCTIONS_RU.md',
     'INSTRUCTIONS_EN.md',
     'EMERGENCY_URSUSBOOT_RU.md',
-    'TEST63_TEST_RU.md',
+    'TEST64_TEST_RU.md',
     'CHANGELOG_RU.md',
     'CHANGELOG_EN.md',
     'README_EN.md',

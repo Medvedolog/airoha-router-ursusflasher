@@ -16,7 +16,7 @@ KEEP_DOCS = {
     'INSTRUCTIONS_EN.md',
     'EMERGENCY_URSUSBOOT_RU.md',
     'CHANGELOG_RU.md',
-    'TEST63_TEST_RU.md',
+    'TEST64_TEST_RU.md',
 }
 
 

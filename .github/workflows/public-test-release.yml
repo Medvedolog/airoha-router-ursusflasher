@@ -13,7 +13,7 @@ on:
         required: true
         type: string
       hardware_passed:
-        description: "TEST63 hardware acceptance passed on MD and MF (docs/TEST63_TEST_RU.md)"
+        description: "TEST64 hardware acceptance passed on MD and MF (docs/TEST64_TEST_RU.md)"
         required: true
         type: boolean
         default: false
@@ -38,7 +38,7 @@ jobs:
       - name: Require hardware acceptance
         if: ${{ !inputs.hardware_passed }}
         run: |
-          echo "Publish only after the TEST63 hardware acceptance passed on MD and MF (docs/TEST63_TEST_RU.md)." >&2
+          echo "Publish only after the TEST64 hardware acceptance passed on MD and MF (docs/TEST64_TEST_RU.md)." >&2
           exit 2
 
       - name: Checkout repository
@@ -155,7 +155,7 @@ jobs:
           | \`1\` Установить OpenWrt | маршрут ONE-CLICK; на Nokia STOCK EXPERT может явно пропустить полный backup только для этого запуска; один \`[y/N]\` остаётся перед direct \`mtd0\` write |
           | \`2\` Установить или обновить UrsusBoot | обновить загрузчик на уже работающем роутере |
           | \`3\` Записать свою прошивку OpenWrt | поставить собственный образ вместо комплектного |
-          | \`4\` Stock Nokia → OpenWrt UBI с UrsusBoot Recovery | MD и MF: UrsusBoot TEST63 + быстрый BL2, OpenWrt на UBI |
+          | \`4\` Stock Nokia → OpenWrt UBI → Vanilla U-Boot | MD и MF: UrsusBoot TEST64 + быстрый BL2 → OpenWrt на UBI → закреплённый Vanilla U-Boot |
           | \`5\` Восстановить загрузчик | роутер не включается; нужен USB-UART 3,3 В |
           | \`7\` Создать полную копию flash | снять резервную копию до любых записей |
           | \`8\` Проверить резервную копию | убедиться, что копия пригодна для восстановления |
@@ -175,9 +175,9 @@ jobs:
 
           Подробности — в приложенных \`INSTRUCTIONS_RU.md\` и \`EMERGENCY_URSUSBOOT_RU.md\`.
 
-          > **UrsusBoot TEST63** из \`Medvedolog/airoha-ursusboot\` на закреплённом коммите, MD и MF,
+          > **UrsusBoot TEST64** из \`Medvedolog/airoha-ursusboot\` на закреплённом коммите, MD и MF,
           > с быстрым UBI BL2. Хэши preloader и BL2 — в \`PUBLIC_TEST_RELEASE.txt\` внутри архива.
-          > Аппаратная приёмка MD и MF пройдена (\`TEST63_TEST_RU.md\`).
+          > Аппаратная приёмка MD и MF пройдена (\`TEST64_TEST_RU.md\`).
 
           ## Проверка архива
 
@@ -207,4 +207,4 @@ jobs:
             "docs/INSTRUCTIONS_RU.md" \
             "docs/EMERGENCY_URSUSBOOT_RU.md" \
             "docs/CHANGELOG_RU.md" \\
-            "docs/TEST63_TEST_RU.md"
+            "docs/TEST64_TEST_RU.md"

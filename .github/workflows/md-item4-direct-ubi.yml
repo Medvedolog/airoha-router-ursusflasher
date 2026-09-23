@@ -33,7 +33,7 @@ on:
       - 'scripts/apply_ursusboot_release.py'
       - 'scripts/verify_kit.py'
       - 'scripts/verify_public_release.py'
-      - 'docs/TEST63_TEST_RU.md'
+      - 'docs/TEST64_TEST_RU.md'
       - 'config/URSUSBOOT_PIN.json'
       - 'scripts/repo_common.py'
 
@@ -102,7 +102,8 @@ jobs:
           test "$(jq -r .path <<<"$RUN")" = ".github/workflows/$WF"
           test "$(jq -r .conclusion <<<"$RUN")" = success
           has_pin_artifacts "$RUN_ID"
-          { echo "id=$RUN_ID"; echo "number=$(jq -r .run_number <<<"$RUN")"; echo "commit=$COMMIT"; } >> "$GITHUB_OUTPUT"
+          TAG="$(python3 -c "import json; print(json.load(open('config/URSUSBOOT_PIN.json'))['version'].rsplit('-',1)[-1])")"
+          { echo "id=$RUN_ID"; echo "number=$(jq -r .run_number <<<"$RUN")"; echo "commit=$COMMIT"; echo "tag=$TAG"; } >> "$GITHUB_OUTPUT"
 
       - uses: actions/download-artifact@v4
         with:
@@ -145,7 +146,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: UrsusFlasher-MD-MF-URSUSBOOT-TEST63-${{ github.sha }}
+          name: UrsusFlasher-MD-MF-URSUSBOOT-${{ steps.runs.outputs.tag }}-${{ github.sha }}
           path: |
             /tmp/kit-public/*.zip
             /tmp/kit-public/*.sha256.txt
