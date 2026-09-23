@@ -294,13 +294,7 @@ def _boot_family_recovery_once(host: str, local_ip: str, router_ip: str, family:
     ))
 
 
-def restore_from_running(state) -> None:
-    """Restore stock without UART from verified production OpenWrt/recovery."""
-    _verify_stock_restore_runtime()
-    state_family = _require_family(_family_from_state(state) or "")
-    host = str(getattr(state, "host", "") or "192.168.1.1")
-    proven.transition_lan_policy_notice()
-
+def _restore_inputs():
     local_ip = ui.prompt(tr("Статический IP компьютера [192.168.1.254]: ", "Static PC IP [192.168.1.254]: ")).strip() or "192.168.1.254"
     port_text = ui.prompt(tr("Порт передачи restore [1069]: ", "Restore transfer port [1069]: ")).strip()
     restore_port = int(port_text) if port_text else 1069
@@ -308,9 +302,19 @@ def restore_from_running(state) -> None:
     backup_dir = Path(raw).expanduser()
     if not raw:
         raise proven.Error(tr("backup не выбран", "no backup was selected"))
-
     payload_dir, manifest = proven.prepare_stock_restore_payloads(backup_dir)
     backup_family = _require_family(str(manifest.get("source_validation", {}).get("device_family") or ""))
+    return local_ip, restore_port, backup_dir, payload_dir, manifest, backup_family
+
+
+def restore_from_running(state) -> None:
+    """Restore stock without UART from verified production OpenWrt/recovery."""
+    _verify_stock_restore_runtime()
+    state_family = _require_family(_family_from_state(state) or "")
+    host = str(getattr(state, "host", "") or "192.168.1.1")
+    proven.transition_lan_policy_notice()
+
+    local_ip, restore_port, backup_dir, payload_dir, manifest, backup_family = _restore_inputs()
     if backup_family != state_family:
         raise proven.Error(tr(
             f"backup относится к {backup_family.upper()}, а устройство подтверждено как {state_family.upper()}; запись запрещена",
@@ -318,6 +322,11 @@ def restore_from_running(state) -> None:
         ))
     backup_sha = str(manifest.get("all_flash_sha256") or "")
     mode, _ = proven.inspect_restore_environment(host, expected_family=state_family, quiet=True)
+
+    if mode == "production" and _running_on_ursusboot(host):
+        _ask_for_ursusboot_recovery()
+        _restore_from_ursusboot_after_inputs(host, local_ip, restore_port, backup_dir, payload_dir, manifest, backup_family)
+        return
 
     if mode == "production":
         image, image_sha = _recovery_initramfs(state_family)
@@ -352,11 +361,133 @@ def restore_over_uart() -> None:
         proven.verify_kit = original_verify
 
 
+def _running_on_ursusboot(host: str) -> bool:
+    """OpenWrt booted by UrsusBoot: its bootcmd cannot be armed for a one-shot TFTP boot."""
+    try:
+        _, out = proven.ssh_run(host, "echo BOOTCMD=$(fw_printenv -n bootcmd 2>/dev/null || true)", timeout=60, quiet=True)
+    except proven.Error:
+        return False
+    return str(proven.parse_shell_assignments(out, ("BOOTCMD",)).get("BOOTCMD") or "").strip() == "ursusdispatch"
+
+
+def _ask_for_ursusboot_recovery() -> None:
+    ui.status(tr("МЕТОД", "METHOD"), tr(
+        "OpenWrt загружена через UrsusBoot (bootcmd=ursusdispatch): recovery-initramfs запускается из UrsusBoot Recovery, UART не нужен.",
+        "OpenWrt was booted by UrsusBoot (bootcmd=ursusdispatch): the recovery initramfs is started from UrsusBoot Recovery; no UART is needed.",
+    ))
+    ui.note(tr(
+        "Перезагрузите роутер (питание или reboot) и сразу зажмите Reset до красной последовательности и постоянного красного; затем отпустите.",
+        "Reboot the router (power or reboot) and immediately hold Reset until the red pattern and steady red; then release.",
+    ))
+
+
+def _wait_ursusboot(host: str, seconds: int = 300) -> dict:
+    import time
+    import ursus_web_client as uw
+    deadline = time.monotonic() + seconds
+    print(tr(f"[ЖДУ] UrsusBoot Recovery на {host} (до {seconds} с)...", f"[WAIT] UrsusBoot Recovery at {host} (up to {seconds} s)..."))
+    while time.monotonic() < deadline:
+        try:
+            return uw.status(host)
+        except Exception:
+            time.sleep(3)
+    raise proven.Error(tr(
+        "UrsusBoot Recovery не ответил; запись не начиналась",
+        "UrsusBoot Recovery did not answer; nothing was written",
+    ))
+
+
+def _restore_from_ursusboot_after_inputs(host, local_ip, restore_port, backup_dir, payload_dir, manifest, backup_family) -> None:
+    import one_key_multi
+    import ursus_web_client as uw
+
+    st = _wait_ursusboot(host)
+    family = _require_family(one_key_multi._family_from_ursus(st))
+    if backup_family != family:
+        raise proven.Error(tr(
+            f"backup относится к {backup_family.upper()}, а UrsusBoot сообщает {family.upper()}; запись запрещена",
+            f"the backup belongs to {backup_family.upper()}, while UrsusBoot reports {family.upper()}; writing is blocked",
+        ))
+    image, image_sha = _recovery_initramfs(family)
+    if not _one_yn_before_recovery_handoff(family=family, backup_sha=str(manifest.get("all_flash_sha256") or ""),
+                                           image=image, image_sha=image_sha):
+        ui.status(tr("СТОП", "STOP"), tr("Восстановление отменено; persistent write не начинался.", "Restore cancelled; no persistent write was started."))
+        return
+    uw.upload(host, image, "initramfs")
+    st = uw.status(host)
+    if not st.get("expert_valid"):
+        raise proven.Error(tr(
+            f"UrsusBoot не принял recovery-initramfs: {st.get('expert_reason') or st.get('expert_reason_class')}; запись не начиналась",
+            f"UrsusBoot rejected the recovery initramfs: {st.get('expert_reason') or st.get('expert_reason_class')}; nothing was written",
+        ))
+    uw.boot_once(host)
+    if proven.wait_for_stable_openwrt(host, 480, expected_mode="recovery") != "recovery":
+        raise proven.Error(tr(
+            "recovery-initramfs из UrsusBoot не подтверждена; запись не начиналась. Роутер вернётся в UrsusBoot/OpenWrt после перезагрузки.",
+            "the recovery initramfs started from UrsusBoot was not proven; nothing was written. The router returns to UrsusBoot/OpenWrt after a reboot.",
+        ))
+    print(tr(
+        f"[OK] {family.upper()} recovery-initramfs запущена из UrsusBoot в RAM; image во flash не записывался.",
+        f"[OK] {family.upper()} recovery initramfs started from UrsusBoot in RAM; the image was not written to flash.",
+    ))
+    with _legacy_restore_confirmation_adapter(already_confirmed=True):
+        proven.perform_stock_restore_over_ssh(host, local_ip, restore_port, backup_dir, payload_dir, manifest)
+
+
+def restore_via_ursusboot(host: str = "192.168.1.1") -> None:
+    """UrsusBoot Recovery (Web) -> family recovery initramfs in RAM -> restore over SSH."""
+    _verify_stock_restore_runtime()
+    proven.transition_lan_policy_notice()
+    local_ip, restore_port, backup_dir, payload_dir, manifest, backup_family = _restore_inputs()
+    _restore_from_ursusboot_after_inputs(host, local_ip, restore_port, backup_dir, payload_dir, manifest, backup_family)
+
+
+def _choose_route() -> str:
+    ui.rule(tr("СПОСОБ ВОССТАНОВЛЕНИЯ", "RESTORE ROUTE"), style="amber2")
+    ui.menu_item(1, tr("Автоматически (рекомендуется)", "Automatic (recommended)"),
+                 tr("по текущему состоянию роутера", "from the router's current state"))
+    ui.menu_item(2, tr("Из работающей OpenWrt по SSH", "From running OpenWrt over SSH"),
+                 tr("Vanilla U-Boot: одноразовый TFTP-запуск recovery в RAM; UrsusBoot: через его Recovery",
+                    "Vanilla U-Boot: one-shot TFTP recovery boot in RAM; UrsusBoot: via its Recovery"))
+    ui.menu_item(3, tr("Из UrsusBoot Recovery (Web)", "From UrsusBoot Recovery (Web)"),
+                 tr("Reset при включении → recovery-initramfs в RAM → восстановление; UART не нужен",
+                    "Reset at power-on → recovery initramfs in RAM → restore; no UART"))
+    ui.menu_item(4, tr("Через USB-UART (BootROM/XMODEM)", "Over USB-UART (BootROM/XMODEM)"),
+                 tr("если роутер не загружается совсем", "when the router does not boot at all"))
+    ui.menu_item(0, tr("Назад", "Back"))
+    return ui.prompt(tr("Способ [1]: ", "Route [1]: ")).strip() or "1"
+
+
 def restore_nokia(state) -> None:
+    """Item 6: the operator may pick the route; 'automatic' resolves it from DeviceState."""
+    choice = _choose_route()
+    if choice == "0":
+        return
+    if choice == "3":
+        restore_via_ursusboot(str(getattr(state, "host", "") or "192.168.1.1"))
+        return
+    if choice == "4":
+        restore_over_uart()
+        return
+    if choice == "2":
+        restore_from_running(state)
+        return
+    _restore_auto(state)
+
+
+def _restore_auto(state) -> None:
     """Resolve the safest stock-restore route from current DeviceState."""
     system = str(getattr(state, "current_system", "") or "UNKNOWN")
     probe = str(getattr(state, "probe_status", "") or "")
     family = _family_from_state(state)
+
+    if system == "RECOVERY" and (getattr(state, "evidence", {}) or {}).get("ursus_status"):
+        ui.status(tr("МЕТОД", "METHOD"), tr(
+            "UART не требуется: UrsusBoot Recovery → recovery-initramfs в RAM → restore",
+            "UART is not required: UrsusBoot Recovery → RAM recovery initramfs → restore",
+        ))
+        restore_via_ursusboot(str(getattr(state, "host", "") or "192.168.1.1"))
+        return
 
     if family and probe == "COMPLETE" and (system.startswith("OPENWRT") or system == "RECOVERY"):
         ui.status(tr("МЕТОД", "METHOD"), tr(

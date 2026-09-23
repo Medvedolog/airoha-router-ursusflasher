@@ -26,6 +26,8 @@ on:
       - 'ursusflasher/src/**'
       - 'ursusflasher/tools/selftest_item4_direct_ubi.py'
       - 'ursusflasher/tools/selftest_network_faults.py'
+      - 'ursusflasher/tools/selftest_restore_routes.py'
+      - 'ursusflasher/src/stock_restore.py'
       - 'config/**'
       - 'fw/**'
       - 'payloads/**'
@@ -57,6 +59,7 @@ jobs:
           python3 -m py_compile ursusflasher/src/*.py ursusflasher/tools/selftest_item4_direct_ubi.py scripts/*.py
           python3 ursusflasher/tools/selftest_item4_direct_ubi.py
           python3 ursusflasher/tools/selftest_network_faults.py
+          python3 ursusflasher/tools/selftest_restore_routes.py
 
       - name: Resolve the UrsusBoot release run for the pinned airoha-ursusboot commit
         id: runs

@@ -518,7 +518,7 @@ def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApp
     if number == 5:
         return ("USB-UART → Airoha BootROM → UrsusBoot из RAM → запись и проверка загрузчика", "USB-UART → Airoha BootROM → UrsusBoot from RAM → bootloader write and verification")
     if number == 6:
-        return ("Проверенный stock backup: автоматически без UART через U-Boot+RAM initramfs при доступной OpenWrt/recovery; иначе BootROM/XMODEM", "Validated stock backup: automatically without UART through U-Boot+RAM initramfs when OpenWrt/recovery is available; otherwise BootROM/XMODEM")
+        return ("Проверенный stock backup. Способ на выбор: автоматически; из OpenWrt по SSH; из UrsusBoot Recovery (без UART); через USB-UART (BootROM/XMODEM)", "Validated stock backup. Route of your choice: automatic; from OpenWrt over SSH; from UrsusBoot Recovery (no UART); over USB-UART (BootROM/XMODEM)")
     if number == 7:
         return ("BootROM/USB-UART → среда в RAM → чтение NAND → копия на ПК; flash не изменяется", "BootROM/USB-UART → RAM environment → NAND read → PC backup; flash is not modified")
     if number == 8:
