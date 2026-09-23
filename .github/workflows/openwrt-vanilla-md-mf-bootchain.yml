@@ -29,10 +29,12 @@ jobs:
             target: an7581
             device: nokia_xg-040g-md-ubi
             bl2: an7581-bl2.bin
+            uboot_variant: an7581_nokia_xg-040g-md
           - family: mf
             target: an7583
             device: nokia_xg-040g-mf-ubi
             bl2: an7583-bl2.bin
+            uboot_variant: an7583_nokia_xg-040g-mf
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     steps:
@@ -106,19 +108,23 @@ jobs:
           mkdir -p "$OUT"
           BL2="openwrt/staging_dir/target-aarch64_cortex-a53_musl/image/${{ matrix.bl2 }}"
           test -s "$BL2"
-          # OpenWrt builds U-Boot in build_dir/.../uboot-airoha-<variant>/uboot-airoha-<version>
-          # (PKG_NAME-PKG_VERSION); locate it through the u-boot.lzma the package produces.
-          LZMA="$(find openwrt/build_dir -type f -path '*/uboot-airoha-*/*' -name u-boot.lzma -print -quit)"
-          test -s "$LZMA"
-          UBDIR="$(dirname "$LZMA")"
-          BIN="$UBDIR/u-boot.bin"
+          # OpenWrt builds U-Boot in build_dir/<target>/uboot-airoha-<variant>/uboot-airoha-<version>.
+          # The Nokia variants do not set LZMA_COMPRESS, so the package leaves only u-boot.bin;
+          # compress it here with the buildroot's own lzma, exactly as the package does for
+          # LZMA_COMPRESS variants (LZMA-alone, as the FIP NT_FW expects).
+          BIN="$(find openwrt/build_dir -type f -path '*/uboot-airoha-${{ matrix.uboot_variant }}/*' -name u-boot.bin -print -quit)"
           test -s "$BIN"
+          UBDIR="$(dirname "$BIN")"
+          LZMA="$OUT/u-boot.lzma"
+          openwrt/staging_dir/host/bin/lzma e "$BIN" "$LZMA"
+          test -s "$LZMA"
           # No `| head` under pipefail: an early-closing reader can SIGPIPE the writer.
           grep -aFq 'U-Boot 2026.07' "$BIN"
           grep -Fq 'FM25G02B' "$UBDIR/drivers/mtd/nand/spi/fmsh.c"
           cp "$BL2" "$OUT/openwrt-vanilla-${{ matrix.family }}-fast-ubi-bl2.bin"
           cp "$BIN" "$OUT/openwrt-vanilla-${{ matrix.family }}-fudan-u-boot.bin"
-          cp "$LZMA" "$OUT/openwrt-vanilla-${{ matrix.family }}-fudan-u-boot.lzma"
+          mv "$LZMA" "$OUT/openwrt-vanilla-${{ matrix.family }}-fudan-u-boot.lzma"
+          LZMA="$OUT/openwrt-vanilla-${{ matrix.family }}-fudan-u-boot.lzma"
 
           manifest=kit/config/VANILLA_BOOT_CHAIN_PROFILES.json
           profile="xg040-${{ matrix.family }}"
