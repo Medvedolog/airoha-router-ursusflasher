@@ -89,7 +89,12 @@ jobs:
               [ -n "$RUN_ID" ] && break
               # 2) otherwise a release run must be in flight for this very commit (pin just changed)
               RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WF/runs?head_sha=$GITHUB_SHA&per_page=1" --jq '.workflow_runs[0] // empty')"
-              if [ -z "$RUN" ] && [ "$i" -gt 3 ]; then
+              # A release run for the pin may have been started by an earlier commit
+              # (a host-only change pushed while it builds): keep waiting while any
+              # release run is still queued or building; it may produce the pin's artifacts.
+              ACTIVE="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WF/runs?per_page=30" \
+                --jq '[.workflow_runs[] | select(.status != "completed")] | length')"
+              if [ -z "$RUN" ] && [ "$ACTIVE" = 0 ] && [ "$i" -gt 3 ]; then
                 echo "no release run for pinned $COMMIT and none started for $GITHUB_SHA; dispatch $WF" >&2; exit 1
               fi
               if [ -n "$RUN" ] && [ "$(jq -r .status <<<"$RUN")" = completed ] && [ "$(jq -r .conclusion <<<"$RUN")" != success ]; then
