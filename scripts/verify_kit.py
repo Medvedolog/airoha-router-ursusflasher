@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import importlib
 import json
+import re
 import sys
 import tempfile
 import zipfile
@@ -99,11 +100,12 @@ def verify_release(root: Path, pin: dict, dists: dict[str, Path]) -> dict:
     hit = [x for x in md_bundle["files"] if x.get("role") == "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE"]
     check(len(hit) == 1 and hit[0]["sha256"] == rel["boards"]["md"]["files"]["ubi_preloader"]["sha256"],
           "FIRMWARE_BUNDLE md preloader role -> release")
-    # Any UrsusBoot TEST6x build other than the pinned release version is superseded.
+    # Any UrsusBoot TEST6x / -tNN build other than the pinned release version is superseded.
     stale = sorted(p.relative_to(root).as_posix()
                    for d in ("data/payloads/md/ursusboot", "data/payloads/mf/recovery", "data/payloads/mf/ursusboot",
                              "data/payloads/md/vanilla", "data/payloads/mf/vanilla")
-                   for p in (root / d).glob("*TEST6[0-9]*") if pin["version"] not in p.name)
+                   for p in (root / d).glob("*")
+                   if re.search(r"TEST6\d|-t\d\d(?!\d)", p.name) and pin["version"] not in p.name)
     check(not stale, f"no superseded UrsusBoot build installable next to {pin['version']}", ",".join(stale) or "none")
     for fam in ("md", "mf"):
         b = rel["boards"][fam]

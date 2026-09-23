@@ -56,7 +56,7 @@ jobs:
           test "$(jq -r .path <<<"$RUN")" = ".github/workflows/md-item4-direct-ubi.yml"
           test "$(jq -r .conclusion <<<"$RUN")" = success
           test "$(jq -r .head_sha <<<"$RUN")" = "$GITHUB_SHA" || { echo "kit run $KIT_RUN is for $(jq -r .head_sha <<<"$RUN"), not $GITHUB_SHA" >&2; exit 3; }
-          gh run download "$KIT_RUN" -R "$GITHUB_REPOSITORY" -p "UrsusFlasher-MD-MF-URSUSBOOT-*-$GITHUB_SHA" -D kit-artifact
+          gh run download "$KIT_RUN" -R "$GITHUB_REPOSITORY" -p "UrsusFlasher-MD-MF-*-$GITHUB_SHA" -D kit-artifact
           mkdir -p dist-public
           find kit-artifact -type f -exec mv -t dist-public {} +
           ls -la dist-public

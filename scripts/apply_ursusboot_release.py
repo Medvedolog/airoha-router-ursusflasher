@@ -45,8 +45,8 @@ LAYOUT = {
 BOARD_PROFILE = {"md": "xg040-md", "mf": "xg040-mf"}
 # Superseded UrsusBoot builds that must not remain installable next to the release.
 STALE = {
-    "md": ("data/payloads/md/ursusboot", ("*TEST61*.fip", "*TEST62*.fip", "*TEST63*.fip", "*TEST61*-u-boot.bin", "*TEST63*-u-boot.bin", "*TEST63*.bin")),
-    "mf": ("data/payloads/mf/recovery", ("*TEST61*", "*TEST62*", "*TEST63*")),
+    "md": ("data/payloads/md/ursusboot", ("*TEST61*.fip", "*TEST62*.fip", "*TEST63*.fip", "*TEST61*-u-boot.bin", "*TEST63*-u-boot.bin", "*TEST63*.bin", "*UBIUX1-TEST64*")),
+    "mf": ("data/payloads/mf/recovery", ("*TEST61*", "*TEST62*", "*TEST63*", "*UBIUX1-TEST64*")),
 }
 
 
