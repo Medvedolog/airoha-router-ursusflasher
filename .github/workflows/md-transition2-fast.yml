@@ -1,43 +1,9 @@
 name: EXPERT item4 TRANSITION2 no-UART kit
 
+# Legacy: manual only. Superseded by md-item4-direct-ubi.yml; EXPERT item 4 is now the MD+MF STOCK -> OpenWrt UBI -> Vanilla path; this TRANSITION2 kit
+# still asserts the old stock_ab_pregnant.run_expert route.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/ursusboot-modular-airoha
-    paths:
-      - '.github/workflows/md-transition2-fast.yml'
-      - 'START_EXPERT.cmd'
-      - 'START_EXPERT.sh'
-      - 'ursusboot/configs/ursusboot-transition-handoff.cfg'
-      - 'ursusboot/patches/190-md-transition1-handoff.patch'
-      - 'ursusboot/patches/200-transition2-uart-fallback.patch'
-      - 'ursusboot/patches/205-transition2-an7581-gdm1-enable.patch'
-      - 'ursusboot/patches/210-transition2-netdbg1-netreset.patch'
-      - 'ursusboot/patches/215-transition2-canonical-web.patch'
-      - 'ursusboot/patches/220-transition2-stockslot-command.patch'
-      - 'ursusboot/scripts/build_md_transition1.sh'
-      - 'ursusboot/source/ursusboot-0.1.0-alpha5-UBIUX1-TEST61-source.tar.zst'
-      - 'ursusflasher/src/backup_progress.py'
-      - 'ursusflasher/src/transition_trace.py'
-      - 'ursusflasher/src/transition_fastpath.py'
-      - 'ursusflasher/src/device_state.py'
-      - 'ursusflasher/src/expert.py'
-      - 'ursusflasher/src/expert_airoha.py'
-      - 'ursusflasher/src/expert_multi.py'
-      - 'ursusflasher/src/stock_ab_transition.py'
-      - 'ursusflasher/src/stock_fit_wrapper.py'
-      - 'ursusflasher/src/stock_slot_uart.py'
-      - 'ursusflasher/src/stock_slot_telnet.py'
-      - 'ursusflasher/tools/selftest_backup_progress.py'
-      - 'ursusflasher/tools/selftest_transition_trace.py'
-      - 'ursusflasher/tools/selftest_transition_expert_item4.py'
-      - 'ursusflasher/tools/selftest_transition_family_metadata.py'
-      - 'ursusflasher/tools/selftest_transition_write_safety.py'
-      - 'ursusflasher/tools/selftest_expert_launcher_item4.py'
-      - 'ursusflasher/tools/selftest_stateui6_action_preflight.py'
-      - 'ursusflasher/tools/selftest_device_state_v529.py'
-      - 'config/**'
 
 permissions:
   contents: read

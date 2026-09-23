@@ -1,18 +1,8 @@
 name: Airoha multimodel public test
 
+# Legacy: manual only. Superseded by md-item4-direct-ubi.yml; the canonical public kit is
+# built by md-item4-direct-ubi.yml and published by public-test-release.yml.
 on:
-  push:
-    branches:
-      - feature/ursusboot-modular-airoha
-    paths:
-      - '.github/workflows/airoha-multimodel-public-test.yml'
-      - '.github/workflows/md-transition1-build.yml'
-      - 'START_*.cmd'
-      - 'START_*.sh'
-      - 'config/**'
-      - 'payloads/**'
-      - 'ursusflasher/**'
-      - 'ursusboot/**'
   workflow_dispatch:
 
 permissions:
