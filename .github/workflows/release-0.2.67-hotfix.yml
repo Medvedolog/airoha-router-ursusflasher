@@ -1,0 +1,112 @@
+name: Publish UrsusFlasher 0.2.67 host hotfix
+
+on:
+  push:
+    branches:
+      - feature/ursusboot-modular-airoha
+    paths:
+      - '.github/workflows/release-0.2.67-hotfix.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: release-0.2.67-host-hotfix
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Verify release identity
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n' < VERSION)" = "0.2.67"
+          test "$(jq -r .version config/URSUSBOOT_PIN.json)" = "0.1.0-alpha5-t66"
+
+      - name: Wait for exact canonical kit
+        id: kit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_ID=""
+          for i in $(seq 1 90); do
+            RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/md-item4-direct-ubi.yml/runs?head_sha=$GITHUB_SHA&per_page=10" --jq '.workflow_runs[0] // empty')"
+            if [ -n "$RUN" ]; then
+              STATUS="$(jq -r .status <<<"$RUN")"
+              CONCLUSION="$(jq -r '.conclusion // ""' <<<"$RUN")"
+              RUN_ID="$(jq -r .id <<<"$RUN")"
+              echo "canonical kit run=$RUN_ID status=$STATUS conclusion=$CONCLUSION"
+              if [ "$STATUS" = completed ]; then
+                test "$CONCLUSION" = success
+                break
+              fi
+            fi
+            sleep 10
+          done
+          test -n "$RUN_ID"
+          RUN="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
+          test "$(jq -r .head_sha <<<"$RUN")" = "$GITHUB_SHA"
+          test "$(jq -r .conclusion <<<"$RUN")" = success
+          echo "id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact verified kit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KIT_RUN: ${{ steps.kit.outputs.id }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist-public
+          gh run download "$KIT_RUN" -R "$GITHUB_REPOSITORY"             -p "UrsusFlasher-0.2.67-MD-MF-UrsusBoot-T66-$GITHUB_SHA"             -D dist-public
+          find dist-public -maxdepth 2 -type f -print
+          META="$(find dist-public -name URSUSFLASHER_COMMIT.txt -print -quit)"
+          test -n "$META"
+          grep -Fxq "URSUSFLASHER_COMMIT=$GITHUB_SHA" "$META"
+          ZIP="$(find dist-public -name 'UrsusFlasher-0.2.67-PUBLIC-TEST.zip' -print -quit)"
+          SHA_FILE="$(find dist-public -name 'UrsusFlasher-0.2.67-PUBLIC-TEST.zip.sha256.txt' -print -quit)"
+          test -s "$ZIP"
+          test -s "$SHA_FILE"
+          EXPECTED="$(awk '{print $1; exit}' "$SHA_FILE")"
+          ACTUAL="$(sha256sum "$ZIP" | cut -d' ' -f1)"
+          test "$ACTUAL" = "$EXPECTED"
+          cp "$ZIP" .
+          cp "$SHA_FILE" .
+
+      - name: Prepare announcement
+        run: |
+          cat > RELEASE_NOTES_RU.md <<'EOF'
+          # UrsusFlasher 0.2.67 — укрепили получение UID 0
+
+          Медведь больше не просит оператора вручную лезть в заводскую веб-морду, если на Nokia STOCK выключен FTP.
+
+          В 0.2.67 установочные пути **MD и MF** теперь сами:
+          - после неудачного получения UID 0 включают FTP через штатный Web UI;
+          - перечитывают FTP-реквизиты;
+          - заново открывают Telnet и проверяют настоящий `su user_ftp -> id -u == 0`;
+          - только если FTP не помог, пробуют Samba/`samba_anony`.
+
+          Заодно закрыт обратный крайний случай: read-only backup по-прежнему не имеет права включать сервисы, и даже после переподключения при сетевом сбое этот запрет больше не теряется.
+
+          Дополнительно прогоняется совместимость host-side кода с Python **3.12 / 3.13 / 3.14**.
+
+          **Важно:** это host-side релиз UrsusFlasher. Закреплённый UrsusBoot не менялся — **0.1.0-alpha5-t66**. CI PASS этого релиза не объявляется новой аппаратной приёмкой загрузчика.
+          EOF
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="test-v0.2.67-run${GITHUB_RUN_NUMBER}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists" >&2
+            exit 3
+          fi
+          gh release create "$TAG"             --target "$GITHUB_SHA"             --title "UrsusFlasher 0.2.67 — публичный тест"             --prerelease             --notes-file RELEASE_NOTES_RU.md             UrsusFlasher-0.2.67-PUBLIC-TEST.zip             UrsusFlasher-0.2.67-PUBLIC-TEST.zip.sha256.txt             docs/INSTRUCTIONS_RU.md             docs/EMERGENCY_URSUSBOOT_RU.md             docs/CHANGELOG_RU.md             docs/TEST64_TEST_RU.md

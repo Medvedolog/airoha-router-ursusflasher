@@ -1,3 +1,12 @@
+# 0.2.67 PUBLIC TEST — укреплён bootstrap UID 0 на Nokia STOCK
+
+- Установочные ONE-CLICK/EXPERT пути для **MD и MF** теперь при необходимости сами включают FTP через штатный Web UI, если без сервисного аккаунта нельзя получить подтверждённый UID 0.
+- После включения FTP реквизиты перечитываются из Web UI, Telnet открывается заново и проверяется реальный `su user_ftp -> id -u == 0`. Samba/`samba_anony` используется только как второй fallback, если FTP не помог.
+- Обязательный полный stock backup больше не блокирует установку на устройстве, где FTP изначально выключен.
+- Read-only резервное копирование остаётся действительно read-only по сервисам: оно не включает Telnet/FTP/Samba, а повторное подключение после сетевого сбоя теперь наследует исходный запрет на provisioning.
+- Добавлен отдельный regression selftest для MD/MF и матрица host Python 3.12 / 3.13 / 3.14.
+- Это host-side исправление UrsusFlasher. Закреплённый UrsusBoot остаётся **0.1.0-alpha5-t66**; новая аппаратная приёмка загрузчика этим релизом не заявляется.
+
 # Development checkpoint — Vanilla pregnant item 4 / MD stock fallback / OEM FIT carrier (2026-09-22)
 
 - EXPERT пункт 4 переведён на полный автономный путь `stock tcboot -> stock-compatible SLOT2 -> ARM64 handoff shim -> RAM-only UrsusBoot -> pregnant OpenWrt initramfs -> stage2 -> canonical UBI -> pinned UnameOne -> Vanilla FIP -> BL2 LAST`. Persistent UrsusBoot в конечной Vanilla-системе не остаётся.
