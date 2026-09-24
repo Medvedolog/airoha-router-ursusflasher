@@ -110,4 +110,4 @@ PAYLOAD_SHA256SUMS.txt
 VERSION
 ```
 
-CI verifies pinned UrsusBoot t66 for MD/MF, the MF recovery/runtime contracts, canonical UnameOne firmware set, pinned transition/recovery resources, host Python compilation, package payload allowlist and final ZIP contents.
+CI verifies pinned UrsusBoot t67 for MD/MF, the MF recovery/runtime contracts, canonical UnameOne firmware set, pinned transition/recovery resources, host Python compilation, package payload allowlist and final ZIP contents.

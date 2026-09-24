@@ -35,7 +35,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(tr -d '\r\n' < VERSION)" = "0.2.67"
-          test "$(jq -r .version config/URSUSBOOT_PIN.json)" = "0.1.0-alpha5-t66"
+          test "$(jq -r .version config/URSUSBOOT_PIN.json)" = "0.1.0-alpha5-t67"
 
       - name: Wait for exact canonical kit
         id: kit
@@ -71,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist-public
-          gh run download "$KIT_RUN" -R "$GITHUB_REPOSITORY"             -p "UrsusFlasher-0.2.67-MD-MF-UrsusBoot-T66-$GITHUB_SHA"             -D dist-public
+          gh run download "$KIT_RUN" -R "$GITHUB_REPOSITORY"             -p "UrsusFlasher-0.2.67-MD-MF-UrsusBoot-T67-$GITHUB_SHA"             -D dist-public
           find dist-public -maxdepth 2 -type f -print
           META="$(find dist-public -name URSUSFLASHER_COMMIT.txt -print -quit)"
           test -n "$META"
@@ -103,7 +103,7 @@ jobs:
 
           Дополнительно прогоняется совместимость host-side кода с Python **3.12 / 3.13 / 3.14**.
 
-          **Важно:** это host-side релиз UrsusFlasher. Закреплённый UrsusBoot не менялся — **0.1.0-alpha5-t66**. CI PASS этого релиза не объявляется новой аппаратной приёмкой загрузчика.
+          **Важно:** это host-side релиз UrsusFlasher. Закреплённый UrsusBoot обновлён до **0.1.0-alpha5-t67**: исправлены ложный post-migration `UBI_ATTACH_FAILED`, журналирование Web reboot, 3-секундный fallback при зависшем HTTP-ответе и до трёх попыток `reset`, если команда неожиданно возвращается. CI PASS не объявляется аппаратной приёмкой этих новых исправлений.
           EOF
 
       - name: Publish prerelease

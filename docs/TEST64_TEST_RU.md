@@ -1,6 +1,6 @@
 # TEST64 — аппаратный тест MD и MF: Nokia STOCK → OpenWrt UBI → Vanilla U-Boot
 
-UrsusBoot `0.1.0-alpha5-t66` (коротко **t66**: t64 + сброс окружения при замене на Vanilla + RAM U-Boot для UART с поддержкой Fudan FM25G02B) собран в `Medvedolog/airoha-ursusboot` на
+UrsusBoot `0.1.0-alpha5-t67` (коротко **t67**: t66 + исправление ложного post-migration `UBI_ATTACH_FAILED` + усиленный Web reboot с диагностическим логом, bounded fallback и повторными попытками reset) собран в `Medvedolog/airoha-ursusboot` на
 закреплённом коммите (см. `data/URSUSBOOT_RELEASE.json`). В комплекте:
 
 - быстрый BL2: при загрузке он сканирует UBI сразу, без полного прохода по NAND;

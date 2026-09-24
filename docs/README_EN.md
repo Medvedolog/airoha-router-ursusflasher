@@ -45,7 +45,7 @@ That is a router with OpenWrt already installed: the layout is `OPENWRT_UBI`, wh
 
 ## Current development status
 
-The current published PUBLIC TEST is **UrsusFlasher 0.2.67** with pinned **UrsusBoot `0.1.0-alpha5-t66`** for MD and MF. 0.2.67 strengthens the stock UID-0 bootstrap: install flows can enable FTP through the stock Web UI when a service account is required for root access, while read-only backup does not. The version badge above is populated from the latest GitHub prerelease so the title page does not need a manual version edit for every public test.
+The current published PUBLIC TEST is **UrsusFlasher 0.2.67** with pinned **UrsusBoot `0.1.0-alpha5-t67`** for MD and MF. t67 hardens post-migration Web reboot/status handling; 0.2.67 also strengthens the stock UID-0 bootstrap: install flows can enable FTP through the stock Web UI when a service account is required for root access, while read-only backup does not. The version badge above is populated from the latest GitHub prerelease so the title page does not need a manual version edit for every public test.
 
 TEST59 and TEST60 are revoked for new hardware runs because their split build identity could make ONE-CLICK attempt an unnecessary second FIP write after a direct `mtd0` write/readback had already succeeded.
 
