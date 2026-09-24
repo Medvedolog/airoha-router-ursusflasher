@@ -1,4 +1,4 @@
-# UrsusFlasher 0.2.62 TEST — Nokia XG-040G-MD + XG-040G-MF
+# UrsusFlasher 0.2.67 TEST — Nokia XG-040G-MD + XG-040G-MF
 
 Hardware-test комплект для:
 
@@ -26,6 +26,12 @@ Linux/macOS:
 ./START_EXPERT.sh
 ./START_UART_RESTORE.sh
 ```
+
+## 0.2.67
+
+- Исправлен bootstrap UID 0 на Nokia STOCK: установочные ONE-CLICK/EXPERT пути MD и MF при необходимости сами включают FTP через штатный Web UI, перечитывают реквизиты и повторяют Telnet/su. Samba остаётся вторым fallback только если FTP не дал пригодный UID 0 аккаунт.
+- Read-only пункт создания резервной копии по-прежнему не включает Telnet/FTP/Samba; это правило теперь сохраняется и при повторном Telnet-подключении после сбоя передачи.
+- Host-side совместимость проверяется на Python 3.12, 3.13 и 3.14.
 
 ## 0.2.62
 

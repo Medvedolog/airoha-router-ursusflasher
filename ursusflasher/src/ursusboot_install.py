@@ -1091,7 +1091,7 @@ def run_install(*, unattended: bool = False, host: str = "192.168.1.1", recovery
                 ))
                 telnet.close()
                 telnet = None
-                pb.backup_tftp(access, access.host, full_backup, expected_family="md")
+                pb.backup_tftp(access, access.host, full_backup, expected_family="md", allow_service_provisioning=True)
                 result["full_stock_backup"] = str(full_backup)
                 identity_json = full_backup / "DEVICE_IDENTITY.json"
                 if identity_json.is_file():

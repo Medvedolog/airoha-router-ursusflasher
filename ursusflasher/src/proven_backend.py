@@ -3773,7 +3773,7 @@ def backup_tftp(
                         f"[ЖДУ] Открываю новый Telnet-сеанс с root-доступом для повтора mtd{number}.",
                         f"[WAIT] Opening a new UID-0 Telnet session to retry mtd{number}.",
                     ))
-                    telnet = login_root_family(access, expected_family, allow_service_provisioning=True)
+                    telnet = login_root_family(access, expected_family, allow_service_provisioning=allow_service_provisioning)
 
                 ready = threading.Event()
                 cancel = threading.Event()

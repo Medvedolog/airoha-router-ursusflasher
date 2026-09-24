@@ -345,7 +345,7 @@ def install_from_stock(*, host: str, unattended: bool = False, skip_full_backup:
     try:
         if not skip_full_backup:
             full = backups / f"stock-mf-full-{stamp}"
-            pb.backup_tftp(access, access.host, full, expected_family="mf", allow_service_provisioning=False)
+            pb.backup_tftp(access, access.host, full, expected_family="mf", allow_service_provisioning=True)
             result["full_stock_backup"] = str(full)
         else:
             result["full_stock_backup"] = None; result["full_stock_backup_skipped"] = True

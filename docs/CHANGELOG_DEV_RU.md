@@ -8,6 +8,14 @@ Published/release history remains in `docs/CHANGELOG_RU.md`.
 
 ---
 
+## 2026-09-24 — 0.2.67 / stock UID0 service bootstrap
+
+- Исправлен install-flow на Nokia STOCK для обеих XG-040: MD и MF теперь явно разрешают штатному root-bootstrap включить FTP через Web UI до обязательного полного backup, если без сервисного UID0 аккаунта root недоступен.
+- Порядок эскалации остаётся минимальным: сначала FTP/user_ftp, Samba/samba_anony только если FTP не помог.
+- Read-only EXPERT backup сохраняет запрет на provisioning сервисов; повторное Telnet-подключение внутри backup_tftp теперь наследует исходный allow_service_provisioning вместо безусловного True.
+- Добавлен regression selftest для MD и MF: install auto-enables FTP, read-only path не меняет service state.
+- Host Python compatibility matrix: 3.12 / 3.13 / 3.14.
+
 ## 2026-09-16 — TRANSITION2 stabilization / MD hardware evidence
 
 ### TRANSITION identity dependency removed
