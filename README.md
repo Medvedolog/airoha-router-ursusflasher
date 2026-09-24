@@ -4,17 +4,16 @@
 
 # UrsusFlasher
 
-### OpenWrt на Nokia XG-040G-MD: установка, бэкапы и спасение «кирпичей»
+### OpenWrt на Nokia XG-040G-MD / XG-040G-MF: установка, бэкапы и восстановление
 
-**Airoha AN7581 · SPI-NAND 256 МиБ · UrsusBoot · OpenWrt**
+**Airoha AN7581 / AN7583 · SPI-NAND 256 МиБ · UrsusBoot · OpenWrt**
 
-![UrsusFlasher](https://img.shields.io/badge/UrsusFlasher-0.2.61-6f4b2f)
-![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--UBIUX1--TEST61-b36b32)
-![Target](https://img.shields.io/badge/Nokia-XG--040G--MD-555)
-![OpenWrt](https://img.shields.io/badge/OpenWrt-r36009%2B75-00a4ef)
-![FUDAN test](https://img.shields.io/badge/FUDAN_NAND-нужен_полный_тест_и_отзыв-c27b00)
+[![UrsusFlasher latest prerelease](https://img.shields.io/github/v/release/Medvedolog/airoha-router-ursusflasher?include_prereleases&label=UrsusFlasher&color=6f4b2f)](https://github.com/Medvedolog/airoha-router-ursusflasher/releases)
+[![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--t66-b36b32)](config/URSUSBOOT_PIN.json)
+![Target](https://img.shields.io/badge/Nokia-XG--040G--MD_%2F_XG--040G--MF-555)
+![OpenWrt](https://img.shields.io/badge/OpenWrt-UnameOne_Edition-00a4ef)
 
-**[📦 Опубликованные сборки](../../releases)** · [Инструкция](docs/INSTRUCTIONS_RU.md) · [Changelog](docs/CHANGELOG_RU.md) · [Аварийное восстановление](docs/EMERGENCY_URSUSBOOT_RU.md)
+**[📦 Скачать последний PUBLIC TEST — верхний prerelease](https://github.com/Medvedolog/airoha-router-ursusflasher/releases)** · [Инструкция](docs/INSTRUCTIONS_RU.md) · [Changelog](docs/CHANGELOG_RU.md) · [Аварийное восстановление](docs/EMERGENCY_URSUSBOOT_RU.md)
 
 🇬🇧 [Read this in English](docs/README_EN.md)
 
@@ -44,10 +43,10 @@
 
 ## Текущий статус разработки
 
-Текущий кандидат PUBLIC TEST в `main` — **UrsusFlasher 0.2.61** с **UrsusBoot `0.1.0-alpha5-UBIUX1-TEST61`**. TEST61 содержит исправления SAFETYREG1 и требует полного аппаратного прогона перед публикацией нового GitHub Release и переводом в production. На странице Releases пока могут находиться более старые опубликованные тестовые сборки.
+Текущий опубликованный PUBLIC TEST — **UrsusFlasher 0.2.67** с закреплённым **UrsusBoot `0.1.0-alpha5-t66`** для MD и MF. В 0.2.67 укреплён stock UID 0 bootstrap: установочные пути сами включают FTP через штатный Web UI, если без сервисного аккаунта root недоступен; read-only backup этого не делает. Значок версии вверху берётся автоматически из последнего GitHub prerelease, поэтому титульная страница не должна отставать от опубликованной сборки.
 
 > [!IMPORTANT]
-> **Очень нужен полный тест на Nokia XG-040G-MD с FUDAN NAND, особенно FM25G02B, и отзыв владельца такого устройства.** Нужен полный проход: заводская Nokia → резервная копия → UrsusBoot TEST61 → Recovery → OpenWrt UBI → перезагрузка и повторный вход в Recovery. Полезен любой исход — успешная установка или ошибка. Пожалуйста, приложите точную модель NAND, описание пройденного сценария и сохранённый журнал/диагностику в [GitHub Issues](../../issues). Аппаратный PASS прежней сборки на SkyHigh нельзя автоматически переносить на FUDAN и TEST61.
+> **0.2.67 — host-side обновление UrsusFlasher.** Закреплённый UrsusBoot остаётся t66; CI PASS этой версии не является новой аппаратной приёмкой загрузчика. Для аппаратных прогонов MD/MF используйте [TEST64 checklist](docs/TEST64_TEST_RU.md) и прикладывайте полный журнал при любой ошибке.
 
 ---
 
@@ -130,7 +129,7 @@
 *   `10` Доступные операции для данного устройства.
 *   `11` Flash-память, разметка и сбойные блоки.
 
-*Примечание: Пункты 6 и 9 в меню есть, но пока работают как заглушки (разработка в процессе).*
+*Примечание: пункт 4 выполняет полный переход Stock → OpenWrt UBI → Vanilla U-Boot; пункт 6 восстанавливает Nokia stock из проверенного backup; пункт 9 возвращает заводскую загрузочную область Nokia.*
 
 
 ---

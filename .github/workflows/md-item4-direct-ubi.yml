@@ -39,6 +39,11 @@ on:
       - 'scripts/verify_kit.py'
       - 'scripts/verify_public_release.py'
       - 'docs/TEST64_TEST_RU.md'
+      - 'README.md'
+      - 'docs/README_EN.md'
+      - 'docs/INSTRUCTIONS_RU.md'
+      - 'docs/INSTRUCTIONS_EN.md'
+      - 'ursusflasher/release/README.md'
       - 'config/URSUSBOOT_PIN.json'
       - 'scripts/repo_common.py'
 

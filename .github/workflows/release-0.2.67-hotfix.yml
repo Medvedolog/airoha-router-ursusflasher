@@ -6,6 +6,13 @@ on:
       - feature/ursusboot-modular-airoha
     paths:
       - '.github/workflows/release-0.2.67-hotfix.yml'
+      - 'README.md'
+      - 'docs/README_EN.md'
+      - 'docs/INSTRUCTIONS_RU.md'
+      - 'docs/INSTRUCTIONS_EN.md'
+      - 'docs/CHANGELOG_RU.md'
+      - 'ursusflasher/release/README.md'
+      - '.github/workflows/md-item4-direct-ubi.yml'
 
 permissions:
   contents: write

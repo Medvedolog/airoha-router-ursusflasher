@@ -3,11 +3,11 @@
 Hardware-test комплект для:
 
 ```text
-Nokia XG-040G-MD -> Airoha AN7581 -> UrsusBoot-MD TEST61
-Nokia XG-040G-MF -> Airoha AN7583 -> UrsusBoot-MF TEST61
+Nokia XG-040G-MD -> Airoha AN7581 -> UrsusBoot-MD t66
+Nokia XG-040G-MF -> Airoha AN7583 -> UrsusBoot-MF t66
 ```
 
-Python 3.12+; сторонние Python-пакеты не требуются. Это тестовый комплект, не release: `main`, tag и GitHub Release автоматически не изменяются.
+Python 3.12+; сторонние Python-пакеты не требуются. Актуальный публичный тест публикуется как GitHub prerelease; титульная страница репозитория показывает его версию автоматически.
 
 ## Запуск
 
@@ -110,4 +110,4 @@ PAYLOAD_SHA256SUMS.txt
 VERSION
 ```
 
-CI verifies frozen MD TEST61, MF RAM Recovery, MF persistent runtime, canonical eight-file UnameOne firmware set, pinned transition/recovery resources, host Python compilation, package payload allowlist and final ZIP contents.
+CI verifies pinned UrsusBoot t66 for MD/MF, the MF recovery/runtime contracts, canonical UnameOne firmware set, pinned transition/recovery resources, host Python compilation, package payload allowlist and final ZIP contents.
