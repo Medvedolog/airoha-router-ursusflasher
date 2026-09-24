@@ -68,7 +68,7 @@ class FakeAccess:
         self.telnet_port = 23
         self.user = "admin"
         self.password = "web-pass"
-        self.su_user = ""
+        self.su_user = "auto"
         self.su_password = ""
         self.ftp_user = ""
         self.ftp_password = ""
