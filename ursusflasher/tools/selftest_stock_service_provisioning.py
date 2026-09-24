@@ -14,6 +14,9 @@ import proven_backend as pb
 import ursusboot_install as ui
 import expert
 
+# CI selftest: never prompt for the operator language.
+pb._LANG = "en"
+
 
 def source_contract() -> None:
     mf = inspect.getsource(mri.install_from_stock)
