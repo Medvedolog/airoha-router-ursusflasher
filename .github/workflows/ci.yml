@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [ main, master, feature/ursusboot-modular-airoha ]
+    branches: [ main, master ]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -9,16 +9,11 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ['3.12', '3.13', '3.14']
-    name: verify (Python ${{ matrix.python-version }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.13'
       - run: python3 scripts/verify_boot_chain.py
       - run: python3 scripts/verify_repo.py
       - run: python3 scripts/build_release.py --out-dir dist
