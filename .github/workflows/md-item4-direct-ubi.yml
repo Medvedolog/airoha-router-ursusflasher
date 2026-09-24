@@ -29,6 +29,7 @@ on:
       - 'ursusflasher/tools/selftest_network_faults.py'
       - 'ursusflasher/tools/selftest_restore_routes.py'
       - 'ursusflasher/tools/selftest_mf_backup_gate.py'
+      - 'ursusflasher/tools/selftest_stock_service_provisioning.py'
       - 'ursusflasher/src/stock_restore.py'
       - 'config/**'
       - 'fw/**'
