@@ -3773,6 +3773,8 @@ def backup_tftp(
                         f"[ЖДУ] Открываю новый Telnet-сеанс с root-доступом для повтора mtd{number}.",
                         f"[WAIT] Opening a new UID-0 Telnet session to retry mtd{number}.",
                     ))
+                    # Preserve the caller's service-provisioning policy across reconnects:
+                    # install may enable FTP/Samba, read-only backup must never do so.
                     telnet = login_root_family(access, expected_family, allow_service_provisioning=allow_service_provisioning)
 
                 ready = threading.Event()
