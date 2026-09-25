@@ -44,10 +44,10 @@ def action_applicability(state: ds.DeviceState):
 def _show_transition_action_unconditionally(_state: ds.DeviceState) -> None:
     base.base.ui.menu_item(
         4,
-        base.tr("Stock Nokia → OpenWrt UBI → Vanilla U-Boot", "Stock Nokia → OpenWrt UBI → Vanilla U-Boot"),
+        base.tr("Заводская Nokia → OpenWrt UBI → Vanilla U-Boot (по выбору)", "Nokia stock → OpenWrt UBI → Vanilla U-Boot (optional)"),
         base.tr(
-            "Ставит UrsusBoot (MD — в mtd0, MF — постоянный runtime), его Recovery переводит заводскую прошивку на OpenWrt UBI с быстрым BL2, затем (одно подтверждение) UrsusBoot заменяется закреплённым Vanilla OpenWrt U-Boot.",
-            "Installs UrsusBoot (MD: in mtd0, MF: persistent runtime), its Recovery migrates the factory firmware to OpenWrt UBI with the fast BL2, then (one confirmation) the pinned Vanilla OpenWrt U-Boot replaces UrsusBoot.",
+            "Сначала UrsusBoot переводит заводскую Nokia на OpenWrt UBI. После проверки можно отдельно подтвердить замену UrsusBoot на Vanilla U-Boot; если отказаться, UrsusBoot Recovery останется.",
+            "UrsusBoot first migrates Nokia stock to OpenWrt UBI. After verification you may separately confirm replacing UrsusBoot with Vanilla U-Boot; declining keeps UrsusBoot Recovery.",
         ),
         write_capable=True,
         enabled=True,
@@ -64,7 +64,7 @@ def _transition_profile_after_selection(_menu_state: ds.DeviceState) -> str | No
     backend's own stock login, chipset and /proc/mtd checks still prove the
     target before any NAND write, and a mismatch stops there.
     """
-    host = os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
+    host = _menu_state.host
     fresh_state = ds.probe_device_state(host)
     detected = _original_transition_profile(fresh_state)
     if detected in ("xg040-md", "xg040-mf"):
@@ -86,13 +86,13 @@ def _transition_profile_after_selection(_menu_state: ds.DeviceState) -> str | No
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     if number == 1:
         return (
-            "Nokia stock MD/MF → полный backup (в EXPERT можно пропустить) → UrsusBoot → комплектная OpenWrt. Аварийный WebFailsafe UrsusBoot остаётся в загрузчике.",
-            "Nokia stock MD/MF → full backup (EXPERT may skip it) → UrsusBoot → bundled OpenWrt. The UrsusBoot emergency WebFailsafe stays in the bootloader.",
+            "Установит комплектную OpenWrt на MD/MF. Можно выбрать UrsusBoot с аварийным WebFailsafe или Vanilla U-Boot. В режиме UrsusBoot EXPERT позволяет пропустить полную копию памяти.",
+            "Installs the bundled OpenWrt on MD/MF. Choose UrsusBoot with emergency WebFailsafe or Vanilla U-Boot. In UrsusBoot mode EXPERT may skip the full backup.",
         )
     if number == 4:
         return (
-            "Ставит UrsusBoot (MD — в mtd0, MF — постоянный runtime), его Recovery переводит заводскую прошивку на OpenWrt UBI с быстрым BL2, затем (одно подтверждение) UrsusBoot заменяется закреплённым Vanilla OpenWrt U-Boot.",
-            "Installs UrsusBoot (MD: in mtd0, MF: persistent runtime), its Recovery migrates the factory firmware to OpenWrt UBI with the fast BL2, then (one confirmation) the pinned Vanilla OpenWrt U-Boot replaces UrsusBoot.",
+            "Переведёт заводскую Nokia на OpenWrt UBI через UrsusBoot Recovery. После проверки предложит Vanilla U-Boot; отказ оставит UrsusBoot Recovery.",
+            "Migrates Nokia stock to OpenWrt UBI through UrsusBoot Recovery. After verification it offers Vanilla U-Boot; declining keeps UrsusBoot Recovery.",
         )
     if number == 7 and state.current_system != "NOKIA_STOCK":
         return (

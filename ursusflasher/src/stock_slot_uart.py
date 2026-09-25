@@ -301,7 +301,7 @@ def _run_uart() -> None:
         serial_port.close()
 
 
-def run() -> None:
+def run(*, host: str | None = None) -> None:
     ui.rule(tr("ПЕРЕКЛЮЧЕНИЕ ЗАВОДСКОГО SLOT", "SWITCH NOKIA STOCK SLOT"), style="amber2")
     print(tr("  1 — Через stock root Telnet", "  1 — Through stock root Telnet"))
     print(tr("  2 — Через USB-UART / U-Boot", "  2 — Through USB-UART / U-Boot"))
@@ -311,8 +311,8 @@ def run() -> None:
         return
     if method == "1":
         import stock_slot_telnet
-        host = os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
-        stock_slot_telnet.run(host=host)
+        selected_host = host or os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
+        stock_slot_telnet.run(host=selected_host)
         return
     if method == "2":
         _run_uart()

@@ -251,17 +251,18 @@ def _install_openwrt(st: dict, family: str, *, already_authorized: bool) -> dict
     return result
 
 
-def main(*, skip_full_backup: bool = False) -> int:
+def main(*, skip_full_backup: bool = False, router_host: str | None = None) -> int:
     global HOST
     pb.start_session_logging()
     ui.enable()
-    choose_language()
+    if router_host is None:
+        choose_language()
     root = _root()
     version = ui.package_version(root)
     ui.banner("UrsusFlasher ONE-KEY", version=version)
-    # network_guidance owns the single shared, large stock-reset warning.
-    network_guidance.show()
-    HOST = md_one_key.choose_stock_ip()
+    HOST = router_host if router_host is not None else md_one_key.choose_stock_ip()
+    # EXPERT has already asked for an IP; ONE-KEY asks only when launched alone.
+    network_guidance.show(HOST)
     os.environ["NOKIA_ROUTER_IP"] = HOST
     os.environ["NOKIA_HOST"] = HOST
 

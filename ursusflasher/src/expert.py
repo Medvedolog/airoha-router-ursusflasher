@@ -424,11 +424,10 @@ def flash_diagnostics(state: ds.DeviceState) -> bool:
     print(tr("Flash-память: ", "Flash memory: ") + nand_text)
     ui.note(tr("Машинные значения DeviceState записаны в лог сеанса.", "Raw DeviceState values were written to the session log."))
     if state.probe_status != ds.PROBE_COMPLETE:
-        print(tr("\nСетевая проверка состояния неполна. Для не загружающегося роутера можно отдельно проверить UBI/BL2 через USB-UART только для чтения; NAND/UBI не изменяются.", "\nNetwork state check is incomplete. For a brick, a separate read-only UBI/BL2 check can be run over USB-UART; NAND/UBI are not modified."))
-        ans = input(tr("Запустить проверку через USB-UART только для чтения? [y/N]: ", "Run the read-only UART check? [y/N]: ")).strip().lower()
-        if ans in ("y", "yes", "д", "да"):
-            ursusboot_update.uart_bootrom_forensics()
-            return True
+        ui.note(tr(
+            "Сетевая проверка неполна. Глубокую проверку UBI/BL2 через USB-UART сюда не включаю: подключение UBI может обновить его служебные данные.",
+            "Network checks are incomplete. The deeper UART UBI/BL2 inspection is not part of this passive check: attaching UBI may update its metadata.",
+        ))
     return False
 
 
@@ -470,10 +469,10 @@ def run_action(fn, *, write_may_happen: bool = False) -> None:
         ui.prompt(tr("Нажмите Enter, чтобы вернуться в меню EXPERT...", "Press Enter to return to the EXPERT menu..."))
 
 
-def _show_action(number: int, app: dict[int, ds.ActionApplicability], detail_ru: str = "", detail_en: str = "") -> None:
+def _show_action(number: int, app: dict[int, ds.ActionApplicability], detail_ru: str = "", detail_en: str = "", *, display_number: int | None = None) -> None:
     a = app[number]
     detail = tr(detail_ru, detail_en) if detail_ru or detail_en else ""
-    ui.menu_item(number, terms.action_title(a.key), detail or None, write_capable=a.write_capable, enabled=a.enabled, reason=a.reason if not a.enabled else "")
+    ui.menu_item(number if display_number is None else display_number, terms.action_title(a.key), detail or None, write_capable=a.write_capable, enabled=a.enabled, reason=a.reason if not a.enabled else "")
     if a.enabled and a.note:
         print(f"       {ui.paint(a.note, 'dim')}")
 
@@ -526,9 +525,9 @@ def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApp
     if number == 9:
         return ("Сборка аварийного комплекта из проверенной резервной копии; пока не реализовано", "Build a rescue kit from a validated backup; not implemented yet")
     if number == 10:
-        return ("Пассивная диагностика Web/SSH: система, разметка, загрузчик и применимые операции", "Passive Web/SSH diagnostics: system, layout, bootloader and applicable actions")
+        return ("Покажет определённую модель, систему и доступные действия; ничего не запишет", "Shows the detected model, system and available actions; writes nothing")
     if number == 11:
-        return ("Web/SSH, при необходимости USB-UART: разметка, NAND и bad blocks; только чтение", "Web/SSH, USB-UART when needed: layout, NAND and bad blocks; read-only")
+        return ("Покажет сведения о NAND и разметке, доступные через Web/SSH; без подключения UBI", "Shows NAND and layout details available over Web/SSH; does not attach UBI")
     if number == 12:
         return ("Локальная проверка SHA256 и состава файлов публичного комплекта", "Local SHA256 and package-content verification")
     return "", ""

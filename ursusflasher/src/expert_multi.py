@@ -36,6 +36,15 @@ def tr(ru: str, en: str) -> str:
     return en if os.environ.get("NOKIA_LANG") == "en" else ru
 
 
+# EXPERT presents actions by workflow, while the existing action IDs remain
+# stable for backends, capability metadata and compatibility checks.
+DISPLAY_TO_ACTION = {
+    1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6,
+    7: 9, 8: 7, 9: 8, 10: 13, 11: 10, 12: 11, 13: 12,
+}
+ACTION_TO_DISPLAY = {action: display for display, action in DISPLAY_TO_ACTION.items()}
+
+
 def _family(state: ds.DeviceState) -> str | None:
     key = str(state.evidence.get("board_profile") or "")
     if key.startswith("mf"):
@@ -55,8 +64,8 @@ def _family_or_prompt(state: ds.DeviceState) -> str:
 
 def _ask_skip_full_backup() -> bool:
     answer = base.ui.prompt(tr(
-        "EXPERT backup: Enter — полный mtd0..mtd16; s — пропустить и сохранить только обязательный live mtd0: ",
-        "EXPERT backup: Enter — full mtd0..mtd16; s — skip it and keep only the mandatory live mtd0 capture: ",
+        "Резервная копия: Enter — сохранить все разделы mtd0..mtd16; s — сохранить только обязательный mtd0: ",
+        "Backup: Enter — save all mtd0..mtd16 partitions; s — save only the required mtd0: ",
     )).strip().lower()
     return answer in ("s", "skip", "п", "пропустить")
 
@@ -164,13 +173,13 @@ def _show_action(number: int, app: dict[int, ds.ActionApplicability], detail_ru:
     if not app[number].enabled:
         detail_ru = ""
         detail_en = ""
-    base._show_action(number, app, detail_ru, detail_en)
+    base._show_action(number, app, detail_ru, detail_en, display_number=ACTION_TO_DISPLAY[number])
 
 
 def _show_factory_restore_action(app: dict[int, ds.ActionApplicability]) -> None:
     a = app[9]
     base.ui.menu_item(
-        9,
+        ACTION_TO_DISPLAY[9],
         tr("Вернуть заводской загрузчик Nokia (UrsusBoot будет удалён)", "Restore Nokia factory bootloader (UrsusBoot will be removed)"),
         tr("Через USB-UART. Вернёт заводскую загрузочную область с полной проверкой.", "Via USB-UART. Restores the factory boot area with full verification."),
         write_capable=True,
@@ -181,16 +190,53 @@ def _show_factory_restore_action(app: dict[int, ds.ActionApplicability]) -> None
 
 def _show_stock_slot_action() -> None:
     base.ui.menu_item(
-        13,
-        tr("Переключить заводской SLOT", "Switch Nokia stock SLOT"),
+        ACTION_TO_DISPLAY[13],
+        tr("Переключить заводской слот загрузки", "Switch Nokia stock boot slot"),
         tr(
-            "Nokia stock MD: выбрать MASTER/SLOT1 или SLAVE/SLOT2 через stock root Telnet либо USB-UART/U-Boot. Меняется только active; после записи выполняется полный readback.",
-            "Nokia stock MD: select MASTER/SLOT1 or SLAVE/SLOT2 through stock root Telnet or USB-UART/U-Boot. Only active is changed; a full readback is performed after writing.",
+            "Для Nokia MD: выбрать первый или второй заводской слот через Telnet или USB-UART; изменение проверяется чтением.",
+            "For Nokia MD: select the first or second stock slot over Telnet or USB-UART; the change is read back.",
         ),
         write_capable=True,
         enabled=True,
         reason="",
     )
+
+
+def _capability_report(state: ds.DeviceState) -> None:
+    """Use the same applicability and displayed numbering as the live menu."""
+    app = action_applicability(state)
+    base.print_state_header(state)
+    print()
+    print(tr("Доступность действий:", "Action availability:"))
+    for display, number in DISPLAY_TO_ACTION.items():
+        if number == 13:
+            title = tr("Переключить заводской слот загрузки", "Switch Nokia stock boot slot")
+            enabled, write_capable, reason = True, True, ""
+            detail = tr(
+                "Для Nokia MD: выбрать слот через заводской Telnet или USB-UART; запись проверяется чтением.",
+                "For Nokia MD: select a slot over stock Telnet or USB-UART; the write is read back.",
+            )
+        else:
+            action = app[number]
+            title = base.terms.action_title(action.key)
+            if number == 4:
+                title = tr("Заводская Nokia → OpenWrt UBI → Vanilla U-Boot (по выбору)",
+                           "Nokia stock → OpenWrt UBI → Vanilla U-Boot (optional)")
+            enabled, write_capable, reason = action.enabled, action.write_capable, action.reason
+            detail_ru, detail_en = _menu_detail(number, state, app)
+            detail = tr(detail_ru, detail_en)
+        marker = "!" if write_capable else " "
+        yes = tr("ДА", "YES") if enabled else tr("НЕТ", "NO")
+        print(f" {marker} {display:2d}  {title} — {yes}")
+        if detail:
+            print(f"       {detail}")
+        if reason:
+            print(f"       {reason}")
+        if number != 13 and enabled and app[number].note:
+            print(f"       {app[number].note}")
+    print()
+    base.ui.note(tr("! — действие может записывать данные во flash-память (NAND).",
+                    "! — action may write to flash memory (NAND)."))
 
 
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
@@ -314,7 +360,7 @@ def main() -> int:
         c = base.ask_menu(13)
         if c == "0":
             return 0
-        number = int(c)
+        number = DISPLAY_TO_ACTION[int(c)]
 
         if number == 4:
             profile = base._transition_profile(state)
@@ -327,7 +373,7 @@ def main() -> int:
             continue
 
         if number == 13:
-            base.run_action(stock_slot_uart.run, write_may_happen=True)
+            base.run_action(lambda: stock_slot_uart.run(host=host), write_may_happen=True)
             continue
 
         selected = app[number]
@@ -341,8 +387,8 @@ def main() -> int:
             skip_backup = False
             if state.current_system == "NOKIA_STOCK":
                 choice = base.ui.prompt(tr(
-                    "EXPERT backup: Enter — полный mtd0..mtd16; s — пропустить и сохранить только обязательный live mtd0: ",
-                    "EXPERT backup: Enter — full mtd0..mtd16; s — skip it and keep only the mandatory live mtd0 capture: ",
+                    "Если выберете UrsusBoot: Enter — копия mtd0..mtd16; s — только обязательный mtd0. Для Vanilla копия всегда полная: ",
+                    "If you choose UrsusBoot: Enter — mtd0..mtd16 backup; s — required mtd0 only. Vanilla always takes a full backup: ",
                 )).strip().lower()
                 skip_backup = choice in ("s", "skip", "п", "пропустить")
             base.run_action(lambda: base.one_key.main(skip_full_backup=skip_backup, router_host=host), write_may_happen=True)
@@ -390,7 +436,7 @@ def main() -> int:
             ))
             base.run_action(lambda: _run_factory_bootarea_restore(state), write_may_happen=True)
         elif number == 10:
-            base.run_action(lambda: base.capability_report(base._interactive_diagnostic_state(state)))
+            base.run_action(lambda: _capability_report(base._interactive_diagnostic_state(state)))
         elif number == 11:
             try:
                 base.flash_diagnostics(base._interactive_diagnostic_state(state))
