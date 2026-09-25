@@ -223,8 +223,12 @@ def _capability_report(state: ds.DeviceState) -> None:
                 title = tr("Заводская Nokia → OpenWrt UBI → Vanilla U-Boot (по выбору)",
                            "Nokia stock → OpenWrt UBI → Vanilla U-Boot (optional)")
             enabled, write_capable, reason = action.enabled, action.write_capable, action.reason
-            detail_ru, detail_en = _menu_detail(number, state, app)
-            detail = tr(detail_ru, detail_en)
+            if number == 9:
+                detail = tr("Через USB-UART вернёт заводскую загрузочную область Nokia с проверкой записи.",
+                            "Restores the Nokia factory boot area over USB-UART with write verification.")
+            else:
+                detail_ru, detail_en = _menu_detail(number, state, app)
+                detail = tr(detail_ru, detail_en)
         marker = "!" if write_capable else " "
         yes = tr("ДА", "YES") if enabled else tr("НЕТ", "NO")
         print(f" {marker} {display:2d}  {title} — {yes}")
