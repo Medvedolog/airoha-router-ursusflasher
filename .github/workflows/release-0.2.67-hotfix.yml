@@ -1,18 +1,9 @@
 name: Publish UrsusFlasher 0.2.67 host hotfix
 
+# Retired: this published the 0.2.67 host hotfix on doc pushes and now fails
+# its 0.2.67 identity check on every later version. Manual only.
 on:
-  push:
-    branches:
-      - feature/ursusboot-modular-airoha
-    paths:
-      - '.github/workflows/release-0.2.67-hotfix.yml'
-      - 'README.md'
-      - 'docs/README_EN.md'
-      - 'docs/INSTRUCTIONS_RU.md'
-      - 'docs/INSTRUCTIONS_EN.md'
-      - 'docs/CHANGELOG_RU.md'
-      - 'ursusflasher/release/README.md'
-      - '.github/workflows/md-item4-direct-ubi.yml'
+  workflow_dispatch:
 
 permissions:
   contents: write
