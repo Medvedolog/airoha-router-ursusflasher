@@ -1,6 +1,6 @@
-# UrsusFlasher 0.2.67 / UrsusBoot t66 — operating instructions
+# UrsusFlasher 0.2.71 / UrsusBoot t71 — operating instructions
 
-This document covers Nokia XG-040G-MD / AN7581 and XG-040G-MF / AN7583. The current published PUBLIC TEST is UrsusFlasher 0.2.67 with pinned UrsusBoot t66. The newest prerelease is always listed first on the GitHub Releases page.
+This document covers Nokia XG-040G-MD / AN7581 and XG-040G-MF / AN7583. The current published PUBLIC TEST is UrsusFlasher 0.2.71 with pinned UrsusBoot t71. The newest prerelease is always listed first on the GitHub Releases page.
 
 UrsusFlasher requires **Python 3.12+** and only the standard library; no `pip` packages are required.
 

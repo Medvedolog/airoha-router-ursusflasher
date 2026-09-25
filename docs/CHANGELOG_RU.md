@@ -1,11 +1,11 @@
-# 0.2.70 ENGINEERING HW TEST — UrsusBoot T70 pinned MD/MF
+# 0.2.71 PUBLIC TEST — UrsusBoot t71 для MD и MF
 
-- Это **не prerelease и не GitHub Release**: сборка предназначена только для аппаратной проверки из GitHub Actions artifact.
-- UrsusFlasher закреплён на exact UrsusBoot T70 commit `e2039d9e9406211abf4efdb05e63737b2e26acd7` / `0.1.0-alpha5-t70` одновременно для XG-040G-MD и XG-040G-MF.
-- MD получает обычный канонический `ursusboot-update.fip`.
-- MF по-прежнему ставится штатно через `u-boot.runtime.lzma` с device-derived FIP и сохранением native BL31, но комплект теперь также обязательно содержит отдельный T70 `ursusboot-update.fip` для WebFailsafe repair missing/invalid `fip`.
-- Packaging QA проверяет exact commit/version/provenance, соответствие MF repair FIP его T70 BL33 и наличие этого FIP в итоговом MD+MF kit.
-- CI PASS не считается HW PASS; публикация остаётся ручной только после аппаратной приёмки.
+- Закреплён **UrsusBoot `0.1.0-alpha5-t71`** (`96a2777e`) для XG-040G-MD и XG-040G-MF.
+- WebFailsafe после перехода на UBI больше не показывает ложные «том fip/fit отсутствует» и «UBI не подключена»; после перезагрузки в OpenWrt открытая вкладка сообщает об этом вместо 404 (t68).
+- Ремонт UBI `fip` из WebFailsafe: при отсутствующем, битом или нечитаемом `fip` кнопка **«Восстановить UrsusBoot»** записывает проверенный UrsusBoot через `fip.new` с контрольным чтением; `fip.old` сохраняется, битый `fip` уходит в `fip.bad`; при нехватке места на UBI битый `fip` удаляется, целый чужой FIP — никогда (t69–t71). Обновление OpenWrt при неисправном `fip` отказывает с `BOOTLOADER_REPAIR_REQUIRED`.
+- MF получил канонический `ursusboot-update.fip` (тот же BL33, что и `u-boot.runtime.lzma`), комплект его проверяет.
+- ONE-KEY: при неудачном входе в Web UI Nokia показывается настоящая причина (обычно открытая вкладка браузера) вместо `model=UNKNOWN`.
+- Аппаратная приёмка: XG-040G-MD — ONE-KEY с UrsusBoot и ONE-KEY Vanilla (STOCK → UrsusBoot → UBI → Vanilla, заводской MAC сохранён) на t71. Ремонт `fip` на железе ещё не проверялся.
 
 # 0.2.67 PUBLIC TEST — укреплён bootstrap UID 0 на Nokia STOCK
 
@@ -14,7 +14,7 @@
 - Обязательный полный stock backup больше не блокирует установку на устройстве, где FTP изначально выключен.
 - Read-only резервное копирование остаётся действительно read-only по сервисам: оно не включает Telnet/FTP/Samba, а повторное подключение после сетевого сбоя теперь наследует исходный запрет на provisioning.
 - Добавлен отдельный regression selftest для MD/MF и матрица host Python 3.12 / 3.13 / 3.14.
-- Это host-side исправление UrsusFlasher. Закреплённый UrsusBoot остаётся **0.1.0-alpha5-t66**; новая аппаратная приёмка загрузчика этим релизом не заявляется.
+- В текущем PUBLIC TEST закреплён **UrsusBoot 0.1.0-alpha5-t67**: исправлены ложный post-migration `UBI_ATTACH_FAILED`, журналирование Web reboot и bounded retry/fallback перезагрузки. CI PASS t67 не является новой аппаратной приёмкой этих исправлений.
 
 # Development checkpoint — Vanilla pregnant item 4 / MD stock fallback / OEM FIT carrier (2026-09-22)
 
