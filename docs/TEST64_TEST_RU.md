@@ -1,6 +1,6 @@
 # TEST64 — аппаратный тест MD и MF: Nokia STOCK → OpenWrt UBI → Vanilla U-Boot
 
-UrsusBoot `0.1.0-alpha5-t68` (коротко **t68**: t66 + исправление ложного post-migration `UBI_ATTACH_FAILED` + усиленный Web reboot с диагностическим логом, bounded fallback и повторными попытками reset (t67) + после завершённого перехода на UBI диагностика WebFailsafe больше не показывает ложные «том fip/fit отсутствует» и «UBI не подключена», а вкладка после перезагрузки в OpenWrt сообщает об этом вместо 404 (t68)) собран в `Medvedolog/airoha-ursusboot` на
+UrsusBoot `0.1.0-alpha5-t71` (коротко **t71**: t68 + ремонт UBI `fip` из WebFailsafe — «Восстановить UrsusBoot» при отсутствующем, битом или нечитаемом `fip` с сохранением `fip.old` (t69–t71), MF получил `ursusboot-update.fip`) собран в `Medvedolog/airoha-ursusboot` на
 закреплённом коммите (см. `data/URSUSBOOT_RELEASE.json`). В комплекте:
 
 - быстрый BL2: при загрузке он сканирует UBI сразу, без полного прохода по NAND;
