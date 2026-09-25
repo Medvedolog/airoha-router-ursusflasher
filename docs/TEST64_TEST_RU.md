@@ -1,6 +1,6 @@
 # TEST64 — аппаратный тест MD и MF: Nokia STOCK → OpenWrt UBI → Vanilla U-Boot
 
-UrsusBoot `0.1.0-alpha5-t71` (коротко **t71**: t68 + ремонт UBI `fip` из WebFailsafe — «Восстановить UrsusBoot» при отсутствующем, битом или нечитаемом `fip` с сохранением `fip.old` (t69–t71), MF получил `ursusboot-update.fip`) собран в `Medvedolog/airoha-ursusboot` на
+UrsusBoot `0.1.0-alpha5-t72` (коротко **t72**: t71 + UrsusBoot не принимает чужое окружение (Vanilla/сток) и не теряет восстановление по Reset при любом `bootcmd`; t68–t71: честная диагностика после перехода, ремонт UBI `fip`) собран в `Medvedolog/airoha-ursusboot` на
 закреплённом коммите (см. `data/URSUSBOOT_RELEASE.json`). В комплекте:
 
 - быстрый BL2: при загрузке он сканирует UBI сразу, без полного прохода по NAND;
