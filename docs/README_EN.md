@@ -4,17 +4,16 @@
 
 # UrsusFlasher
 
-### OpenWrt on the Nokia XG-040G-MD: install, back up, recover
+### OpenWrt on Nokia XG-040G-MD / XG-040G-MF: install, back up, recover
 
-**Airoha AN7581 · 256 MiB SPI-NAND · UrsusBoot · OpenWrt**
+**Airoha AN7581 / AN7583 · 256 MiB SPI-NAND · UrsusBoot · OpenWrt**
 
-![UrsusFlasher](https://img.shields.io/badge/UrsusFlasher-0.2.61-6f4b2f)
-![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--UBIUX1--TEST61-b36b32)
-![Target](https://img.shields.io/badge/Nokia-XG--040G--MD-555)
-![OpenWrt](https://img.shields.io/badge/OpenWrt-r36009%2B75-00a4ef)
-![TEST61](https://img.shields.io/badge/TEST61-hardware_safety_regression_required-c27b00)
+[![UrsusFlasher latest prerelease](https://img.shields.io/github/v/release/Medvedolog/airoha-router-ursusflasher?include_prereleases&label=UrsusFlasher&color=6f4b2f)](https://github.com/Medvedolog/airoha-router-ursusflasher/releases)
+[![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--t67-b36b32)](https://github.com/Medvedolog/airoha-ursusboot/tree/8c2567abda3e7c772021989d66503e73b32581b9)
+![Target](https://img.shields.io/badge/Nokia-XG--040G--MD_%2F_XG--040G--MF-555)
+![OpenWrt](https://img.shields.io/badge/OpenWrt-UnameOne_Edition-00a4ef)
 
-**[📦 Published builds](https://github.com/Medvedolog/airoha-router-ursusflasher/releases)** · [instructions](INSTRUCTIONS_EN.md) · [changelog](CHANGELOG_EN.md) · [emergency recovery](EMERGENCY_URSUSBOOT_RU.md)
+**[📦 Download the latest PUBLIC TEST — top prerelease](https://github.com/Medvedolog/airoha-router-ursusflasher/releases)** · [instructions](INSTRUCTIONS_EN.md) · [changelog](CHANGELOG_EN.md) · [emergency recovery](EMERGENCY_URSUSBOOT_RU.md)
 
 🇷🇺 [Читать по-русски](../README.md)
 
@@ -46,7 +45,7 @@ That is a router with OpenWrt already installed: the layout is `OPENWRT_UBI`, wh
 
 ## Current development status
 
-The current PUBLIC TEST candidate in `main` is **UrsusFlasher 0.2.61** with **UrsusBoot `0.1.0-alpha5-UBIUX1-TEST61`**. TEST61 contains the SAFETYREG1 fixes and still requires a complete hardware regression cycle before a new GitHub Release is published or the build is treated as production. The Releases page may therefore still contain an older published test build.
+The current published PUBLIC TEST is **UrsusFlasher 0.2.67** with pinned **UrsusBoot `0.1.0-alpha5-t67`** for MD and MF. t67 hardens post-migration Web reboot/status handling; 0.2.67 also strengthens the stock UID-0 bootstrap: install flows can enable FTP through the stock Web UI when a service account is required for root access, while read-only backup does not. The version badge above is populated from the latest GitHub prerelease so the title page does not need a manual version edit for every public test.
 
 TEST59 and TEST60 are revoked for new hardware runs because their split build identity could make ONE-CLICK attempt an unnecessary second FIP write after a direct `mtd0` write/readback had already succeeded.
 
@@ -314,7 +313,7 @@ git config --global core.longpaths true
 
 ## Releases
 
-Published user kits are listed on the [Releases page](https://github.com/Medvedolog/airoha-router-ursusflasher/releases). The current 0.2.61/TEST61 candidate stays in `main` until the complete hardware cycle passes; no new Release is created merely because source/build/package QA passed. When publication is intentionally started, GitHub Actions (**Public test release**) verifies the repository, builds the archive and verifies the built archive separately.
+Published user kits are listed on the [Releases page](https://github.com/Medvedolog/airoha-router-ursusflasher/releases); the newest PUBLIC TEST prerelease is listed first. Publication uses an exact verified MD+MF kit and keeps host CI evidence separate from hardware acceptance.
 
 SDKs, compilers, build trees and development tools are not in that archive: they belong to the repository, not to whoever is flashing a router.
 
