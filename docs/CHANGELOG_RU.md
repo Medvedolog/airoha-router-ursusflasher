@@ -1,3 +1,12 @@
+# 0.2.70 ENGINEERING HW TEST — UrsusBoot T70 pinned MD/MF
+
+- Это **не prerelease и не GitHub Release**: сборка предназначена только для аппаратной проверки из GitHub Actions artifact.
+- UrsusFlasher закреплён на exact UrsusBoot T70 commit `e2039d9e9406211abf4efdb05e63737b2e26acd7` / `0.1.0-alpha5-t70` одновременно для XG-040G-MD и XG-040G-MF.
+- MD получает обычный канонический `ursusboot-update.fip`.
+- MF по-прежнему ставится штатно через `u-boot.runtime.lzma` с device-derived FIP и сохранением native BL31, но комплект теперь также обязательно содержит отдельный T70 `ursusboot-update.fip` для WebFailsafe repair missing/invalid `fip`.
+- Packaging QA проверяет exact commit/version/provenance, соответствие MF repair FIP его T70 BL33 и наличие этого FIP в итоговом MD+MF kit.
+- CI PASS не считается HW PASS; публикация остаётся ручной только после аппаратной приёмки.
+
 # 0.2.67 PUBLIC TEST — укреплён bootstrap UID 0 на Nokia STOCK
 
 - Установочные ONE-CLICK/EXPERT пути для **MD и MF** теперь при необходимости сами включают FTP через штатный Web UI, если без сервисного аккаунта нельзя получить подтверждённый UID 0.

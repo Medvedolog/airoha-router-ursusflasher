@@ -151,6 +151,9 @@ def verify_host(root: Path, rel: dict) -> None:
     mri = importlib.import_module("mf_runtime_install")
     check(Path(mri.require_bl33()).resolve() == (root / mf["runtime_lzma"]["path"]).resolve(),
           "MF runtime install -> release BL33")
+    mf_repair = root / mf["update_fip"]["path"]
+    check(mf_repair.is_file() and sha256(mf_repair) == mf["update_fip"]["sha256"],
+          "MF canonical persistent repair FIP -> release", mf_repair.name)
     for fam in ("md", "mf"):
         for role in ("OPENWRT_UBI_SYSUPGRADE", "STOCK_TO_UBI_PRELOADER_BL2_CANDIDATE"):
             p = Path(okm.require_role(fam, role)).resolve()

@@ -36,6 +36,7 @@ LAYOUT = {
         "recovery_safe_fip": ("recovery-safe-u-boot.fip", "data/recovery/recovery-safe-u-boot-md-{v}.fip"),
     },
     "mf": {
+        "update_fip": ("ursusboot-update.fip", "data/payloads/mf/ursusboot/ursusboot-mf-{v}-update.fip"),
         "runtime_lzma": ("u-boot.runtime.lzma", "data/payloads/mf/ursusboot/u-boot.runtime.lzma"),
         "u_boot_bin": ("u-boot.bin", "data/payloads/mf/ursusboot/ursusboot-mf-{v}-u-boot.bin"),
         "runtime_ram_fip": ("ursusboot-runtime-ram.fip", "data/payloads/mf/recovery/ursusboot-mf-{v}-runtime-ram.fip"),
@@ -150,8 +151,20 @@ def load_board(fam: str, dist: Path, pin: dict) -> dict:
     if hashlib.sha256(pre).hexdigest() != prov["ubi_preloader_sha256"] or bl2_candidate_sha(pre) != prov["ubi_bl2_image_sha256"]:
         raise RuntimeError(f"{fam}: UBI preloader digests disagree with PROVENANCE.json")
     bl33 = (dist / "u-boot.bin").read_bytes()
-    if fam == "mf" and lzma.decompress((dist / "u-boot.runtime.lzma").read_bytes(), format=lzma.FORMAT_ALONE) != bl33:
-        raise RuntimeError("mf: u-boot.runtime.lzma does not decompress to u-boot.bin")
+    if fam == "mf":
+        runtime_lzma = (dist / "u-boot.runtime.lzma").read_bytes()
+        if lzma.decompress(runtime_lzma, format=lzma.FORMAT_ALONE) != bl33:
+            raise RuntimeError("mf: u-boot.runtime.lzma does not decompress to u-boot.bin")
+        update_fip = dist / "ursusboot-update.fip"
+        if not update_fip.is_file():
+            raise RuntimeError("mf: canonical persistent repair ursusboot-update.fip is missing (t70+ required)")
+        if sha256(update_fip) != prov.get("ursusboot_update_fip_sha256"):
+            raise RuntimeError("mf: ursusboot-update.fip disagrees with PROVENANCE.json")
+        entries = fip_entries(update_fip.read_bytes())
+        if len(entries) != 2 or entries[-1] != runtime_lzma:
+            raise RuntimeError("mf: persistent repair FIP BL33 is not the pinned u-boot.runtime.lzma")
+        if prov.get("persistent_fip_bl33_sha256") != hashlib.sha256(runtime_lzma).hexdigest():
+            raise RuntimeError("mf: persistent repair BL33 digest disagrees with PROVENANCE.json")
     # UrsusBoot memcmp()s the uploaded preloader against these compiled-in arrays.
     for digest in (prov["ubi_preloader_sha256"], prov["ubi_bl2_image_sha256"]):
         if bytes.fromhex(digest) not in bl33:
