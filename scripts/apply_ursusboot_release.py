@@ -55,8 +55,8 @@ COMPATIBLE = {"md": b"nokia,xg-040g-md", "mf": b"nokia,xg-040g-mf"}
 STALE = {
     "md-recovery": ("data/recovery", ("recovery-safe-u-boot-md-*.fip",)),
     "mf-recovery": ("data/recovery/mf", ("recovery-safe-u-boot-mf-*.fip",)),
-    "md": ("data/payloads/md/ursusboot", ("*TEST61*.fip", "*TEST62*.fip", "*TEST63*.fip", "*TEST61*-u-boot.bin", "*TEST63*-u-boot.bin", "*TEST63*.bin", "*UBIUX1-TEST64*", "*-alpha5-t64-*", "*-alpha5-t65-*")),
-    "mf": ("data/payloads/mf/recovery", ("*TEST61*", "*TEST62*", "*TEST63*", "*UBIUX1-TEST64*", "*-alpha5-t64-*", "*-alpha5-t65-*")),
+    "md": ("data/payloads/md/ursusboot", ("*TEST61*.fip", "*TEST62*.fip", "*TEST63*.fip", "*TEST61*-u-boot.bin", "*TEST63*-u-boot.bin", "*TEST63*.bin", "*UBIUX1-TEST64*", "*-alpha5-t64-*", "*-alpha5-t65-*", "*-alpha5-t66-*", "*-alpha5-t67-*")),
+    "mf": ("data/payloads/mf/recovery", ("*TEST61*", "*TEST62*", "*TEST63*", "*UBIUX1-TEST64*", "*-alpha5-t64-*", "*-alpha5-t65-*", "*-alpha5-t66-*", "*-alpha5-t67-*")),
 }
 
 
