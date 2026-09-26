@@ -15,7 +15,7 @@
 
 **[📦 Скачать последний PUBLIC TEST — верхний prerelease](https://github.com/Medvedolog/airoha-router-ursusflasher/releases)** · [Инструкция](docs/INSTRUCTIONS_RU.md) · [Changelog](docs/CHANGELOG_RU.md) · [Аварийное восстановление](docs/EMERGENCY_URSUSBOOT_RU.md)
 
-🇬🇧 [Read this in English](docs/README_EN.md)
+🇬🇧 [Read this in English](docs/README_EN.md) · 🇨🇳 [中文版](docs/README_ZH.md)
 
 </div>
 
