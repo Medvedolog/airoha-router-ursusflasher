@@ -116,13 +116,13 @@ class UrsusLiveConsole:
         self.closed = False
 
     @classmethod
-    def connect(cls, host: str, *, timeout: float = 8.0) -> tuple['UrsusLiveConsole', bytes]:
+    def connect(cls, host: str, *, timeout: float = 8.0, port: int = 80) -> tuple['UrsusLiveConsole', bytes]:
         key = base64.b64encode(os.urandom(16)).decode('ascii')
-        sock = socket.create_connection((host, 80), timeout=timeout)
+        sock = socket.create_connection((host, port), timeout=timeout)
         try:
             request = (
                 f'GET /ws/console HTTP/1.1\r\n'
-                f'Host: {host}\r\n'
+                f'Host: {host if port == 80 else f"{host}:{port}"}\r\n'
                 'Upgrade: websocket\r\n'
                 'Connection: Upgrade\r\n'
                 f'Sec-WebSocket-Key: {key}\r\n'
