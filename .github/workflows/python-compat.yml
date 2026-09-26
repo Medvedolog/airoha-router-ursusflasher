@@ -2,7 +2,7 @@ name: Python compatibility
 
 on:
   push:
-    branches: [ main, master, feature/ursusboot-modular-airoha ]
+    branches: [ main, master, feature/ursusboot-modular-airoha, dev/ursusboot-ws-console ]
     paths:
       - '**/*.py'
       - '.github/workflows/python-compat.yml'
@@ -53,3 +53,8 @@ jobs:
               importlib.import_module(name)
               print(f"IMPORT_OK {name}")
           PY
+      - name: UrsusBoot WebSocket console client selftest
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONPATH: ursusflasher/src
+        run: python3 ursusflasher/tools/selftest_ws_console.py
