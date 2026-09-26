@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import base64
+import hashlib
 import http.client
 import json
 import os
+import select
+import socket
+import struct
+import sys
+import threading
 import time
 import urllib.parse
 from pathlib import Path
@@ -87,6 +94,255 @@ def console(host: str, command: str, *, timeout: float = 360.0) -> str:
     if not 200 <= code < 300:
         raise UrsusWebError(f'console command failed HTTP {code}: {text[-1200:]}')
     return text
+
+
+_WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+_WS_PROTOCOL = 'ursusboot-console-v1'
+_WS_HELLO = b'URSUS_WS_HELLO protocol=1 product=UrsusBoot transport=live-stdio'
+
+
+class UrsusLiveConsole:
+    """Minimal RFC6455 client for the UrsusBoot live stdio transport.
+
+    No third-party WebSocket dependency is required.  The connection is
+    identified by the RFC accept hash, a pinned subprotocol and the first
+    machine-readable UrsusBoot hello frame.
+    """
+
+    def __init__(self, sock: socket.socket, pending: bytes = b''):
+        self.sock = sock
+        self.pending = bytearray(pending)
+        self._send_lock = threading.Lock()
+        self.closed = False
+
+    @classmethod
+    def connect(cls, host: str, *, timeout: float = 8.0) -> tuple['UrsusLiveConsole', bytes]:
+        key = base64.b64encode(os.urandom(16)).decode('ascii')
+        sock = socket.create_connection((host, 80), timeout=timeout)
+        try:
+            request = (
+                f'GET /ws/console HTTP/1.1\r\n'
+                f'Host: {host}\r\n'
+                'Upgrade: websocket\r\n'
+                'Connection: Upgrade\r\n'
+                f'Sec-WebSocket-Key: {key}\r\n'
+                'Sec-WebSocket-Version: 13\r\n'
+                f'Sec-WebSocket-Protocol: {_WS_PROTOCOL}\r\n'
+                '\r\n'
+            ).encode('ascii')
+            sock.sendall(request)
+
+            buf = bytearray()
+            while b'\r\n\r\n' not in buf:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    raise UrsusWebError('live console closed during WebSocket handshake')
+                buf.extend(chunk)
+                if len(buf) > 16384:
+                    raise UrsusWebError('live console WebSocket handshake headers are too large')
+            head, pending = bytes(buf).split(b'\r\n\r\n', 1)
+            lines = head.decode('iso-8859-1').split('\r\n')
+            if not lines or ' 101 ' not in f' {lines[0]} ':
+                raise UrsusWebError(f'live console WebSocket upgrade failed: {lines[0] if lines else head!r}')
+            headers: dict[str, str] = {}
+            for line in lines[1:]:
+                if ':' in line:
+                    k, v = line.split(':', 1)
+                    headers[k.strip().lower()] = v.strip()
+
+            expected = base64.b64encode(
+                hashlib.sha1((key + _WS_GUID).encode('ascii')).digest()
+            ).decode('ascii')
+            if headers.get('sec-websocket-accept') != expected:
+                raise UrsusWebError('live console WebSocket accept hash mismatch')
+            if headers.get('sec-websocket-protocol') != _WS_PROTOCOL:
+                raise UrsusWebError(
+                    f'live console protocol mismatch: {headers.get("sec-websocket-protocol")!r}'
+                )
+            ws = cls(sock, pending)
+            sock.settimeout(None)
+            hello = ws.recv_message()
+            if not hello.startswith(_WS_HELLO):
+                ws.close()
+                raise UrsusWebError(f'live console UrsusBoot hello mismatch: {hello[:160]!r}')
+            _session_log(f'[URSUS_WS_CONNECTED] host={host} protocol={_WS_PROTOCOL}')
+            return ws, hello
+        except Exception:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            raise
+
+    def _recv_exact(self, n: int) -> bytes:
+        out = bytearray()
+        if self.pending:
+            take = min(n, len(self.pending))
+            out.extend(self.pending[:take])
+            del self.pending[:take]
+        while len(out) < n:
+            chunk = self.sock.recv(n - len(out))
+            if not chunk:
+                self.closed = True
+                raise EOFError('UrsusBoot live console disconnected')
+            out.extend(chunk)
+        return bytes(out)
+
+    def _send_frame(self, opcode: int, payload: bytes = b'') -> None:
+        if self.closed:
+            raise EOFError('UrsusBoot live console is closed')
+        if len(payload) > 0x7fffffff:
+            raise ValueError('WebSocket frame too large')
+        mask = os.urandom(4)
+        first = 0x80 | (opcode & 0x0f)
+        n = len(payload)
+        if n <= 125:
+            header = bytes((first, 0x80 | n))
+        elif n <= 0xffff:
+            header = bytes((first, 0x80 | 126)) + struct.pack('!H', n)
+        else:
+            header = bytes((first, 0x80 | 127)) + struct.pack('!Q', n)
+        masked = bytes(ch ^ mask[i & 3] for i, ch in enumerate(payload))
+        with self._send_lock:
+            self.sock.sendall(header + mask + masked)
+
+    def send(self, payload: bytes) -> None:
+        self._send_frame(0x2, payload)
+
+    def recv_message(self) -> bytes:
+        while True:
+            h = self._recv_exact(2)
+            fin = bool(h[0] & 0x80)
+            opcode = h[0] & 0x0f
+            masked = bool(h[1] & 0x80)
+            n = h[1] & 0x7f
+            if h[0] & 0x70 or not fin:
+                raise UrsusWebError('unsupported fragmented/reserved WebSocket frame')
+            if masked:
+                raise UrsusWebError('server sent an invalid masked WebSocket frame')
+            if n == 126:
+                n = struct.unpack('!H', self._recv_exact(2))[0]
+            elif n == 127:
+                n = struct.unpack('!Q', self._recv_exact(8))[0]
+            if n > 1 << 20:
+                raise UrsusWebError(f'live console frame too large: {n}')
+            payload = self._recv_exact(n)
+            if opcode in (0x1, 0x2):
+                return payload
+            if opcode == 0x8:
+                self.closed = True
+                raise EOFError('UrsusBoot live console closed')
+            if opcode == 0x9:
+                self._send_frame(0xA, payload)
+                continue
+            if opcode == 0xA:
+                continue
+            raise UrsusWebError(f'unsupported WebSocket opcode {opcode}')
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        try:
+            self._send_frame(0x8, struct.pack('!H', 1000))
+        except Exception:
+            pass
+        self.closed = True
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except Exception:
+            pass
+        self.sock.close()
+
+
+def live_console(host: str) -> None:
+    """Attach the local terminal to UrsusBoot's live WebSocket stdio.
+
+    Ctrl-C is sent to U-Boot.  Ctrl-] detaches the host terminal without
+    issuing any flash action or reboot.
+    """
+    ws, hello = UrsusLiveConsole.connect(host)
+    stop = threading.Event()
+
+    sys.stdout.buffer.write(hello)
+    if hello and not hello.endswith(b'\n'):
+        sys.stdout.buffer.write(b'\n')
+    sys.stdout.buffer.flush()
+    print(terms.tr(
+        '[LIVE] Ctrl-C отправляется в U-Boot; Ctrl-] отключает UrsusFlasher.',
+        '[LIVE] Ctrl-C is sent to U-Boot; Ctrl-] detaches UrsusFlasher.',
+    ))
+    sys.stdout.flush()
+
+    def reader() -> None:
+        try:
+            while not stop.is_set():
+                data = ws.recv_message()
+                if data:
+                    sys.stdout.buffer.write(data)
+                    sys.stdout.buffer.flush()
+        except EOFError:
+            pass
+        except Exception as exc:
+            if not stop.is_set():
+                _session_log(f'[URSUS_WS_RX_ERROR] {exc!r}')
+        finally:
+            stop.set()
+
+    th = threading.Thread(target=reader, name='ursus-ws-console-rx', daemon=True)
+    th.start()
+
+    try:
+        if os.name == 'nt':
+            import msvcrt
+            arrows = {'H': b'\x1b[A', 'P': b'\x1b[B', 'K': b'\x1b[D', 'M': b'\x1b[C'}
+            while not stop.is_set():
+                try:
+                    if not msvcrt.kbhit():
+                        time.sleep(0.03)
+                        continue
+                    ch = msvcrt.getwch()
+                except KeyboardInterrupt:
+                    ws.send(b'\x03')
+                    continue
+                if ch == '\x1d':
+                    break
+                if ch in ('\x00', '\xe0'):
+                    code = msvcrt.getwch()
+                    payload = arrows.get(code)
+                    if payload:
+                        ws.send(payload)
+                    continue
+                if ch == '\x03':
+                    ws.send(b'\x03')
+                else:
+                    ws.send(ch.encode('utf-8', 'replace'))
+        else:
+            import termios
+            import tty
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            try:
+                tty.setraw(fd)
+                while not stop.is_set():
+                    ready, _, _ = select.select([fd], [], [], 0.1)
+                    if not ready:
+                        continue
+                    data = os.read(fd, 64)
+                    if not data:
+                        break
+                    pos = data.find(b'\x1d')
+                    if pos >= 0:
+                        if pos:
+                            ws.send(data[:pos])
+                        break
+                    ws.send(data)
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    finally:
+        stop.set()
+        ws.close()
+        th.join(timeout=1)
+        _session_log(f'[URSUS_WS_DISCONNECTED] host={host}')
 
 
 def _text(host: str, path: str, *, timeout: float = 10.0) -> str:
