@@ -193,6 +193,20 @@ def _show_stock_slot_action() -> None:
     )
 
 
+def _show_live_console_action() -> None:
+    base.ui.menu_item(
+        14,
+        tr("Живая консоль UrsusBoot (WebSocket)", "UrsusBoot live console (WebSocket)"),
+        tr(
+            "Настоящий stdin/stdout U-Boot по Ethernet. Без дополнительного подтверждения; Ctrl-C уходит роутеру, Ctrl-] отключает локальный терминал.",
+            "Real U-Boot stdin/stdout over Ethernet. No extra confirmation; Ctrl-C goes to the router and Ctrl-] detaches the local terminal.",
+        ),
+        write_capable=True,
+        enabled=True,
+        reason="",
+    )
+
+
 def _menu_detail(number: int, state: ds.DeviceState, app: dict[int, ds.ActionApplicability]) -> tuple[str, str]:
     family = _family(state)
     if number == 2 and family == "mf" and state.current_system == "RECOVERY":
@@ -305,13 +319,14 @@ def main() -> int:
         for number in (10, 11, 12):
             detail_ru, detail_en = base._menu_detail(number, state, app)
             _show_action(number, app, detail_ru, detail_en)
+        _show_live_console_action()
 
         print()
         base.ui.menu_item(0, tr("Выход", "Exit"))
         base.ui.note(tr("! — операция может выполнять запись во flash-память (NAND)", "! — operation may modify flash/NAND"))
         base.ui.rule(style="amber")
 
-        c = base.ask_menu(13)
+        c = base.ask_menu(14)
         if c == "0":
             return 0
         number = int(c)
@@ -328,6 +343,10 @@ def main() -> int:
 
         if number == 13:
             base.run_action(stock_slot_uart.run, write_may_happen=True)
+            continue
+
+        if number == 14:
+            base.run_action(lambda: uw.live_console(host), write_may_happen=True)
             continue
 
         selected = app[number]
