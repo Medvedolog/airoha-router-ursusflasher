@@ -12,6 +12,7 @@ on:
       - main
       - feature/ursusboot-modular-airoha
       - claude/lucid-gauss-t0il1g
+      - dev/ursusboot-ws-console
     paths:
       - '.github/workflows/ursusboot-release.yml'
       - 'config/URSUSBOOT_PIN.json'
