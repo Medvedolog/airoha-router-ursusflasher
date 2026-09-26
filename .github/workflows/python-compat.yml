@@ -2,7 +2,7 @@ name: Python compatibility
 
 on:
   push:
-    branches: [ main, master, feature/ursusboot-modular-airoha ]
+    branches: [ main, master, feature/ursusboot-modular-airoha, dev/ursusboot-ws-console ]
     paths:
       - '**/*.py'
       - '.github/workflows/python-compat.yml'
