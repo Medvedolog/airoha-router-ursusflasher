@@ -18,6 +18,7 @@ on:
       - main
       - feature/ursusboot-modular-airoha
       - claude/lucid-gauss-t0il1g
+      - dev/ursusboot-ws-console
     paths:
       - '.github/workflows/md-item4-direct-ubi.yml'
       - 'START_ONECLICK.cmd'
