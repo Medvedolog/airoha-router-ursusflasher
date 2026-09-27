@@ -15,6 +15,34 @@ SRC = HERE.parent / "src"
 sys.path.insert(0, str(SRC))
 
 import ursus_web_client as uw
+from ursus_ws_terminal import LiveTerminal
+
+
+def terminal_key_contract() -> None:
+    class FakeSocket:
+        def __init__(self):
+            self.sent = []
+
+        def send(self, data: bytes) -> None:
+            self.sent.append(data)
+
+    sock = FakeSocket()
+    term = LiveTerminal(sock, '127.0.0.1')
+    term._write = lambda data: None
+    term._keys(b'version\r\x1bOQ')
+    assert sock.sent == [b'version\r']  # paste is batched, F2 is local
+    assert term.action == 'upload' and term.stop.is_set()
+
+    sock = FakeSocket()
+    term = LiveTerminal(sock, '127.0.0.1')
+    term._write = lambda data: None
+    term._keys(b'\x1bOS')  # F4: line editing
+    term._keys(b'version\r\x1b[A')
+    assert sock.sent == [b'version\r'] and term.line == 'version'
+    term._keys(b'\x1b[B\x03\x1d')  # history down, remote Ctrl-C, local menu
+    term._keys(b'd')
+    assert sock.sent == [b'version\r', b'\x03']
+    assert term.action == 'download' and term.stop.is_set()
 
 
 def _recv_headers(conn: socket.socket) -> bytes:
@@ -60,6 +88,7 @@ def _recv_client_frame(conn: socket.socket) -> tuple[int, bytes]:
 
 
 def main() -> int:
+    terminal_key_contract()
     ready = threading.Event()
     result: dict[str, object] = {}
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
