@@ -63,12 +63,17 @@ def nand_geometry_contract() -> None:
                b'  - min I/O: 0x800 bytes\r\n'
                b'  - 0x000000000000-0x000010000000 : "spi-nand0"\r\n'
                b'\t  - 0x000000000000-0x000000080000 : "bl2"\r\n'
-               b'\t  - 0x000000080000-0x000010000000 : "ubi"\r\n')
+               b'\t  - 0x000000080000-0x000010000000 : "ubi"\r\n'
+               b'\t\t  - 0x000000080000-0x0000000a0000 : "nested-relative"\r\n')
     master, size, erase, page, parts = _parse_list(
         listing, {'flash_size_mib': 256, 'flash_erase_size': 0x20000,
                   'flash_page_size': 0x800, 'soc': 'AN7581', 'current_layout': 'OPENWRT_UBI'})
     assert (master, size, erase, page) == ('spi-nand0', 256 << 20, 0x20000, 0x800)
     assert parts[0] == Region('bl2', 0, 0x80000)
+    assert [p.name for p in parts] == ['bl2', 'ubi']
+    assert _parse_list(listing, {'flash_size_mib': 256, 'flash_erase_size': 0x20000,
+                                 'flash_page_size': 0x800, 'soc': 'AN7583',
+                                 'current_layout': 'STOCK'})[-1] == ()
     geo = Geometry(master, size, erase, page, parts, (0x20000,))
     assert _runs(Region('bl2', 0, 0x80000), geo) == [(0, 0x20000), (0x40000, 0x40000)]
     try:

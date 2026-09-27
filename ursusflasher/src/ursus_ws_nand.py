@@ -103,7 +103,7 @@ def _parse_list(out: bytes, status: dict) -> tuple[str, int, int, int, tuple[Reg
         if '  - min I/O: ' in line:
             current['page'] = int(line.split('min I/O: ', 1)[1].split()[0], 16)
         region = RANGE.search(line)
-        if region:
+        if region and (line.startswith('  - 0x') or line.startswith('\t  - 0x')):
             a, b = int(region[1], 16), int(region[2], 16)
             current['ranges'].append(Region(region[3], a, b - a))
     size = int(status.get('flash_size_mib') or 0) << 20
@@ -121,16 +121,18 @@ def _parse_list(out: bytes, status: dict) -> tuple[str, int, int, int, tuple[Reg
     parts = tuple(p for p in d['ranges'][1:] if p.size > 0 and
                   0 <= p.offset < size and p.offset + p.size <= size and
                   p.offset % erase == 0 and p.size % erase == 0 and NAME.fullmatch(p.name))
-    # Stock partition offsets are diagnostics-only in UrsusBoot and are not
-    # registered as writable MTD devices. Use them only on positively
-    # identified MD stock layout, through the physical master and offsets.
-    if ('AN7581' in str(status.get('soc')) and
-            status.get('current_layout') in ('STOCK', 'OPENWRT_STOCK_LAYOUT')):
-        parts += tuple(Region(str(n), int(off), int(length))
-                       for n, off, length in status.get('stock_parts', [])
-                       if NAME.fullmatch(str(n)) and 0 <= int(off) < size and
-                       int(length) > 0 and int(off) + int(length) <= size and
-                       int(off) % erase == 0 and int(length) % erase == 0)
+    # The persistent DTS may still advertise BL2+UBI while the chip holds a
+    # Nokia stock layout. Do not offer those aliases as stock partitions.
+    if status.get('current_layout') in ('STOCK', 'OPENWRT_STOCK_LAYOUT'):
+        parts = ()
+        # UrsusBoot's stock_parts diagnostic map is known for MD/AN7581.
+        # MF stock partition-by-partition restore needs its own proven map.
+        if 'AN7581' in str(status.get('soc')):
+            parts = tuple(Region(str(n), int(off), int(length))
+                          for n, off, length in status.get('stock_parts', [])
+                          if NAME.fullmatch(str(n)) and 0 <= int(off) < size and
+                          int(length) > 0 and int(off) + int(length) <= size and
+                          int(off) % erase == 0 and int(length) % erase == 0)
     unique = {(p.name, p.offset, p.size): p for p in parts}
     return d['name'], size, erase, page, tuple(unique.values())
 
