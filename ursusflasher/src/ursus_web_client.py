@@ -255,94 +255,9 @@ class UrsusLiveConsole:
 
 
 def live_console(host: str) -> None:
-    """Attach the local terminal to UrsusBoot's live WebSocket stdio.
-
-    Ctrl-C is sent to U-Boot.  Ctrl-] detaches the host terminal without
-    issuing any flash action or reboot.
-    """
-    ws, hello = UrsusLiveConsole.connect(host)
-    stop = threading.Event()
-
-    sys.stdout.buffer.write(hello)
-    if hello and not hello.endswith(b'\n'):
-        sys.stdout.buffer.write(b'\n')
-    sys.stdout.buffer.flush()
-    print(terms.tr(
-        '[LIVE] Ctrl-C отправляется в U-Boot; Ctrl-] отключает UrsusFlasher.',
-        '[LIVE] Ctrl-C is sent to U-Boot; Ctrl-] detaches UrsusFlasher.',
-    ))
-    sys.stdout.flush()
-
-    def reader() -> None:
-        try:
-            while not stop.is_set():
-                data = ws.recv_message()
-                if data:
-                    sys.stdout.buffer.write(data)
-                    sys.stdout.buffer.flush()
-        except EOFError:
-            pass
-        except Exception as exc:
-            if not stop.is_set():
-                _session_log(f'[URSUS_WS_RX_ERROR] {exc!r}')
-        finally:
-            stop.set()
-
-    th = threading.Thread(target=reader, name='ursus-ws-console-rx', daemon=True)
-    th.start()
-
-    try:
-        if os.name == 'nt':
-            import msvcrt
-            arrows = {'H': b'\x1b[A', 'P': b'\x1b[B', 'K': b'\x1b[D', 'M': b'\x1b[C'}
-            while not stop.is_set():
-                try:
-                    if not msvcrt.kbhit():
-                        time.sleep(0.03)
-                        continue
-                    ch = msvcrt.getwch()
-                except KeyboardInterrupt:
-                    ws.send(b'\x03')
-                    continue
-                if ch == '\x1d':
-                    break
-                if ch in ('\x00', '\xe0'):
-                    code = msvcrt.getwch()
-                    payload = arrows.get(code)
-                    if payload:
-                        ws.send(payload)
-                    continue
-                if ch == '\x03':
-                    ws.send(b'\x03')
-                else:
-                    ws.send(ch.encode('utf-8', 'replace'))
-        else:
-            import termios
-            import tty
-            fd = sys.stdin.fileno()
-            old = termios.tcgetattr(fd)
-            try:
-                tty.setraw(fd)
-                while not stop.is_set():
-                    ready, _, _ = select.select([fd], [], [], 0.1)
-                    if not ready:
-                        continue
-                    data = os.read(fd, 64)
-                    if not data:
-                        break
-                    pos = data.find(b'\x1d')
-                    if pos >= 0:
-                        if pos:
-                            ws.send(data[:pos])
-                        break
-                    ws.send(data)
-            finally:
-                termios.tcsetattr(fd, termios.TCSADRAIN, old)
-    finally:
-        stop.set()
-        ws.close()
-        th.join(timeout=1)
-        _session_log(f'[URSUS_WS_DISCONNECTED] host={host}')
+    """UrsidoRescue-style terminal over the pinned UrsusBoot WebSocket."""
+    from ursus_ws_terminal import live_console as run_terminal
+    run_terminal(host)
 
 
 def _text(host: str, path: str, *, timeout: float = 10.0) -> str:
