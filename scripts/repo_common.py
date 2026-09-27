@@ -34,6 +34,7 @@ RELEASE_DOCS = (
     'CHANGELOG_RU.md',
     'CHANGELOG_EN.md',
     'README_EN.md',
+    'NAND_WS_PRESETS_RU.md',
     'UrsusBoot_UrsusFlasher_TZ_RU_v5.38_MF_PERSISTENT_CORRECTION.md',
 )
 

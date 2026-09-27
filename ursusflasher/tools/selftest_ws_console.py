@@ -4,12 +4,14 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
 import os
 import socket
 import struct
 import sys
 import threading
 import tempfile
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -19,6 +21,7 @@ sys.path.insert(0, str(SRC))
 import ursus_web_client as uw
 from ursus_ws_terminal import LiveTerminal
 from ursus_ws_xmodem import WebSocketSerial, _wait_ready
+from ursus_ws_nand import Geometry, Region, _parse_list, _runs
 
 
 def terminal_key_contract() -> None:
@@ -46,6 +49,151 @@ def terminal_key_contract() -> None:
     term._keys(b'd')
     assert sock.sent == [b'version\r', b'\x03']
     assert term.action == 'download' and term.stop.is_set()
+
+    sock = FakeSocket()
+    term = LiveTerminal(sock, '127.0.0.1')
+    term._write = lambda data: None
+    term._keys(b'\x1b[15~')
+    assert term.action == 'nand' and term.stop.is_set() and sock.sent == []
+
+
+def nand_geometry_contract() -> None:
+    listing = (b'List of MTD devices:\r\n* spi-nand0\r\n'
+               b'  - type: NAND flash\r\n  - block size: 0x20000 bytes\r\n'
+               b'  - min I/O: 0x800 bytes\r\n'
+               b'  - 0x000000000000-0x000010000000 : "spi-nand0"\r\n'
+               b'\t  - 0x000000000000-0x000000080000 : "bl2"\r\n'
+               b'\t  - 0x000000080000-0x000010000000 : "ubi"\r\n')
+    master, size, erase, page, parts = _parse_list(
+        listing, {'flash_size_mib': 256, 'flash_erase_size': 0x20000,
+                  'flash_page_size': 0x800, 'soc': 'AN7581', 'current_layout': 'OPENWRT_UBI'})
+    assert (master, size, erase, page) == ('spi-nand0', 256 << 20, 0x20000, 0x800)
+    assert parts[0] == Region('bl2', 0, 0x80000)
+    geo = Geometry(master, size, erase, page, parts, (0x20000,))
+    assert _runs(Region('bl2', 0, 0x80000), geo) == [(0, 0x20000), (0x40000, 0x40000)]
+    try:
+        _parse_list(listing.replace(b'0x20000 bytes', b'0x40000 bytes'),
+                    {'flash_size_mib': 256, 'flash_erase_size': 0x20000,
+                     'flash_page_size': 0x800})
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError('geometry mismatch must fail')
+
+
+def nand_restore_contract() -> None:
+    import ursus_ws_nand as nand
+
+    erase = 0x20000
+    geo = Geometry('spi-nand0', 4 * erase, erase, 0x800, (),
+                   (erase,))
+    status = {'version': '0.1.0-alpha5-t75', 'board': 'XG-040G-MD',
+              'soc': 'AN7581', 'flash_chip': 'FM25G02B', 'flash_id': 'abcd',
+              'ubi_attached': False}
+    calls: list[str] = []
+    current_digest = ''
+    last_read = 0
+    image: Path
+
+    class FakeSession:
+        def __init__(self, host: str):
+            assert host == '127.0.0.1'
+
+        def close(self) -> None:
+            pass
+
+        def command(self, cmd: str, timeout: float = 60) -> bytes:
+            nonlocal last_read
+            calls.append(cmd)
+            if cmd.startswith('mtd bad '):
+                return b'MTD device spi-nand0 bad blocks list:\r\n\t0x00020000\r\n'
+            if cmd.startswith('mtd read '):
+                last_read = int(cmd.split()[-2], 16)
+            return b'UrsusBoot> '
+
+        def sha(self, address: int, size: int) -> str:
+            if address == nand.VERIFY_ADDR:
+                return hashlib.sha256(image.read_bytes()[last_read:last_read + size]).hexdigest()
+            return current_digest
+
+    def fake_send(session, path, length, digest):
+        nonlocal current_digest
+        assert path.read_bytes() and length == path.stat().st_size
+        current_digest = digest
+
+    with tempfile.TemporaryDirectory() as directory:
+        image = Path(directory) / 'nand.bin'
+        image.write_bytes(b'A' * erase + b'\xff' * erase + b'B' * (2 * erase))
+        meta = {'schema': 1, 'format': 'ursus-nand-main-area-ecc',
+                'region': {'name': 'entire-nand', 'offset': 0, 'size': 4 * erase},
+                'board': status['board'], 'soc': status['soc'],
+                'flash_chip': status['flash_chip'], 'flash_id': status['flash_id'],
+                'flash_size': 4 * erase, 'erase_size': erase, 'page_size': 0x800,
+                'bad_blocks': [erase], 'sha256': hashlib.sha256(image.read_bytes()).hexdigest()}
+        manifest = Path(str(image) + '.json')
+        manifest.write_text(json.dumps(meta), encoding='utf-8')
+        with mock.patch.object(nand, 'Session', FakeSession), \
+                mock.patch.object(nand, 'discover', lambda session, st: geo), \
+                mock.patch.object(nand, '_serve_chunk', fake_send), \
+                mock.patch('builtins.input', return_value='y'):
+            nand.restore('127.0.0.1', status, image)
+            writes = [x for x in calls if x.startswith('mtd write ')]
+            assert len(writes) == 3 and writes[0].split()[-2] == '0x40000' \
+                   and writes[1].split()[-2] == '0x60000' and writes[2].split()[-2] == '0x0'
+            assert all(x.split()[-2] != '0x20000' for x in writes)
+            calls.clear()
+            meta['bad_blocks'] = []
+            manifest.write_text(json.dumps(meta), encoding='utf-8')
+            try:
+                nand.restore('127.0.0.1', status, image)
+            except RuntimeError as exc:
+                assert 'bad-block map' in str(exc)
+            else:
+                raise AssertionError('changed bad-block map must stop restore')
+            assert not any(x.startswith(('mtd erase ', 'mtd write ')) for x in calls)
+
+
+def nand_backup_contract() -> None:
+    import ursus_ws_nand as nand
+    import ursus_ws_tftp
+
+    erase = 0x20000
+    geo = Geometry('spi-nand0', 4 * erase, erase, 0x800, (), (erase,))
+    status = {'version': '0.1.0-alpha5-t75', 'board': 'Nokia XG-040G-MD',
+              'soc': 'Airoha AN7581', 'flash_chip': 'FM25G02B', 'flash_id': 'abcd'}
+    reads: list[str] = []
+
+    class FakeSession:
+        def __init__(self, host):
+            self.link = object()
+
+        def command(self, cmd, timeout=60):
+            reads.append(cmd)
+            return b'UrsusBoot> '
+
+        def close(self):
+            pass
+
+    def fake_receive(host, address, size, path, *, link):
+        assert address == nand.RAM_ADDR and size in (erase, 2 * erase)
+        path.write_bytes(b'R' * size)
+
+    with tempfile.TemporaryDirectory() as directory:
+        image = Path(directory) / 'nand.bin'
+        with mock.patch.object(nand, 'Session', FakeSession), \
+                mock.patch.object(nand, 'discover', lambda session, st: geo), \
+                mock.patch.object(ursus_ws_tftp, 'receive_ram', fake_receive):
+            nand.backup('127.0.0.1', status, Region('entire-nand', 0, geo.size), image)
+        data = image.read_bytes()
+        assert len(data) == geo.size
+        assert data[:erase] == b'R' * erase
+        assert data[erase:2 * erase] == b'\xff' * erase
+        assert data[2 * erase:] == b'R' * (2 * erase)
+        meta = json.loads(Path(str(image) + '.json').read_text())
+        assert meta['sha256'] == hashlib.sha256(data).hexdigest()
+        assert meta['bad_blocks'] == [erase] and meta['oob'] is False
+        assert reads == ['mtd read spi-nand0 0x81800000 0x0 0x20000',
+                         'mtd read spi-nand0 0x81800000 0x40000 0x40000']
 
 
 def xmodem_transport_contract() -> None:
@@ -242,6 +390,9 @@ def _recv_client_frame(conn: socket.socket) -> tuple[int, bytes]:
 
 def main() -> int:
     terminal_key_contract()
+    nand_geometry_contract()
+    nand_restore_contract()
+    nand_backup_contract()
     xmodem_transport_contract()
     existing_xmodem_sender_over_ws()
     tftp_ram_export_contract()
@@ -307,6 +458,7 @@ def main() -> int:
     th.join(timeout=2)
     assert result.get("payload") == b"version\r"
     print("URSUS_WS_TFTPPUT_SELFTEST=PASS ram_range=1 size=1 sha256=1")
+    print("URSUS_WS_NAND_SELFTEST=PASS f5_local=1 geometry=1 bad_block_runs=1")
     print("URSUS_WS_XMODEM_SELFTEST=PASS reused_uart_sender=1 blocks=3 crc_ack=1")
     print("URSUS_WS_CLIENT_SELFTEST=PASS handshake=accept+subprotocol+hello masked_tx=1")
     return 0

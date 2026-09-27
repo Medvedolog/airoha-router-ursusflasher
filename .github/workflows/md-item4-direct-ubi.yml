@@ -20,6 +20,7 @@ on:
       - claude/lucid-gauss-t0il1g
       - dev/ursusboot-ws-console-ui
       - dev/ursusboot-t75-transfer
+      - dev/ursusboot-t75-nand-presets
     paths:
       - '.github/workflows/md-item4-direct-ubi.yml'
       - 'START_ONECLICK.cmd'
@@ -28,6 +29,7 @@ on:
       - 'START_EXPERT.sh'
       - 'ursusflasher/src/**'
       - 'ursusflasher/tools/selftest_ws_console.py'
+      - 'docs/NAND_WS_PRESETS_RU.md'
       - 'ursusflasher/tools/selftest_item4_direct_ubi.py'
       - 'ursusflasher/tools/selftest_network_faults.py'
       - 'ursusflasher/tools/selftest_restore_routes.py'

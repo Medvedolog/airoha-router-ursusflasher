@@ -13,7 +13,8 @@ import ui_terms as terms
 from ursus_ws_xmodem import WebSocketSerial, _prompt
 
 
-def receive_ram(host: str, address: int, size: int, output: Path, *, port: int = 1069) -> None:
+def receive_ram(host: str, address: int, size: int, output: Path, *,
+                port: int = 1069, link: WebSocketSerial | None = None) -> None:
     from proven_backend import TftpResult, local_ip_for, receive_tftp_put
     from ursus_web_client import UrsusLiveConsole, _session_log
 
@@ -25,11 +26,15 @@ def receive_ram(host: str, address: int, size: int, output: Path, *, port: int =
     if output.exists():
         raise FileExistsError(output)
 
-    ws, _hello = UrsusLiveConsole.connect(host)
-    link = WebSocketSerial(ws)
+    owned = link is None
+    if owned:
+        ws, _hello = UrsusLiveConsole.connect(host)
+        link = WebSocketSerial(ws)
+    assert link is not None
     partial = output.with_name(output.name + '.partial')
     if partial.exists():
-        link.close()
+        if owned:
+            link.close()
         raise FileExistsError(partial)
     ready = threading.Event()
     cancel = threading.Event()
@@ -79,7 +84,8 @@ def receive_ram(host: str, address: int, size: int, output: Path, *, port: int =
                        f'[DONE] {output} · {size} bytes · SHA256 {got}. Flash was not modified.'))
     finally:
         cancel.set()
-        link.close()
+        if owned:
+            link.close()
         if thread:
             thread.join(timeout=2)
         partial.unlink(missing_ok=True)

@@ -25,7 +25,7 @@ from pathlib import Path
 LAUNCHERS = {"START_ONECLICK.cmd", "START_ONECLICK.sh", "START_EXPERT.cmd", "START_EXPERT.sh"}
 RUNTIME = (
     "one_key.py", "one_key_multi.py", "expert.py", "expert_airoha.py", "ursusboot_pregnant.py",
-    "ursus_web_client.py", "ursus_ws_terminal.py", "ursus_ws_xmodem.py", "ursus_ws_tftp.py", "ursusboot_install.py", "ursusboot_update.py", "ursusboot_release.py",
+    "ursus_web_client.py", "ursus_ws_terminal.py", "ursus_ws_xmodem.py", "ursus_ws_tftp.py", "ursus_ws_nand.py", "ursusboot_install.py", "ursusboot_update.py", "ursusboot_release.py",
     "proven_backend.py",
 )
 SRC_NAME = {

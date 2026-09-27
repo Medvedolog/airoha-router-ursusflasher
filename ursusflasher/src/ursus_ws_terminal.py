@@ -26,6 +26,7 @@ _FKEYS = {
     b'\x1bOQ': 'upload', b'\x1b[12~': 'upload',  # F2
     b'\x1bOR': 'download', b'\x1b[13~': 'download',  # F3
     b'\x1bOS': 'mode', b'\x1b[14~': 'mode',  # F4
+    b'\x1b[15~': 'nand',  # F5
     b'\x1b[21~': 'quit', b'\x1b[10~': 'quit',  # F10
 }
 _ARROWS = {b'\x1b[A': 'up', b'\x1b[B': 'down', b'\x1bOA': 'up', b'\x1bOB': 'down'}
@@ -65,8 +66,8 @@ class LiveTerminal:
         header = f' UrsusFlasher  ·  UrsusBoot {self.host}  ●  WebSocket  ·  {mode} '
         rule = tr('── ЖИВАЯ КОНСОЛЬ ', '── LIVE CONSOLE ')
         rule += '─' * max(0, cols - len(rule))
-        hints = tr(' F2 ↑файл · F3 ↓файл · F4 строки/RAW · F10 выход · Ctrl+] меню ',
-                   ' F2 ↑file · F3 ↓file · F4 line/RAW · F10 quit · Ctrl+] menu ')
+        hints = tr(' F2 ↑файл · F3 ↓файл · F4 строки/RAW · F5 NAND · F10 выход ',
+                   ' F2 ↑file · F3 ↓file · F4 line/RAW · F5 NAND · F10 quit ')
         if self.pager:
             hints += tr(' [ВКЛ]', ' [ON]')
         footer = hints[:cols].ljust(cols)
@@ -214,6 +215,9 @@ class LiveTerminal:
         elif key in (b'd', b'D'):
             self.action = 'download'
             self.stop.set()
+        elif key in (b'n', b'N'):
+            self.action = 'nand'
+            self.stop.set()
         elif key in (b'l', b'L', b'r', b'R'):
             self.raw = not self.raw
             self.line = ''
@@ -239,8 +243,8 @@ class LiveTerminal:
         elif key == b'\x1d':
             self.menu = True
             with self.lock:
-                self._write(tr('\r\n[меню: S отправить HTTP · D скачать логи · L строки/RAW · P пейджер · Q выход]\r\n',
-                               '\r\n[menu: S send HTTP · D save logs · L line/RAW · P pager · Q quit]\r\n').encode())
+                self._write(tr('\r\n[меню: S отправить · D скачать · N NAND · L строки/RAW · P пейджер · Q выход]\r\n',
+                               '\r\n[menu: S send · D save · N NAND · L line/RAW · P pager · Q quit]\r\n').encode())
         elif key == b'\x10':
             self._toggle_pager()
         elif key in (b'\x1bOQ', b'\x1b[12~'):
@@ -254,6 +258,9 @@ class LiveTerminal:
             self.line = ''
             with self.lock:
                 self._refresh()
+        elif key == b'\x1b[15~':
+            self.action = 'nand'
+            self.stop.set()
         elif self.paused and key in (b'\r', b'\n'):
             with self.lock:
                 self.paused = False
@@ -313,8 +320,8 @@ class LiveTerminal:
             with self.lock:
                 self._start()
                 self._write(hello + (b'\r\n' if hello and not hello.endswith(b'\n') else b''))
-                self._write(tr('WebSocket · F2 HTTP/XMODEM в RAM · F3 TFTP/диагностика на ПК · F4 строки/RAW · F10 выход\r\n',
-                               'WebSocket · F2 HTTP/XMODEM to RAM · F3 TFTP/diagnostics to PC · F4 line/RAW · F10 quit\r\n').encode())
+                self._write(tr('WebSocket · F2 HTTP/XMODEM в RAM · F3 TFTP/диагностика · F4 строки/RAW · F5 NAND · F10 выход\r\n',
+                               'WebSocket · F2 HTTP/XMODEM to RAM · F3 TFTP/diagnostics · F4 line/RAW · F5 NAND · F10 quit\r\n').encode())
                 self._write(tr('Ожидаем вывод устройства. Enter покажет приглашение; команды записи не ограничены.\r\n',
                                'Waiting for device output. Enter requests a prompt; flash commands are unrestricted.\r\n').encode())
             reader = threading.Thread(target=self._reader, name='ursus-ws-console-rx', daemon=True)
@@ -327,7 +334,7 @@ class LiveTerminal:
                     ch = msvcrt.getwch()
                     if ch in ('\x00', '\xe0'):
                         scan = msvcrt.getwch()
-                        key = {'<': b'\x1bOQ', '=': b'\x1bOR', '>': b'\x1bOS', 'D': b'\x1b[21~',
+                        key = {'<': b'\x1bOQ', '=': b'\x1bOR', '>': b'\x1bOS', '?': b'\x1b[15~', 'D': b'\x1b[21~',
                                'H': b'\x1b[A', 'P': b'\x1b[B'}.get(scan)
                     else:
                         key = ch.encode('utf-8', 'replace')
@@ -373,6 +380,9 @@ def live_console(host: str) -> None:
         try:
             if terminal.action == 'upload':
                 _send_file(host)
+            elif terminal.action == 'nand':
+                from ursus_ws_nand import menu
+                menu(host)
             else:
                 _receive_file(host)
         except Exception as exc:

@@ -1,13 +1,17 @@
-# UrsusFlasher 0.2.67 TEST — Nokia XG-040G-MD + XG-040G-MF
+# UrsusFlasher 0.2.74-dev-nand TEST — Nokia XG-040G-MD + XG-040G-MF
 
 Hardware-test комплект для:
 
 ```text
-Nokia XG-040G-MD -> Airoha AN7581 -> UrsusBoot-MD t66
-Nokia XG-040G-MF -> Airoha AN7583 -> UrsusBoot-MF t66
+Nokia XG-040G-MD -> Airoha AN7581 -> UrsusBoot-MD T75
+Nokia XG-040G-MF -> Airoha AN7583 -> UrsusBoot-MF T75
 ```
 
 Python 3.12+; сторонние Python-пакеты не требуются. Актуальный публичный тест публикуется как GitHub prerelease; титульная страница репозитория показывает его версию автоматически.
+
+## NAND через живую консоль
+
+В EXPERT откройте WebSocket-консоль UrsusBoot и нажмите F5: архив всей основной области NAND или отдельного раздела, а также восстановление из архива с манифестом. Перед записью показываются модель, геометрия и SHA256, затем одно y/N; блоки читаются обратно. OOB не входит. См. `doc/NAND_WS_PRESETS_RU.md`. На железе этот новый путь ещё не подтверждён.
 
 ## Запуск
 
