@@ -198,8 +198,8 @@ def _show_live_console_action() -> None:
         14,
         tr("Живая консоль UrsusBoot (WebSocket)", "UrsusBoot live console (WebSocket)"),
         tr(
-            "Консоль U-Boot по Ethernet. F2: файл в RAM через HTTP; F3: диагностика на ПК; F4: строки/RAW. Ctrl-C уходит роутеру, F10 выходит.",
-            "U-Boot console over Ethernet. F2: HTTP file to RAM; F3: diagnostics to PC; F4: line/RAW. Ctrl-C reaches the router, F10 exits.",
+            "Консоль U-Boot по Ethernet. F2: HTTP или XMODEM в RAM; F3: диагностика на ПК; F4: строки/RAW. Ctrl-C уходит роутеру, F10 выходит.",
+            "U-Boot console over Ethernet. F2: HTTP or XMODEM to RAM; F3: diagnostics to PC; F4: line/RAW. Ctrl-C reaches the router, F10 exits.",
         ),
         write_capable=True,
         enabled=True,

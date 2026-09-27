@@ -65,8 +65,8 @@ class LiveTerminal:
         header = f' UrsusFlasher  ·  UrsusBoot {self.host}  ●  WebSocket  ·  {mode} '
         rule = tr('── ЖИВАЯ КОНСОЛЬ ', '── LIVE CONSOLE ')
         rule += '─' * max(0, cols - len(rule))
-        hints = tr(' F2 ↑HTTP · F3 ↓логи · F4 строки/RAW · F10 выход · Ctrl+] меню ',
-                   ' F2 ↑HTTP · F3 ↓logs · F4 line/RAW · F10 quit · Ctrl+] menu ')
+        hints = tr(' F2 ↑файл · F3 ↓логи · F4 строки/RAW · F10 выход · Ctrl+] меню ',
+                   ' F2 ↑file · F3 ↓logs · F4 line/RAW · F10 quit · Ctrl+] menu ')
         if self.pager:
             hints += tr(' [ВКЛ]', ' [ON]')
         footer = hints[:cols].ljust(cols)
@@ -313,8 +313,8 @@ class LiveTerminal:
             with self.lock:
                 self._start()
                 self._write(hello + (b'\r\n' if hello and not hello.endswith(b'\n') else b''))
-                self._write(tr('WebSocket · F2 файл через HTTP · F3 логи на ПК · F4 строки/RAW · F10 выход · Ctrl+] меню\r\n',
-                               'WebSocket · F2 file over HTTP · F3 save logs · F4 line/RAW · F10 quit · Ctrl+] menu\r\n').encode())
+                self._write(tr('WebSocket · F2 HTTP/XMODEM в RAM · F3 логи на ПК · F4 строки/RAW · F10 выход\r\n',
+                               'WebSocket · F2 HTTP/XMODEM to RAM · F3 save logs · F4 line/RAW · F10 quit\r\n').encode())
                 self._write(tr('Ожидаем вывод устройства. Enter покажет приглашение; команды записи не ограничены.\r\n',
                                'Waiting for device output. Enter requests a prompt; flash commands are unrestricted.\r\n').encode())
             reader = threading.Thread(target=self._reader, name='ursus-ws-console-rx', daemon=True)
@@ -371,10 +371,10 @@ def live_console(host: str) -> None:
         # UrsusBoot explicitly locks other HTTP requests while a WebSocket
         # console owns the control plane.  The terminal has already detached.
         try:
-            _wait_http_ready(host)
             if terminal.action == 'upload':
-                _send_http(host)
+                _send_file(host)
             else:
+                _wait_http_ready(host)
                 _save_diagnostics(host)
         except Exception as exc:
             print(tr(f'[ОШИБКА] {exc}', f'[ERROR] {exc}'))
@@ -397,21 +397,26 @@ def _wait_http_ready(host: str) -> None:
             time.sleep(.1)
 
 
-def _send_http(host: str) -> None:
+def _send_file(host: str) -> None:
     from ursus_web_client import upload
 
-    print(tr('Передача по HTTP в RAM UrsusBoot. Flash не записывается.',
-             'HTTP transfer into UrsusBoot RAM. Flash is not written.'))
-    print(tr('1 initramfs · 2 прошивка OpenWrt · 3 UrsusBoot FIP · 4 Vanilla FIP · 5 UBI preloader',
-             '1 initramfs · 2 OpenWrt firmware · 3 UrsusBoot FIP · 4 Vanilla FIP · 5 UBI preloader'))
+    print(tr('Передача в RAM UrsusBoot. Flash не записывается.',
+             'Transfer into UrsusBoot RAM. Flash is not written.'))
+    print(tr('1 initramfs · 2 прошивка OpenWrt · 3 UrsusBoot FIP · 4 Vanilla FIP · 5 UBI preloader · 6 произвольный файл XMODEM',
+             '1 initramfs · 2 OpenWrt firmware · 3 UrsusBoot FIP · 4 Vanilla FIP · 5 UBI preloader · 6 arbitrary file via XMODEM'))
+    choice = input(tr('Тип файла [Enter — назад]: ', 'File type [Enter — back]: ')).strip()
     kind = {'1': 'initramfs', '2': 'firmware', '3': 'fip',
-            '4': 'vanilla-fip', '5': 'preloader'}.get(input(tr('Тип файла [Enter — назад]: ',
-                                                            'File type [Enter — back]: ')).strip())
-    if kind is None:
+            '4': 'vanilla-fip', '5': 'preloader'}.get(choice)
+    if kind is None and choice != '6':
         return
     name = input(tr('Путь к файлу [Enter — назад]: ', 'File path [Enter — back]: ')).strip().strip('"')
     if not name:
         return
+    if choice == '6':
+        from ursus_ws_xmodem import send_file
+        send_file(host, Path(name).expanduser())
+        return
+    _wait_http_ready(host)
     result = upload(host, Path(name).expanduser(), kind)
     print(tr(f'[ГОТОВО] Файл принят в RAM: {result.get("result")}. Запись и запуск не выполнялись.',
              f'[DONE] File accepted into RAM: {result.get("result")}. No write or boot was started.'))

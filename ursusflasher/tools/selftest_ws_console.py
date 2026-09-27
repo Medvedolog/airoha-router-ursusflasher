@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import os
 import socket
 import struct
 import sys
 import threading
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -16,6 +18,7 @@ sys.path.insert(0, str(SRC))
 
 import ursus_web_client as uw
 from ursus_ws_terminal import LiveTerminal
+from ursus_ws_xmodem import WebSocketSerial, _wait_ready
 
 
 def terminal_key_contract() -> None:
@@ -43,6 +46,96 @@ def terminal_key_contract() -> None:
     term._keys(b'd')
     assert sock.sent == [b'version\r', b'\x03']
     assert term.action == 'download' and term.stop.is_set()
+
+
+def xmodem_transport_contract() -> None:
+    class FakeWS:
+        def __init__(self):
+            self.messages = [b'Ready for binary (xmodem) download\r\n', b'C', b'\x06']
+            self.sent = []
+            self.cv = threading.Condition()
+            self.closed = False
+
+        def recv_message(self):
+            with self.cv:
+                while not self.messages and not self.closed:
+                    self.cv.wait()
+                if self.closed:
+                    raise EOFError
+                return self.messages.pop(0)
+
+        def send(self, data):
+            self.sent.append(data)
+
+        def close(self):
+            with self.cv:
+                self.closed = True
+                self.cv.notify_all()
+
+    fake = FakeWS()
+    link = WebSocketSerial(fake)
+    try:
+        _wait_ready(link, 2)
+        assert link.read(1, 1) == b'\x06'
+        link.write(b'A' * 2300)
+        assert list(map(len, fake.sent)) == [1024, 1024, 252]
+        link.reset_input()  # must preserve the next receiver byte
+        with fake.cv:
+            fake.messages.append(b'C')
+            fake.cv.notify_all()
+        assert link.read(1, 1) == b'C'
+    finally:
+        link.close()
+
+
+def existing_xmodem_sender_over_ws() -> None:
+    from proven_backend import xmodem_send, crc16_xmodem
+
+    class Receiver:
+        def __init__(self):
+            self.cv = threading.Condition()
+            self.messages = []
+            self.closed = False
+            self.blocks = []
+            self.eot = False
+
+        def recv_message(self):
+            with self.cv:
+                while not self.messages and not self.closed:
+                    self.cv.wait()
+                if self.closed:
+                    raise EOFError
+                return self.messages.pop(0)
+
+        def send(self, data):
+            if data == b'\x04':
+                self.eot = True
+            else:
+                assert len(data) == 133 and data[0] == 1
+                assert data[1] ^ data[2] == 255
+                assert int.from_bytes(data[-2:], 'big') == crc16_xmodem(data[3:-2])
+                self.blocks.append(data[3:-2])
+            with self.cv:
+                self.messages.append(b'\x06')
+                self.cv.notify_all()
+
+        def close(self):
+            with self.cv:
+                self.closed = True
+                self.cv.notify_all()
+
+    receiver = Receiver()
+    link = WebSocketSerial(receiver)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            file = Path(tmp) / 'test.bin'
+            payload = bytes(range(256)) + b'!'  # three 128-byte blocks
+            file.write_bytes(payload)
+            xmodem_send(link, file, file.name, io.BytesIO())
+            assert b''.join(receiver.blocks)[:len(payload)] == payload
+            assert len(receiver.blocks) == 3 and receiver.eot
+    finally:
+        link.close()
 
 
 def _recv_headers(conn: socket.socket) -> bytes:
@@ -89,6 +182,8 @@ def _recv_client_frame(conn: socket.socket) -> tuple[int, bytes]:
 
 def main() -> int:
     terminal_key_contract()
+    xmodem_transport_contract()
+    existing_xmodem_sender_over_ws()
     ready = threading.Event()
     result: dict[str, object] = {}
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -150,6 +245,7 @@ def main() -> int:
     ws.close()
     th.join(timeout=2)
     assert result.get("payload") == b"version\r"
+    print("URSUS_WS_XMODEM_SELFTEST=PASS reused_uart_sender=1 blocks=3 crc_ack=1")
     print("URSUS_WS_CLIENT_SELFTEST=PASS handshake=accept+subprotocol+hello masked_tx=1")
     return 0
 
