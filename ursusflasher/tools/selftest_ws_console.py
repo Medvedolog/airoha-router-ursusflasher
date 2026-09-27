@@ -89,6 +89,7 @@ def xmodem_transport_contract() -> None:
 
 
 def existing_xmodem_sender_over_ws() -> None:
+    os.environ.setdefault('NOKIA_LANG', 'ru')
     from proven_backend import xmodem_send, crc16_xmodem
 
     class Receiver:
