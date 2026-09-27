@@ -198,8 +198,8 @@ def _show_live_console_action() -> None:
         14,
         tr("Живая консоль UrsusBoot (WebSocket)", "UrsusBoot live console (WebSocket)"),
         tr(
-            "Настоящий stdin/stdout U-Boot по Ethernet. Без дополнительного подтверждения; Ctrl-C уходит роутеру, Ctrl-] отключает локальный терминал.",
-            "Real U-Boot stdin/stdout over Ethernet. No extra confirmation; Ctrl-C goes to the router and Ctrl-] detaches the local terminal.",
+            "Консоль U-Boot по Ethernet. F2: файл в RAM через HTTP; F3: диагностика на ПК; F4: строки/RAW. Ctrl-C уходит роутеру, F10 выходит.",
+            "U-Boot console over Ethernet. F2: HTTP file to RAM; F3: diagnostics to PC; F4: line/RAW. Ctrl-C reaches the router, F10 exits.",
         ),
         write_capable=True,
         enabled=True,
