@@ -18,6 +18,7 @@ on:
       - main
       - feature/ursusboot-modular-airoha
       - claude/lucid-gauss-t0il1g
+      - dev/ursusboot-ws-console-ui
     paths:
       - '.github/workflows/md-item4-direct-ubi.yml'
       - 'START_ONECLICK.cmd'
@@ -65,6 +66,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 -m py_compile ursusflasher/src/*.py ursusflasher/tools/selftest_item4_direct_ubi.py ursusflasher/tools/selftest_stock_service_provisioning.py scripts/*.py
+          python3 ursusflasher/tools/selftest_ws_console.py
           python3 ursusflasher/tools/selftest_item4_direct_ubi.py
           python3 ursusflasher/tools/selftest_network_faults.py
           python3 ursusflasher/tools/selftest_restore_routes.py
