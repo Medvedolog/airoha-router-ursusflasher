@@ -65,8 +65,8 @@ class LiveTerminal:
         header = f' UrsusFlasher  ·  UrsusBoot {self.host}  ●  WebSocket  ·  {mode} '
         rule = tr('── ЖИВАЯ КОНСОЛЬ ', '── LIVE CONSOLE ')
         rule += '─' * max(0, cols - len(rule))
-        hints = tr(' F2 ↑файл · F3 ↓логи · F4 строки/RAW · F10 выход · Ctrl+] меню ',
-                   ' F2 ↑file · F3 ↓logs · F4 line/RAW · F10 quit · Ctrl+] menu ')
+        hints = tr(' F2 ↑файл · F3 ↓файл · F4 строки/RAW · F10 выход · Ctrl+] меню ',
+                   ' F2 ↑file · F3 ↓file · F4 line/RAW · F10 quit · Ctrl+] menu ')
         if self.pager:
             hints += tr(' [ВКЛ]', ' [ON]')
         footer = hints[:cols].ljust(cols)
@@ -313,8 +313,8 @@ class LiveTerminal:
             with self.lock:
                 self._start()
                 self._write(hello + (b'\r\n' if hello and not hello.endswith(b'\n') else b''))
-                self._write(tr('WebSocket · F2 HTTP/XMODEM в RAM · F3 логи на ПК · F4 строки/RAW · F10 выход\r\n',
-                               'WebSocket · F2 HTTP/XMODEM to RAM · F3 save logs · F4 line/RAW · F10 quit\r\n').encode())
+                self._write(tr('WebSocket · F2 HTTP/XMODEM в RAM · F3 TFTP/диагностика на ПК · F4 строки/RAW · F10 выход\r\n',
+                               'WebSocket · F2 HTTP/XMODEM to RAM · F3 TFTP/diagnostics to PC · F4 line/RAW · F10 quit\r\n').encode())
                 self._write(tr('Ожидаем вывод устройства. Enter покажет приглашение; команды записи не ограничены.\r\n',
                                'Waiting for device output. Enter requests a prompt; flash commands are unrestricted.\r\n').encode())
             reader = threading.Thread(target=self._reader, name='ursus-ws-console-rx', daemon=True)
@@ -374,8 +374,7 @@ def live_console(host: str) -> None:
             if terminal.action == 'upload':
                 _send_file(host)
             else:
-                _wait_http_ready(host)
-                _save_diagnostics(host)
+                _receive_file(host)
         except Exception as exc:
             print(tr(f'[ОШИБКА] {exc}', f'[ERROR] {exc}'))
         answer = input(tr('Вернуться к живой консоли? [Y/n]: ',
@@ -422,8 +421,23 @@ def _send_file(host: str) -> None:
              f'[DONE] File accepted into RAM: {result.get("result")}. No write or boot was started.'))
 
 
-def _save_diagnostics(host: str) -> None:
-    from ursus_web_client import collect_diagnostics
+def _receive_file(host: str) -> None:
+    from ursus_web_client import collect_diagnostics, KIT
 
-    path = collect_diagnostics(host, 'live-console-operator-request')
-    print(tr(f'[ГОТОВО] Диагностика сохранена: {path}', f'[DONE] Diagnostics saved: {path}'))
+    print(tr('1 Диагностика UrsusBoot по HTTP · 2 Диапазон RAM через TFTP PUT',
+             '1 UrsusBoot HTTP diagnostics · 2 RAM range over TFTP PUT'))
+    choice = input(tr('Что сохранить [Enter — назад]: ', 'Save what [Enter — back]: ')).strip()
+    if choice == '1':
+        _wait_http_ready(host)
+        path = collect_diagnostics(host, 'live-console-operator-request')
+        print(tr(f'[ГОТОВО] Диагностика сохранена: {path}', f'[DONE] Diagnostics saved: {path}'))
+    elif choice == '2':
+        from ursus_ws_tftp import receive_ram
+
+        address = int(input(tr('Адрес RAM [0x81800000]: ', 'RAM address [0x81800000]: ')).strip()
+                      or '0x81800000', 0)
+        size = int(input(tr('Длина в байтах (например 0x100000): ',
+                            'Length in bytes (e.g. 0x100000): ')).strip(), 0)
+        default = KIT / 'work' / 'diagnostics' / f'ursus-ram-{int(time.time())}.bin'
+        name = input(tr(f'Файл на ПК [{default}]: ', f'PC output file [{default}]: ')).strip().strip('"')
+        receive_ram(host, address, size, Path(name).expanduser() if name else default)

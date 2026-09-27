@@ -139,6 +139,65 @@ def existing_xmodem_sender_over_ws() -> None:
         link.close()
 
 
+def tftp_ram_export_contract() -> None:
+    import proven_backend as proven
+    from ursus_ws_tftp import receive_ram
+
+    payload = b'UrsusBoot TFTP PUT' * 37
+    digest = hashlib.sha256(payload).hexdigest()
+
+    class FakeWS:
+        def __init__(self):
+            self.cv = threading.Condition()
+            self.messages = []
+            self.closed = False
+
+        def recv_message(self):
+            with self.cv:
+                while not self.messages and not self.closed:
+                    self.cv.wait()
+                if self.closed:
+                    raise EOFError
+                return self.messages.pop(0)
+
+        def send(self, data):
+            with self.cv:
+                if data.startswith(b'hash sha256'):
+                    self.messages.append(f'SHA256 for RAM ==> {digest}\r\nUrsusBoot> '.encode())
+                elif data.startswith(b'tftpput '):
+                    assert b':1069:' in data
+                    self.messages.append(b'TFTP done\r\nUrsusBoot> ')
+                self.cv.notify_all()
+
+        def close(self):
+            with self.cv:
+                self.closed = True
+                self.cv.notify_all()
+
+    def fake_receive(bind_ip, port, output, name, host, ready, result, **kwargs):
+        assert port == 1069 and host == '127.0.0.1' and name.startswith('ursus-ram-')
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(payload)
+        result.bytes_transferred = len(payload)
+        ready.set()
+
+    original_connect = uw.UrsusLiveConsole.connect
+    original_receive = proven.receive_tftp_put
+    original_ip = proven.local_ip_for
+    uw.UrsusLiveConsole.connect = lambda *args, **kwargs: (FakeWS(), b'hello')
+    proven.receive_tftp_put = fake_receive
+    proven.local_ip_for = lambda host: '127.0.0.1'
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / 'ram.bin'
+            receive_ram('127.0.0.1', 0x81800000, len(payload), output)
+            assert output.read_bytes() == payload
+    finally:
+        uw.UrsusLiveConsole.connect = original_connect
+        proven.receive_tftp_put = original_receive
+        proven.local_ip_for = original_ip
+
+
 def _recv_headers(conn: socket.socket) -> bytes:
     data = bytearray()
     while b"\r\n\r\n" not in data:
@@ -185,6 +244,7 @@ def main() -> int:
     terminal_key_contract()
     xmodem_transport_contract()
     existing_xmodem_sender_over_ws()
+    tftp_ram_export_contract()
     ready = threading.Event()
     result: dict[str, object] = {}
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -246,6 +306,7 @@ def main() -> int:
     ws.close()
     th.join(timeout=2)
     assert result.get("payload") == b"version\r"
+    print("URSUS_WS_TFTPPUT_SELFTEST=PASS ram_range=1 size=1 sha256=1")
     print("URSUS_WS_XMODEM_SELFTEST=PASS reused_uart_sender=1 blocks=3 crc_ack=1")
     print("URSUS_WS_CLIENT_SELFTEST=PASS handshake=accept+subprotocol+hello masked_tx=1")
     return 0
