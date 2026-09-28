@@ -107,6 +107,9 @@ def nand_restore_contract() -> None:
         def close(self) -> None:
             pass
 
+        def detach_ubi(self) -> None:
+            calls.append('ubi detach')
+
         def command(self, cmd: str, timeout: float = 60) -> bytes:
             nonlocal last_read
             calls.append(cmd)
@@ -121,9 +124,10 @@ def nand_restore_contract() -> None:
                 return hashlib.sha256(image.read_bytes()[last_read:last_read + size]).hexdigest()
             return current_digest
 
-    def fake_send(session, path, length, digest):
+    def fake_send(session, path, length, digest, port):
         nonlocal current_digest
         assert path.read_bytes() and length == path.stat().st_size
+        assert 1024 <= port <= 65535, port
         current_digest = digest
 
     with tempfile.TemporaryDirectory() as directory:
@@ -142,6 +146,9 @@ def nand_restore_contract() -> None:
                 mock.patch.object(nand, '_serve_chunk', fake_send), \
                 mock.patch('builtins.input', return_value='y'):
             nand.restore('127.0.0.1', status, image)
+            assert 'ubi detach' in calls, 'UBI must be detached before writing its MTD'
+            erases = [i for i, x in enumerate(calls) if x.startswith('mtd erase ')]
+            assert erases and calls.index('ubi detach') < erases[0]
             writes = [x for x in calls if x.startswith('mtd write ')]
             assert len(writes) == 3 and writes[0].split()[-2] == '0x40000' \
                    and writes[1].split()[-2] == '0x60000' and writes[2].split()[-2] == '0x0'
@@ -152,7 +159,7 @@ def nand_restore_contract() -> None:
             try:
                 nand.restore('127.0.0.1', status, image)
             except RuntimeError as exc:
-                assert 'bad-block map' in str(exc)
+                assert 'URSUS_NAND_BADBLOCK_MAP_CHANGED' in str(exc)
             else:
                 raise AssertionError('changed bad-block map must stop restore')
             assert not any(x.startswith(('mtd erase ', 'mtd write ')) for x in calls)
@@ -179,8 +186,9 @@ def nand_backup_contract() -> None:
         def close(self):
             pass
 
-    def fake_receive(host, address, size, path, *, link):
+    def fake_receive(host, address, size, path, *, port, link):
         assert address == nand.RAM_ADDR and size in (erase, 2 * erase)
+        assert 1024 <= port <= 65535, port
         path.write_bytes(b'R' * size)
 
     with tempfile.TemporaryDirectory() as directory:
@@ -393,8 +401,50 @@ def _recv_client_frame(conn: socket.socket) -> tuple[int, bytes]:
     return opcode, bytes(ch ^ mask[i & 3] for i, ch in enumerate(payload))
 
 
+def nand_generation_contract() -> None:
+    """The presets must follow the tftpput capability, not one exact version."""
+    import ursus_ws_nand as nand
+
+    for version, want in (('0.1.0-alpha5-t75', True), ('0.1.0-alpha5-t76', True),
+                          ('0.1.0-alpha5-t100', True), ('0.1.0-alpha5-t74', False),
+                          ('0.1.0-alpha5-UBIUX1-TEST61', False), ('', False)):
+        got = nand._tftpput_available({'version': version})
+        assert got is want, (version, got, want)
+    # An explicit capability flag wins over the inferred generation.
+    assert nand._tftpput_available({'version': '0.1.0-alpha5-t74', 'tftpput_available': True})
+    assert not nand._tftpput_available({'version': '0.1.0-alpha5-t99', 'tftpput_available': False})
+
+
+def nand_transfer_port_contract() -> None:
+    """A busy 1069 must fall back instead of ending the preset."""
+    import socket as _socket
+
+    import ursus_ws_nand as nand
+
+    hog = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+    try:
+        hog.bind(('', nand.PORT))
+    except OSError:
+        # Something on this machine already holds 1069; the fallback is exactly
+        # what ships for that case, so assert it rather than the preferred port.
+        hog.close()
+        assert 1024 <= nand._transfer_port() <= 65535
+        return
+    try:
+        hog.close()
+        assert nand._transfer_port() == nand.PORT, 'a free 1069 must be preferred'
+        hog = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+        hog.bind(('', nand.PORT))
+        fallback = nand._transfer_port()
+        assert fallback != nand.PORT and 1024 <= fallback <= 65535, fallback
+    finally:
+        hog.close()
+
+
 def main() -> int:
     terminal_key_contract()
+    nand_generation_contract()
+    nand_transfer_port_contract()
     nand_geometry_contract()
     nand_restore_contract()
     nand_backup_contract()

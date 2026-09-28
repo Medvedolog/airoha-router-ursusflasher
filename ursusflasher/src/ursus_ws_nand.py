@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import socket
 import threading
 import time
 
@@ -23,6 +24,9 @@ RAM_ADDR = 0x81800000
 VERIFY_ADDR = 0x83800000
 CHUNK_LIMIT = 8 * 1024 * 1024
 PORT = 1069
+# The `tftpput` RAM export these presets are built on first shipped in T75.
+TFTPPUT_GENERATION = 75
+GENERATION = re.compile(r'-t(\d+)$')
 PROMPT = re.compile(rb'(?:^|[\r\n])UrsusBoot>\s*$')
 NAME = re.compile(r'^[A-Za-z0-9_.-]+$')
 RANGE = re.compile(r'0x([0-9a-fA-F]+)-0x([0-9a-fA-F]+) : "([^"]+)"')
@@ -31,6 +35,55 @@ HEX64 = re.compile(rb'\b[0-9a-fA-F]{64}\b')
 
 def tr(ru: str, en: str) -> str:
     return terms.tr(ru, en)
+
+
+def _tftpput_available(status: dict) -> bool:
+    """Whether this UrsusBoot exports RAM over TFTP.
+
+    A firmware that declares the capability decides for itself. Otherwise the
+    `-tNN` runtime generation is compared, so a later release keeps working
+    instead of being refused by an exact version match.
+    """
+    declared = status.get('tftpput_available')
+    if isinstance(declared, bool):
+        return declared
+    match = GENERATION.search(str(status.get('version') or '').strip())
+    return bool(match) and int(match.group(1)) >= TFTPPUT_GENERATION
+
+
+def _transfer_port(preferred: int = PORT) -> int:
+    """A UDP port the PC can actually bind for this transfer.
+
+    The documented port is kept whenever it is free so firewall rules stay
+    predictable; a busy one falls back instead of failing the whole preset.
+    """
+    for candidate in (preferred, 0):
+        probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            probe.bind(('', candidate))
+            return int(probe.getsockname()[1])
+        except OSError:
+            continue
+        finally:
+            probe.close()
+    raise RuntimeError(tr(
+        'Не удалось занять ни один UDP-порт для передачи TFTP.',
+        'No UDP port could be bound for the TFTP transfer.',
+    ))
+
+
+def _own_port(port: int | None) -> int:
+    """Resolve the transfer port, naming it when this call had to choose one."""
+    if port is not None:
+        return port
+    port = _transfer_port()
+    if port == PORT:
+        print(tr(f'[TFTP] Порт UDP {port}. Разрешите его в firewall ПК.',
+                 f'[TFTP] UDP port {port}. Allow it in the PC firewall.'))
+    else:
+        print(tr(f'[TFTP] UDP {PORT} занят, использую UDP {port}. Разрешите в firewall ПК именно его.',
+                 f'[TFTP] UDP {PORT} is busy, using UDP {port}. Allow this port in the PC firewall.'))
+    return port
 
 
 @dataclass(frozen=True)
@@ -75,6 +128,16 @@ class Session:
                     return bytes(out)
                 raise RuntimeError(f'U-Boot command failed: {cmd}\n{bytes(out)[-1000:].decode("utf-8", "replace")}')
         raise TimeoutError(f'U-Boot command did not finish: {cmd}')
+
+    def detach_ubi(self) -> None:
+        """Make sure UBI is not holding the MTD; a no-op when nothing is attached."""
+        try:
+            self.command('ubi detach', 30)
+        except RuntimeError:
+            # `ubi detach` fails when there is nothing attached, which is the
+            # state this call wants.  A real detach failure surfaces at the
+            # first erase instead, where it is unambiguous.
+            pass
 
     def sha(self, address: int, size: int) -> str:
         out = self.command(f'hash sha256 0x{address:x} 0x{size:x}', 90)
@@ -138,8 +201,11 @@ def _parse_list(out: bytes, status: dict) -> tuple[str, int, int, int, tuple[Reg
 
 
 def discover(session: Session, status: dict) -> Geometry:
-    if not str(status.get('version', '')).endswith('-t75'):
-        raise RuntimeError('NAND presets require UrsusBoot T75')
+    if not _tftpput_available(status):
+        raise RuntimeError(
+            f'NAND presets need the UrsusBoot tftpput RAM export (T{TFTPPUT_GENERATION} or later); '
+            f'this bootloader reports {str(status.get("version") or "no version")!r}'
+        )
     identity = (str(status.get('board') or ''), str(status.get('soc') or ''))
     if identity not in (('Nokia XG-040G-MD', 'Airoha AN7581'),
                         ('Nokia XG-040G-MF', 'Airoha AN7583')):
@@ -188,8 +254,9 @@ def _hash_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def backup(host: str, status: dict, region: Region, output: Path) -> None:
+def backup(host: str, status: dict, region: Region, output: Path, *, port: int | None = None) -> None:
     from ursus_ws_tftp import receive_ram
+    port = _own_port(port)
     output = output.expanduser().resolve()
     manifest = _metadata_path(output)
     partial = output.with_name(output.name + '.partial')
@@ -226,7 +293,7 @@ def backup(host: str, status: dict, region: Region, output: Path) -> None:
                                 max(90, length // 20000))
                 chunk = output.with_name(output.name + f'.chunk-{off:08x}')
                 try:
-                    receive_ram(host, RAM_ADDR, length, chunk, link=session.link)
+                    receive_ram(host, RAM_ADDR, length, chunk, port=port, link=session.link)
                     with chunk.open('rb') as source:
                         for data in iter(lambda: source.read(1024 * 1024), b''):
                             dest.write(data)
@@ -267,19 +334,22 @@ def backup(host: str, status: dict, region: Region, output: Path) -> None:
         manifest.with_name(manifest.name + '.partial').unlink(missing_ok=True)
 
 
-def _serve_chunk(session: Session, path: Path, length: int, digest: str) -> None:
+def _serve_chunk(session: Session, path: Path, length: int, digest: str, port: int) -> None:
     from proven_backend import TftpResult, local_ip_for, serve_tftp_get
     bind_ip = local_ip_for(session.host)
     remote_name = f'ursus-restore-{time.monotonic_ns():x}.bin'
     ready = threading.Event()
     result = TftpResult()
     thread = threading.Thread(target=serve_tftp_get,
-                              args=(bind_ip, PORT, path, remote_name, session.host, ready, result),
+                              args=(bind_ip, port, path, remote_name, session.host, ready, result),
                               kwargs={'timeout': 120}, daemon=True)
     thread.start()
     if not ready.wait(5) or result.error:
-        raise RuntimeError(f'TFTP GET server failed: {result.error}')
-    session.command(f'tftpboot 0x{RAM_ADDR:x} {bind_ip}:{PORT}:{remote_name}',
+        raise RuntimeError(
+            f'TFTP GET server could not serve {bind_ip}:{port}: {result.error}; '
+            'check that the PC firewall allows this UDP port'
+        )
+    session.command(f'tftpboot 0x{RAM_ADDR:x} {bind_ip}:{port}:{remote_name}',
                     max(120, length // 10000))
     thread.join(timeout=10)
     if thread.is_alive() or result.error or result.bytes_transferred != length:
@@ -296,7 +366,45 @@ def _current_bad(session: Session, master: str) -> tuple[int, ...]:
         rb'^\s+0x([0-9a-fA-F]+)\s*$', report, re.M)}))
 
 
-def restore(host: str, status: dict, image: Path) -> None:
+def _assert_archive_matches(meta: dict, status: dict, geo: Geometry) -> None:
+    """Refuse a foreign or stale archive, naming the field that disagrees."""
+    for label, want, got in (
+        ('board', meta.get('board'), status.get('board')),
+        ('SoC', meta.get('soc'), status.get('soc')),
+        ('NAND chip', meta.get('flash_chip'), status.get('flash_chip')),
+        ('NAND id', meta.get('flash_id'), status.get('flash_id')),
+        ('flash size', meta.get('flash_size'), geo.size),
+        ('erase size', meta.get('erase_size'), geo.erase),
+        ('page size', meta.get('page_size'), geo.page),
+    ):
+        if want != got:
+            raise RuntimeError('URSUS_NAND_ARCHIVE_FOREIGN field=' + label.replace(' ', '_') + ': ' + tr(
+                f'архив снят с другого устройства: {label} в архиве {want!r}, '
+                f'а на этом аппарате {got!r}. Заливка остановлена.',
+                f'the archive is from a different device: {label} is {want!r} in the archive '
+                f'and {got!r} on this unit. Restore stopped.',
+            ))
+    archived = tuple(meta.get('bad_blocks', []))
+    if archived != geo.bad:
+        appeared = [x for x in geo.bad if x not in archived]
+        vanished = [x for x in archived if x not in geo.bad]
+        detail = []
+        if appeared:
+            detail.append(tr(f'новых {len(appeared)}: ' + ', '.join(f'0x{x:x}' for x in appeared[:8]),
+                             f'{len(appeared)} new: ' + ', '.join(f'0x{x:x}' for x in appeared[:8])))
+        if vanished:
+            detail.append(tr(f'пропавших {len(vanished)}', f'{len(vanished)} no longer reported'))
+        raise RuntimeError('URSUS_NAND_BADBLOCK_MAP_CHANGED: ' + tr(
+            'карта плохих блоков изменилась с момента снятия архива (' + '; '.join(detail) + '). '
+            'Этот архив больше не описывает физическую раскладку аппарата, и заливка по нему '
+            'сдвинула бы данные. Снимите свежий архив этим же меню и восстанавливайтесь с него.',
+            'the bad-block map changed since the archive was taken (' + '; '.join(detail) + '). '
+            'The archive no longer describes this unit physically and restoring it would shift data. '
+            'Take a fresh archive with this same menu and restore from that one.',
+        ))
+
+
+def restore(host: str, status: dict, image: Path, *, port: int | None = None) -> None:
     image = image.expanduser().resolve()
     meta = json.loads(_metadata_path(image).read_text(encoding='utf-8'))
     region_data = meta.get('region') or {}
@@ -312,12 +420,8 @@ def restore(host: str, status: dict, image: Path) -> None:
         geo = discover(session, status)
         if (region != Region('entire-nand', 0, geo.size) and region not in geo.parts):
             raise RuntimeError('backup region is not present in the current layout')
-        if (meta.get('board') != status.get('board') or meta.get('soc') != status.get('soc') or
-                meta.get('flash_chip') != status.get('flash_chip') or
-                meta.get('flash_id') != status.get('flash_id') or
-                meta.get('flash_size') != geo.size or meta.get('erase_size') != geo.erase or
-                meta.get('page_size') != geo.page or tuple(meta.get('bad_blocks', [])) != geo.bad):
-            raise RuntimeError('board, NAND geometry or bad-block map differs from backup')
+        _assert_archive_matches(meta, status, geo)
+        port = _own_port(port)
         print(tr(f'ЗАЛИВКА {region.name}: 0x{region.offset:x} + 0x{region.size:x} '
                  f'из {image}\nПлата: {status.get("board")}, NAND: {geo.master} '
                  f'{geo.size >> 20} МиБ, плохих блоков {len(geo.bad)}. '
@@ -331,8 +435,11 @@ def restore(host: str, status: dict, image: Path) -> None:
         if answer not in ('y', 'yes', 'д', 'да'):
             return
         # Detach UBI before touching its backing MTD. The U-Boot session itself
-        # remains in RAM and the live WebSocket is kept open.
-        session.command('ubi detach', 30) if status.get('ubi_attached') else None
+        # remains in RAM and the live WebSocket is kept open.  Detach
+        # unconditionally over the session already in hand: the caller's status
+        # snapshot predates discover()'s own commands, and a detach with nothing
+        # attached is a no-op, so asking first only adds a way to be wrong.
+        session.detach_ubi()
         runs = _runs(region, geo)
         # The boot area is written last during a whole-chip restore.
         if region.name == 'entire-nand':
@@ -350,7 +457,7 @@ def restore(host: str, status: dict, image: Path) -> None:
                     digest = hashlib.sha256(data).hexdigest()
                     chunk.write_bytes(data)
                     try:
-                        _serve_chunk(session, chunk, length, digest)
+                        _serve_chunk(session, chunk, length, digest, port)
                     finally:
                         chunk.unlink(missing_ok=True)
                     # The generic U-Boot mtd writer skips marked bad blocks.
@@ -391,10 +498,14 @@ def menu(host: str) -> None:
              f'плохих блоков {len(geo.bad)}. Основная область с ECC, без OOB.',
              f'NAND {geo.master}: {geo.size >> 20} MiB, block 0x{geo.erase:x}, '
              f'{len(geo.bad)} bad blocks. ECC-corrected main area, no OOB.'))
+    port = _transfer_port()
     print(tr(f'Сеть: ПК {local_ip_for(host)} ⇄ UrsusBoot {host}, проводной Ethernet; '
-             f'разрешите UDP {PORT} в firewall ПК. Отключите мешающие VPN/Wi-Fi интерфейсы.',
+             f'разрешите UDP {port} в firewall ПК. Отключите мешающие VPN/Wi-Fi интерфейсы.',
              f'Network: PC {local_ip_for(host)} ⇄ UrsusBoot {host}, wired Ethernet; '
-             f'allow UDP {PORT} in the PC firewall. Disable interfering VPN/Wi-Fi interfaces.'))
+             f'allow UDP {port} in the PC firewall. Disable interfering VPN/Wi-Fi interfaces.'))
+    if port != PORT:
+        print(tr(f'(UDP {PORT} сейчас занят другой программой на ПК.)',
+                 f'(UDP {PORT} is currently taken by another program on the PC.)'))
     print(tr('1 Снять весь NAND · 2 Снять раздел · 3 Залить раздел из архива · '
              '4 Залить весь NAND из архива',
              '1 Back up whole NAND · 2 Back up partition · 3 Restore partition archive · '
@@ -416,7 +527,7 @@ def menu(host: str) -> None:
         from ursus_web_client import KIT
         default = KIT / 'work' / 'backups' / f'ursus-{region.name}-{int(time.time())}.bin'
         raw = input(tr(f'Файл архива [{default}]: ', f'Backup file [{default}]: ')).strip().strip('"')
-        backup(host, st, region, Path(raw) if raw else default)
+        backup(host, st, region, Path(raw) if raw else default, port=port)
     elif choice in ('3', '4'):
         raw = input(tr('Путь к .bin архиву (рядом должен быть .bin.json): ',
                        'Path to .bin image (matching .bin.json alongside): ')).strip().strip('"')
@@ -426,4 +537,4 @@ def menu(host: str) -> None:
         whole = (manifest.get('region') or {}).get('name') == 'entire-nand'
         if whole != (choice == '4'):
             raise RuntimeError('selected preset does not match the archive region')
-        restore(host, st, Path(raw))
+        restore(host, st, Path(raw), port=port)
