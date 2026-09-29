@@ -63,3 +63,10 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
           PYTHONPATH: ursusflasher/src
         run: python3 ursusflasher/tools/selftest_http_backup.py
+      - name: UrsusBoot FIP identification and chooser selftest
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONPATH: ursusflasher/src
+        run: |
+          NOKIA_LANG=ru python3 ursusflasher/tools/selftest_fip_choice.py
+          NOKIA_LANG=en python3 ursusflasher/tools/selftest_fip_choice.py

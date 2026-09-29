@@ -13,6 +13,7 @@ sys.path.insert(0, str(HERE))
 import board_profiles as bp
 import device_state as ds
 import expert as base
+import fip_choice
 import mf_backup_compat
 import mf_persistent
 import mf_runtime_install
@@ -103,8 +104,26 @@ def _mf_update_from_recovery(host: str) -> None:
     soc = str(st.get("soc") or "")
     if "XG-040G-MF" not in board or "AN7583" not in soc:
         raise RuntimeError(f"Recovery is not positively identified as MF/AN7583: board={board!r} soc={soc!r}")
-    candidate = _mf_backup_candidate()
-    result = uw.update_bootloader(host, candidate, confirm=True)
+    installed = f"UrsusBoot {st.get('version')}" if st.get("version") else None
+    try:
+        choice = fip_choice.choose(
+            [fip_choice.Option(
+                "derived",
+                "Кандидат, собранный из mtd0 этого MF (рекомендуется)",
+                "Candidate built from this MF's own mtd0 (recommended)",
+                factory=_mf_backup_candidate, advisory=True,
+                note_ru="Файл будет собран после выбора: понадобится ваш mtd0 backup.",
+                note_en="The file is built after you choose it: your mtd0 backup is needed.")],
+            known=ursusboot_update._known_fips(), rejected=ursusboot_update._rejected_fips(),
+            expect_nt_offset=None,
+            context_ru=f"Сейчас: {installed}" if installed else "", context_en=f"Installed now: {installed}" if installed else "")
+    except fip_choice.Cancelled:
+        base.ui.status(tr("СТОП", "STOP"), tr("Отменено до записи. Постоянная память не изменялась.", "Cancelled before any write. Persistent storage was not modified."))
+        return
+    base.ui.rule(tr("ЧТО БУДЕТ ЗАПИСАНО", "WHAT WILL BE WRITTEN"), style="amber2")
+    for line in fip_choice.summary_lines(choice, installed=installed):
+        print(line)
+    result = uw.update_bootloader(host, choice.path, confirm=True)
     if not result.get("bootloader_update_complete"):
         raise RuntimeError("UrsusBoot did not report a completed bootloader update")
     base.ui.status(tr("ГОТОВО", "READY"), tr(

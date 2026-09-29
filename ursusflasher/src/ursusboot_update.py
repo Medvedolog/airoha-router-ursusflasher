@@ -71,6 +71,7 @@ from proven_backend import (  # noqa: E402
 import ursus_web_client as uw  # noqa: E402
 import console_ui as ui  # noqa: E402
 import ui_terms as terms  # noqa: E402
+import fip_choice as fc  # noqa: E402
 
 
 def sha256(path: Path) -> str:
@@ -99,6 +100,71 @@ def _production_meta() -> dict:
     if candidate.get('version') != '0.1.0-alpha5-UBIUX1-TEST61':
         raise Error('alpha5-UBIUX1-TEST61 safety-regression metadata missing from MANIFEST')
     return candidate
+
+def _known_fips() -> dict[str, str]:
+    """sha256/crc32 -> what this build is, for everything the project itself ships or names."""
+    tr = terms.tr
+    known: dict[str, str] = {crc: name for crc, name in FIP_CRC32_REFERENCES.items()}
+    try:
+        meta = _ursus_meta()
+    except Exception:
+        meta = {}
+    if meta.get('emergency_fip_sha256'):
+        known[str(meta['emergency_fip_sha256']).lower()] = tr(
+            'аварийная сборка alpha3, закреплённая в комплекте', 'the alpha3 emergency build pinned in this kit')
+    cand = meta.get('alpha5_test61_candidate') or {}
+    if cand.get('fip_sha256'):
+        known[str(cand['fip_sha256']).lower()] = tr('историческая сборка TEST61', 'historical TEST61 build')
+    for fam in ('md', 'mf'):
+        digest = ursusboot_release.sha256(fam, 'update_fip')
+        if digest:
+            known[str(digest).lower()] = tr(f'релиз из комплекта ({fam.upper()})', f'release bundled in this kit ({fam.upper()})')
+    return known
+
+
+def _rejected_fips() -> set[str]:
+    try:
+        return {str(x).lower() for x in _ursus_meta().get('rejected_alpha4_hashes', [])}
+    except Exception:
+        return set()
+
+
+def _installed_version(host: str) -> str | None:
+    """Best effort: what the router in recovery says it runs.  Never gates anything."""
+    try:
+        version = uw.status(host).get('version')
+    except Exception:
+        return None
+    return f'UrsusBoot {version}' if version else None
+
+
+def _choose_update_fip(bundled: Path, *, installed: str | None = None) -> 'fc.Choice':
+    """Pick which FIP an ordinary update writes, and print exactly what it is.
+
+    The bundled release stays option 1 (Enter).  A custom file is possible only
+    through fc.choose()'s typed risk acceptance.  Raises fc.Cancelled.
+    """
+    tr = terms.tr
+    options = []
+    try:
+        require_fip_payload()
+    except Error as exc:
+        ui.status(tr('ВНИМАНИЕ', 'WARNING'), tr(
+            f'Комплектный FIP недоступен и не предлагается: {exc}',
+            f'The bundled FIP is unavailable and is not offered: {exc}'))
+    else:
+        options.append(fc.Option(
+            'bundled', f'Комплектный UrsusBoot {PRODUCTION_VERSION} (рекомендуется)',
+            f'UrsusBoot {PRODUCTION_VERSION} bundled with this kit (recommended)', path=bundled))
+    choice = fc.choose(options, known=_known_fips(), rejected=_rejected_fips(),
+                       context_ru=f'Сейчас: {installed}' if installed else '',
+                       context_en=f'Installed now: {installed}' if installed else '')
+    print()
+    ui.rule(tr('ЧТО БУДЕТ ЗАПИСАНО', 'WHAT WILL BE WRITTEN'), style='amber')
+    for line in fc.summary_lines(choice, installed=installed):
+        print(line)
+    return choice
+
 
 def validate_emergency_fip_host() -> dict:
     """Validate the exact alpha3 emergency FIP without asking the router about layout.
@@ -210,16 +276,37 @@ def _uboot_require_ok(sp: RecoverySerial, log, command: str, timeout: float, lab
     except Error as exc:
         raise Error(f'{label}: {exc}') from exc
 
-def load_fip_xmodem_emergency(sp: RecoverySerial, log) -> dict:
-    """Load the production FIP for emergency recovery and verify its RAM SHA256."""
-    meta = validate_emergency_fip_host()
+def _emergency_meta_for(choice: 'fc.Choice | None') -> tuple[dict, Path]:
+    """Host-side gate for the FIP an emergency recovery will write.
+
+    The pinned alpha3 keeps its exact-file validation.  A bundled or custom FIP
+    is re-read and re-identified here, so the bytes written are the bytes the
+    operator was shown, whatever happened to the file in between.
+    """
+    if choice is None or choice.kind == 'pinned':
+        return validate_emergency_fip_host(), PAYLOAD
+    info = fc.identify_file(choice.path, known=_known_fips(), rejected=_rejected_fips())
+    if not info.ok:
+        raise Error(terms.tr('Выбранный FIP не прошёл проверку: ', 'The chosen FIP failed validation: ') + '; '.join(info.problems or ['reject list']))
+    if info.sha256 != choice.info.sha256:
+        raise Error(terms.tr('Файл FIP изменился после выбора; запись отменена.', 'The FIP file changed after it was chosen; write cancelled.'))
+    ui.status(terms.tr('ГОТОВО', 'READY'), terms.tr(
+        f'Проверен выбранный FIP: {info.title}. SHA256={info.sha256}',
+        f'Chosen FIP checked: {info.title}. SHA256={info.sha256}'))
+    return {'fip_sha256': info.sha256, 'fip_size': info.size,
+            'u_boot_sha256': info.bl33_sha256, 'u_boot_size': info.bl33_size}, choice.path
+
+
+def load_fip_xmodem_emergency(sp: RecoverySerial, log, choice: 'fc.Choice | None' = None) -> dict:
+    """Load the FIP for emergency recovery (alpha3 unless the operator chose another) and verify its RAM SHA256."""
+    meta, payload = _emergency_meta_for(choice)
     size = meta['fip_size']
     ui.status('ШАГ', f'Передаю production FIP через XMODEM в RAM 0x{LOADADDR:08x}; {size} байт / 0x{size:x}.')
     _uboot_wait_quiet(sp, log, quiet=0.15, timeout=1.0)
     sp.reset_input()
     _uboot_send_line(sp, f'loadx 0x{LOADADDR:x}')
     time.sleep(0.35)
-    xmodem_send(sp, PAYLOAD, 'production UrsusBoot FIP for emergency recovery', log)
+    xmodem_send(sp, payload, 'production UrsusBoot FIP for emergency recovery', log)
     _uboot_read_until_prompt(sp, log, 45, 'loadx emergency production UrsusBoot FIP')
     _note_xmodem_payload_ready('Production FIP в RAM', meta['fip_sha256'])
     return meta
@@ -1060,7 +1147,8 @@ def _remove_boot_volume_if_present(sp: RecoverySerial, log, name: str) -> None:
     _uboot_command_no_rc(sp, log, f'ubi remove {name}', timeout=30)
 
 
-def emergency_ursusboot_transaction(sp: RecoverySerial, log, meta: dict, view: dict) -> str:
+def emergency_ursusboot_transaction(sp: RecoverySerial, log, meta: dict, view: dict, *,
+                                    choice: 'fc.Choice | None' = None, write_bl2: bool = True) -> str:
     """Restore the complete known-working alpha3 boot-chain state.
 
     This recovery intentionally restores the canonical alpha3 UBI/FIP state and
@@ -1079,12 +1167,30 @@ def emergency_ursusboot_transaction(sp: RecoverySerial, log, meta: dict, view: d
         raise Error('UBI не подключён в режиме только чтения; восстановление остановлено до записи.')
     if not bl2_target:
         raise Error('Не удалось определить MTD для BL2; восстановление остановлено до записи.')
+    pinned = choice is None or choice.kind == 'pinned'
+    fip_what = 'alpha3 FIP' if pinned else terms.tr('выбранный FIP', 'the chosen FIP')
 
     print()
-    ui.rule('ПОЛНОЕ ВОССТАНОВЛЕНИЕ ЦЕПОЧКИ ЗАГРУЗКИ ALPHA3', style='red')
-    ui.info('В RAM уже загружены и проверены точные alpha3 FIP и BL2.')
-    ui.info('Восстанавливаю штатное для alpha3 состояние UBI: fip = static volume ID 4.')
-    ui.info('После проверки FIP последним восстанавливаю парный alpha3 BL2 128 КиБ.')
+    if pinned:
+        ui.rule('ПОЛНОЕ ВОССТАНОВЛЕНИЕ ЦЕПОЧКИ ЗАГРУЗКИ ALPHA3', style='red')
+        ui.info('В RAM уже загружены и проверены точные alpha3 FIP и BL2.')
+        ui.info('Восстанавливаю штатное для alpha3 состояние UBI: fip = static volume ID 4.')
+        ui.info('После проверки FIP последним восстанавливаю парный alpha3 BL2 128 КиБ.')
+    else:
+        ui.rule(terms.tr('ВОССТАНОВЛЕНИЕ URSUSBOOT ИЗ ВЫБРАННОГО FIP', 'URSUSBOOT RECOVERY FROM THE CHOSEN FIP'), style='red')
+        for line in fc.summary_lines(choice):
+            ui.info(line)
+        ui.info(terms.tr('Том fip будет пересоздан как static volume ID 4 и записан этим файлом.',
+                         'The fip volume will be recreated as static volume ID 4 and written with this file.'))
+        if write_bl2:
+            ui.info(terms.tr('После проверки FIP последним будет записан парный alpha3 BL2 128 КиБ.',
+                             'After the FIP is verified, the paired alpha3 BL2 (128 KiB) is written last.'))
+        else:
+            ui.info(terms.tr('BL2 не изменяется: остаётся тот, что записан в роутере сейчас.',
+                             'BL2 is not modified: the one currently in the router stays.'))
+            ui.status(terms.tr('ВНИМАНИЕ', 'WARNING'), terms.tr(
+                'UrsusFlasher не может проверить, что этот FIP работает с BL2 в вашем роутере.',
+                'UrsusFlasher cannot verify that this FIP works with the BL2 in your router.'))
     ui.note('ubootenv, ubootenv2, FIT, rootfs и rootfs_data не изменяются.')
     ui.status('ВНИМАНИЕ', 'После подтверждения питание не отключать до итогового ГОТОВО.')
     answer = ui.prompt('Чтобы восстановить цепочку загрузки, наберите латиницей RECOVER URSUSBOOT: ').strip()
@@ -1092,39 +1198,47 @@ def emergency_ursusboot_transaction(sp: RecoverySerial, log, meta: dict, view: d
         ui.status('СТОП', 'Восстановление отменено до записи. NAND/UBI не изменялись.')
         return 'CANCELLED'
 
-    ui.status('ШАГ', 'Подключаю UBI и возвращаю том fip в штатное для alpha3 состояние: static ID 4.')
+    ui.status('ШАГ', 'Подключаю UBI и возвращаю том fip в штатное для alpha3 состояние: static ID 4.' if pinned else 'Подключаю UBI и пересоздаю том fip: static ID 4.')
     _uboot_command_no_rc(sp, log, 'ubi detach', timeout=20)
     _uboot_require_ok(sp, log, f'ubi part {ubi_target}', 30, 'attach UBI')
     for name in ('fip.new', 'fip.bad', 'fip.old', 'fip'):
         _remove_boot_volume_if_present(sp, log, name)
     _uboot_require_ok(sp, log, 'ubi create fip 0x100000 static 4', 60, 'создание штатного для alpha3 тома fip ID 4')
 
-    ui.status('ШАГ', 'Записываю рабочий alpha3 FIP в UBI volume ID 4.')
-    _uboot_require_ok(sp, log, f'ubi write 0x{LOADADDR:x} fip 0x{size:x}', 180, 'запись alpha3 FIP')
-    _uboot_require_ok(sp, log, f'ubi read 0x{READBACK_ADDR:x} fip 0x{size:x}', 120, 'readback alpha3 FIP')
-    _uboot_require_ok(sp, log, f'cmp.b 0x{LOADADDR:x} 0x{READBACK_ADDR:x} 0x{size:x}', 90, 'byte compare alpha3 FIP')
-    ui.status('ГОТОВО', 'alpha3 FIP записан в UBI static volume ID 4 и побайтово совпал с исходником из RAM.')
+    ui.status('ШАГ', 'Записываю рабочий alpha3 FIP в UBI volume ID 4.' if pinned else f'Записываю {fip_what} в UBI volume ID 4.')
+    _uboot_require_ok(sp, log, f'ubi write 0x{LOADADDR:x} fip 0x{size:x}', 180, 'запись alpha3 FIP' if pinned else 'запись выбранного FIP')
+    _uboot_require_ok(sp, log, f'ubi read 0x{READBACK_ADDR:x} fip 0x{size:x}', 120, 'readback alpha3 FIP' if pinned else 'readback выбранного FIP')
+    _uboot_require_ok(sp, log, f'cmp.b 0x{LOADADDR:x} 0x{READBACK_ADDR:x} 0x{size:x}', 90, 'byte compare alpha3 FIP' if pinned else 'byte compare выбранного FIP')
+    ui.status('ГОТОВО', 'alpha3 FIP записан в UBI static volume ID 4 и побайтово совпал с исходником из RAM.' if pinned else f'{fip_what} записан в UBI static volume ID 4 и побайтово совпал с исходником из RAM.')
 
-    # BL2 is the final destructive step, matching the alpha3 STOCK->UBI migration contract.
-    ui.status('ШАГ', 'FIP подтверждён. Последним восстанавливаю парный alpha3 BL2. НЕ ВЫКЛЮЧАЙТЕ питание.')
-    _uboot_command_no_rc(sp, log, 'ubi detach', timeout=20)
-    _uboot_require_ok(sp, log, f'mtd erase {bl2_target} 0x{bl2_offset:x} 0x{BL2_SIZE:x}', 90, 'erase BL2')
-    _uboot_require_ok(sp, log, f'mtd write {bl2_target} 0x{BL2_ADDR:x} 0x{bl2_offset:x} 0x{BL2_SIZE:x}', 120, 'write alpha3 BL2')
-    _uboot_require_ok(sp, log, f'mtd read {bl2_target} 0x{READBACK_ADDR:x} 0x{bl2_offset:x} 0x{BL2_SIZE:x}', 120, 'readback alpha3 BL2')
-    _uboot_require_ok(sp, log, f'cmp.b 0x{BL2_ADDR:x} 0x{READBACK_ADDR:x} 0x{BL2_SIZE:x}', 60, 'byte compare alpha3 BL2')
-    ui.status('ГОТОВО', 'alpha3 BL2 считан обратно и побайтово совпал с исходником из RAM.')
+    if write_bl2:
+        # BL2 is the final destructive step, matching the alpha3 STOCK->UBI migration contract.
+        ui.status('ШАГ', 'FIP подтверждён. Последним восстанавливаю парный alpha3 BL2. НЕ ВЫКЛЮЧАЙТЕ питание.')
+        _uboot_command_no_rc(sp, log, 'ubi detach', timeout=20)
+        _uboot_require_ok(sp, log, f'mtd erase {bl2_target} 0x{bl2_offset:x} 0x{BL2_SIZE:x}', 90, 'erase BL2')
+        _uboot_require_ok(sp, log, f'mtd write {bl2_target} 0x{BL2_ADDR:x} 0x{bl2_offset:x} 0x{BL2_SIZE:x}', 120, 'write alpha3 BL2')
+        _uboot_require_ok(sp, log, f'mtd read {bl2_target} 0x{READBACK_ADDR:x} 0x{bl2_offset:x} 0x{BL2_SIZE:x}', 120, 'readback alpha3 BL2')
+        _uboot_require_ok(sp, log, f'cmp.b 0x{BL2_ADDR:x} 0x{READBACK_ADDR:x} 0x{BL2_SIZE:x}', 60, 'byte compare alpha3 BL2')
+        ui.status('ГОТОВО', 'alpha3 BL2 считан обратно и побайтово совпал с исходником из RAM.')
+    else:
+        _uboot_command_no_rc(sp, log, 'ubi detach', timeout=20)
+        ui.status('ГОТОВО', terms.tr('BL2 не изменялся (по вашему выбору).', 'BL2 was not modified (your choice).'))
 
     print()
-    ui.rule('ЦЕПОЧКА ЗАГРУЗКИ ALPHA3 ВОССТАНОВЛЕНА', style='green')
-    ui.status('ГОТОВО', 'UrsusBoot 0.1.0-alpha3 полностью восстановлен.')
+    ui.rule('ЦЕПОЧКА ЗАГРУЗКИ ALPHA3 ВОССТАНОВЛЕНА' if pinned else terms.tr('URSUSBOOT ВОССТАНОВЛЕН ИЗ ВЫБРАННОГО FIP', 'URSUSBOOT RESTORED FROM THE CHOSEN FIP'), style='green')
+    ui.status('ГОТОВО', 'UrsusBoot 0.1.0-alpha3 полностью восстановлен.' if pinned else terms.tr(
+        f'Записан {choice.info.title}.', f'{choice.info.title} was written.'))
     ui.info('FIP: UBI static volume ID 4, SHA256=' + expected)
-    ui.info('BL2: 128 КиБ, SHA256=' + BL2_SHA256)
+    if write_bl2:
+        ui.info('BL2: 128 КиБ, SHA256=' + BL2_SHA256)
     ui.info('FIT/rootfs/rootfs_data и настройки U-Boot не изменялись.')
     ui.status('ГОТОВО', 'ПИТАНИЕ ТЕПЕРЬ МОЖНО ВЫКЛЮЧИТЬ.')
     ui.status('СДЕЛАЙТЕ', 'Выключите питание на 5 секунд и включите БЕЗ Reset.')
-    ui.note('Cold-boot PASS: после DRAM FLOW DONE должен исчезнуть LZMA: res 1 / PANIC и появиться UrsusBoot 0.1.0-alpha3.')
+    ui.note('Cold-boot PASS: после DRAM FLOW DONE должен исчезнуть LZMA: res 1 / PANIC и появиться UrsusBoot 0.1.0-alpha3.' if pinned else terms.tr(
+        f'Cold-boot PASS: после DRAM FLOW DONE не должно быть LZMA: res 1 / PANIC, должна появиться {choice.info.title}.',
+        f'Cold-boot PASS: after DRAM FLOW DONE there must be no LZMA: res 1 / PANIC and {choice.info.title} must appear.'))
     ui.prompt('Нажмите Enter после того, как прочитали итог...')
-    return 'UBI_ID4_PLUS_BL2'
+    return 'UBI_ID4_PLUS_BL2' if write_bl2 else 'UBI_ID4_ONLY'
 
 def _require_exact_file(path: Path, expected_sha256: str, label: str) -> None:
     if not path.is_file() or not path.stat().st_size:
@@ -1291,20 +1405,21 @@ def has_native_ursusupdate(sp: RecoverySerial, log) -> bool:
     raise Error('Не удалось однозначно определить наличие ursusupdate; NAND write запрещён.')
 
 
-def load_fip_xmodem(sp: RecoverySerial, log, *, require_native: bool = True) -> None:
-    size = PRODUCTION_PAYLOAD.stat().st_size
+def load_fip_xmodem(sp: RecoverySerial, log, *, require_native: bool = True, payload: Path | None = None) -> None:
+    payload = payload or PRODUCTION_PAYLOAD
+    size = payload.stat().st_size
     if require_native and not has_native_ursusupdate(sp, log):
         raise Error('Установленный UrsusBoot слишком старый; требуется запуск обновляющего загрузчика из RAM.')
     print(f'Передаю production UrsusBoot FIP через XMODEM в RAM 0x{LOADADDR:08x}; FIP={size} bytes / 0x{size:x}.')
     _uboot_wait_quiet(sp, log, quiet=0.15, timeout=1.0); sp.reset_input()
     _uboot_send_line(sp, f'loadx 0x{LOADADDR:x}'); time.sleep(0.35)
-    xmodem_send(sp, PRODUCTION_PAYLOAD, f'UrsusBoot {PRODUCTION_VERSION} FIP', log)
+    xmodem_send(sp, payload, f'UrsusBoot FIP {payload.name}', log)
     _uboot_read_until_prompt(sp, log, 45, 'loadx production UrsusBoot FIP')
     print('[OK] Production FIP передан в RAM. Валидация выполняется самим ursusupdate write перед записью.')
 
 
-def commit_uart(sp: RecoverySerial, log) -> None:
-    size = PRODUCTION_PAYLOAD.stat().st_size
+def commit_uart(sp: RecoverySerial, log, payload: Path | None = None) -> None:
+    size = (payload or PRODUCTION_PAYLOAD).stat().st_size
     answer = input('\nЗаписать обновление во флеш-память? [y/N]: ').strip().lower()
     if answer not in ('y','yes','д','да'):
         print('Запись отменена. NAND не изменялась.'); return
@@ -1341,7 +1456,10 @@ def _enter_bootrom_ram_updater(sp: RecoverySerial, log, *, reason: str, require_
 
 
 def uart_update_installed() -> None:
-    require_fip_payload()
+    try:
+        choice = _choose_update_fip(PRODUCTION_PAYLOAD)
+    except fc.Cancelled:
+        ui.status(terms.tr('СТОП', 'STOP'), terms.tr('Отменено до записи. Постоянная память не изменялась.', 'Cancelled before any write. Persistent storage was not modified.')); return
     print('\nЭтот пункт начинает работу через режим восстановления уже установленного UrsusBoot.')
     print('Если текущая версия уже умеет ursusupdate — обновление пойдёт напрямую через UART loadx/XMODEM.')
     print('Если ursusupdate ещё нет — UrsusFlasher сам переключит вас на безопасный BootROM -> RAM updater bootstrap.')
@@ -1359,8 +1477,8 @@ def uart_update_installed() -> None:
             ver = _uboot_command_no_rc(sp, log, 'version', timeout=20)
             if has_native_ursusupdate(sp, log):
                 print('\n[ШАГ] Текущий UrsusBoot поддерживает штатное обновление. Передаю FIP и затем сверяю запись.')
-                load_fip_xmodem(sp, log, require_native=False)
-                commit_uart(sp, log)
+                load_fip_xmodem(sp, log, require_native=False, payload=choice.path)
+                commit_uart(sp, log, choice.path)
             else:
                 print('\n[ШАГ] Установленный UrsusBoot слишком старый для штатного самообновления. Запускаю новый UrsusBoot из оперативной памяти.')
                 require_ram_bootstrap_payloads()
@@ -1368,12 +1486,57 @@ def uart_update_installed() -> None:
                     sp, log,
                     reason='На установленном UrsusBoot команда ursusupdate отсутствует; обнаружено автоматически.',
                 )
-                load_fip_xmodem(sp, log, require_native=False)
+                load_fip_xmodem(sp, log, require_native=False, payload=choice.path)
                 print('Сохраняю ROM prefix 0x000..0x7ff и env 0x7c000..0x7ffff. После записи считываю весь mtd0 обратно для сверки.')
-                commit_uart(sp, log)
+                commit_uart(sp, log, choice.path)
     finally:
         sp.close()
     ui.status('ГОТОВО', f'UART-лог сохранён: {log_path}')
+
+
+def _choose_emergency_fip() -> tuple['fc.Choice', bool]:
+    """Pick the persistent FIP for BootROM recovery; returns (choice, write_bl2).
+
+    Whatever is chosen here, the RAM helper that starts the router is always the
+    pinned alpha3 RAM installer: it is only the vehicle.  Default (Enter) is the
+    exact alpha3 FIP + BL2 pair the emergency path has always restored.  Any
+    other FIP leaves BL2 alone unless the operator explicitly asks to write the
+    alpha3 BL2 too.  Raises fc.Cancelled.
+    """
+    tr = terms.tr
+    print()
+    ui.note(tr(
+        'Через BootROM в RAM всегда стартует alpha3 — это только загрузчик-помощник. В постоянную память пишется то, что выберете ниже.',
+        'Through BootROM the router always starts alpha3 in RAM — that is only the helper. What is written to persistent storage is what you choose below.'))
+    options = [fc.Option(
+        'pinned', 'UrsusBoot 0.1.0-alpha3 — проверенный аварийный образ (рекомендуется) + парный BL2',
+        'UrsusBoot 0.1.0-alpha3 — the proven emergency image (recommended) + its paired BL2', path=EMERGENCY_PAYLOAD)]
+    if PRODUCTION_PAYLOAD.resolve() != EMERGENCY_PAYLOAD.resolve():
+        try:
+            require_fip_payload()
+        except Error as exc:
+            ui.status(tr('ВНИМАНИЕ', 'WARNING'), tr(f'Комплектный релиз недоступен и не предлагается: {exc}',
+                                                    f'The bundled release is unavailable and is not offered: {exc}'))
+        else:
+            options.append(fc.Option(
+                'bundled', f'Комплектный UrsusBoot {PRODUCTION_VERSION}', f'UrsusBoot {PRODUCTION_VERSION} bundled with this kit',
+                path=PRODUCTION_PAYLOAD,
+                note_ru='Пишется тем же способом, но как аварийный образ на железе не проверялся. BL2 не меняется, если не попросите.',
+                note_en='Written the same way, but not hardware-tested as an emergency image. BL2 stays unless you ask for it.'))
+    choice = fc.choose(options, known=_known_fips(), rejected=_rejected_fips())
+    write_bl2 = True
+    if choice.kind != 'pinned':
+        print()
+        ui.note(tr(
+            'BL2 — ранний загрузчик, который стартует FIP. Если в роутере уже стоит BL2 от этой сборки, перезаписывать его не нужно.',
+            'BL2 is the early loader that starts the FIP. If the router already holds the BL2 that belongs to this build, there is no need to rewrite it.'))
+        write_bl2 = ui.prompt(tr('Записать также парный alpha3 BL2? [y/N]: ', 'Also write the paired alpha3 BL2? [y/N]: ')).strip().lower() in ('y', 'yes', 'д', 'да')
+    print()
+    ui.rule(tr('ЧТО БУДЕТ ЗАПИСАНО', 'WHAT WILL BE WRITTEN'), style='amber')
+    for line in fc.summary_lines(choice):
+        print(line)
+    print('BL2: ' + (tr('alpha3, 128 КиБ, SHA256=', 'alpha3, 128 KiB, SHA256=') + BL2_SHA256 if write_bl2 else tr('не изменяется', 'not modified')))
+    return choice, write_bl2
 
 
 def _uart_bootrom_flow(*, recover: bool) -> None:
@@ -1381,6 +1544,11 @@ def _uart_bootrom_flow(*, recover: bool) -> None:
     if recover:
         print(); ui.rule(terms.tr('BOOTROM: ВОССТАНОВЛЕНИЕ URSUSBOOT', 'BOOTROM: URSUSBOOT RECOVERY'), style='red')
         require_emergency_payloads()
+        try:
+            choice, write_bl2 = _choose_emergency_fip()
+        except fc.Cancelled:
+            ui.status(terms.tr('СТОП', 'STOP'), terms.tr('Отменено до записи. Постоянная память не изменялась.', 'Cancelled before any write. Persistent storage was not modified.'))
+            return
     else:
         print(); ui.rule(terms.tr('BOOTROM: ПРОВЕРКА UBI И BL2', 'BOOTROM: UBI + BL2 READ-ONLY CHECK'), style='amber')
         require_ram_bootstrap_payloads()
@@ -1431,9 +1599,10 @@ def _uart_bootrom_flow(*, recover: bool) -> None:
                 'Проверка UBI и BL2 завершена. Запись начнётся только после отдельного подтверждения RECOVER URSUSBOOT.',
                 'The UBI and BL2 check is complete. Writing starts only after the separate RECOVER URSUSBOOT confirmation.',
             ))
-            meta = load_fip_xmodem_emergency(sp, log)
-            load_bl2_xmodem_emergency(sp, log)
-            emergency_ursusboot_transaction(sp, log, meta, view)
+            meta = load_fip_xmodem_emergency(sp, log, choice)
+            if write_bl2:
+                load_bl2_xmodem_emergency(sp, log)
+            emergency_ursusboot_transaction(sp, log, meta, view, choice=choice, write_bl2=write_bl2)
     finally:
         if old_quiet is None:
             os.environ.pop('URSUS_QUIET_UART_UI', None)
@@ -1457,8 +1626,12 @@ def uart_bootrom_install() -> None:
     uart_bootrom_recover()
 
 def web_fip_update() -> None:
-    require_fip_payload(); host = input('IP-адрес роутера в режиме восстановления UrsusBoot [192.168.1.1]: ').strip() or '192.168.1.1'
-    st = uw.update_bootloader(host, PRODUCTION_PAYLOAD, confirm=True)
+    host = input('IP-адрес роутера в режиме восстановления UrsusBoot [192.168.1.1]: ').strip() or '192.168.1.1'
+    try:
+        choice = _choose_update_fip(PRODUCTION_PAYLOAD, installed=_installed_version(host))
+    except fc.Cancelled:
+        print(terms.tr('[СТОП] Отменено до записи. Постоянная память не изменялась.', '[STOP] Cancelled before any write. Persistent storage was not modified.')); return
+    st = uw.update_bootloader(host, choice.path, confirm=True)
     # bootloader_update_layout is the storage class (UBI/STOCK), not the
     # DeviceState current_layout enum.  Never let a presentation error turn a
     # proven successful flash transaction into a fallback write.
@@ -1493,18 +1666,23 @@ def web_fit_update(image: Path | None = None) -> None:
 
 def tftp_update_automated() -> None:
     """TFTP is transport only; the single write command owns validation + commit."""
-    require_fip_payload(); router = input('IP UrsusBoot [192.168.1.1]: ').strip() or '192.168.1.1'
+    router = input('IP UrsusBoot [192.168.1.1]: ').strip() or '192.168.1.1'
     st = uw.status(router)
     print(f"[ИНФО] Режим восстановления UrsusBoot отвечает: версия {st.get('version')}, система: {terms.layout_label(st.get('current_layout'))}")
+    try:
+        choice = _choose_update_fip(PRODUCTION_PAYLOAD, installed=f"UrsusBoot {st.get('version')}")
+    except fc.Cancelled:
+        print('[СТОП] Отменено до записи. Постоянная память не изменялась.'); return
+    payload = choice.path
     try: auto = local_ip_for(router)
     except Exception: auto = '192.168.1.254'
     bind = input(f'IP компьютера для TFTP [{auto}]: ').strip() or auto
     result = TftpResult(); ready = threading.Event()
-    th = threading.Thread(target=serve_tftp_get, args=(bind,69,PRODUCTION_PAYLOAD,TFTP_NAME,router,ready,result),
+    th = threading.Thread(target=serve_tftp_get, args=(bind,69,payload,TFTP_NAME,router,ready,result),
                           kwargs={'timeout':300,'maximum_block_size':4096}, daemon=True)
     th.start(); ready.wait(3)
     if not ready.is_set(): raise Error('Не удалось запустить TFTP-сервер')
-    size = PRODUCTION_PAYLOAD.stat().st_size
+    size = payload.stat().st_size
     print('[ШАГ] Передаю FIP по TFTP через консоль UrsusBoot...')
     out = uw.console(router, f'setenv serverip {bind}; setenv ipaddr {router}; tftpboot 0x{LOADADDR:x} {TFTP_NAME}', timeout=180)
     th.join(timeout=5)
@@ -1518,16 +1696,21 @@ def tftp_update_automated() -> None:
 
 
 def tftp_server_manual() -> None:
-    require_fip_payload(); router = input('IP UrsusBoot [192.168.1.1]: ').strip() or '192.168.1.1'
+    router = input('IP UrsusBoot [192.168.1.1]: ').strip() or '192.168.1.1'
+    try:
+        choice = _choose_update_fip(PRODUCTION_PAYLOAD, installed=_installed_version(router))
+    except fc.Cancelled:
+        print('[СТОП] Отменено до записи. Постоянная память не изменялась.'); return
+    payload = choice.path
     try: auto = local_ip_for(router)
     except Exception: auto = '192.168.1.254'
     bind = input(f'IP компьютера для TFTP [{auto}]: ').strip() or auto
     result = TftpResult(); ready = threading.Event()
-    th = threading.Thread(target=serve_tftp_get, args=(bind,69,PRODUCTION_PAYLOAD,TFTP_NAME,router,ready,result),
+    th = threading.Thread(target=serve_tftp_get, args=(bind,69,payload,TFTP_NAME,router,ready,result),
                           kwargs={'timeout':300,'maximum_block_size':4096}, daemon=True)
     th.start(); ready.wait(3)
     if not ready.is_set(): raise Error('Не удалось запустить TFTP-сервер')
-    size=PRODUCTION_PAYLOAD.stat().st_size
+    size=payload.stat().st_size
     print('\nВ локальной U-Boot console:')
     print(f'  setenv serverip {bind}; setenv ipaddr {router}')
     print(f'  tftpboot 0x{LOADADDR:x} {TFTP_NAME}')

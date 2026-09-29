@@ -31,6 +31,7 @@ on:
       - 'ursusflasher/src/**'
       - 'ursusflasher/tools/selftest_ws_console.py'
       - 'ursusflasher/tools/selftest_http_backup.py'
+      - 'ursusflasher/tools/selftest_fip_choice.py'
       - 'docs/NAND_WS_PRESETS_RU.md'
       - 'ursusflasher/tools/selftest_item4_direct_ubi.py'
       - 'ursusflasher/tools/selftest_network_faults.py'
@@ -74,6 +75,7 @@ jobs:
           python3 -m py_compile ursusflasher/src/*.py ursusflasher/tools/selftest_item4_direct_ubi.py ursusflasher/tools/selftest_stock_service_provisioning.py scripts/*.py
           python3 ursusflasher/tools/selftest_ws_console.py
           python3 ursusflasher/tools/selftest_http_backup.py
+          python3 ursusflasher/tools/selftest_fip_choice.py
           python3 ursusflasher/tools/selftest_item4_direct_ubi.py
           python3 ursusflasher/tools/selftest_network_faults.py
           python3 ursusflasher/tools/selftest_restore_routes.py

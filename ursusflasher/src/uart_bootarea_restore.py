@@ -122,10 +122,43 @@ def validate_image(path: Path) -> dict:
             f"Для этого пункта нужен boot-area ровно 0x80000 (512 КиБ), получено 0x{size:x}.",
             f"This action requires an exact 0x80000-byte (512 KiB) boot-area image, got 0x{size:x}.",
         ))
-    with path.open("rb") as fh:
-        fh.seek(0x800)
-        magic = fh.read(8)
-    return {"path": path, "size": size, "sha256": sha256(path), "fip_magic": magic == FIP_MAGIC}
+    data = path.read_bytes()
+    magic = data[0x800:0x808]
+    # Informational only: this is a raw restore of the operator's own backup, so the
+    # FIP inside is reported, never used as a gate.  MF FIP layouts differ: no NT_FW offset check.
+    # This module also ships alone in the XG140 tester bundle, which has no fip_choice:
+    # without it the image is simply not identified.
+    fip = None
+    if magic == FIP_MAGIC:
+        try:
+            import fip_choice as fc
+            try:
+                import ursusboot_update as uu   # only for the table of builds the project knows by name
+                known, rejected = uu._known_fips(), uu._rejected_fips()
+            except Exception:
+                known, rejected = None, ()
+            fip = fc.identify(data[fc.STOCK_FIP_OFF:fc.STOCK_ENV_OFF], known=known, rejected=rejected,
+                              expect_nt_offset=None, exact_end=False)
+        except Exception:
+            fip = None
+    return {"path": path, "size": size, "sha256": hashlib.sha256(data).hexdigest(),
+            "fip_magic": magic == FIP_MAGIC, "fip": fip}
+
+
+def _print_fip_inside(meta: dict) -> None:
+    """Say which UrsusBoot (if any) is inside the image that is about to be written."""
+    fip = meta.get("fip")
+    if fip is None:
+        return
+    line = tr("FIP внутри образа: ", "FIP inside the image: ") + fip.title
+    if fip.label:
+        line += f" — {fip.label}"
+    ui.status("FIP", line)
+    ui.info(f"    SHA256(FIP) {fip.sha256} · {fip.size} " + tr("байт", "bytes"))
+    if not fip.ok:
+        ui.status(tr("ВНИМАНИЕ", "WARNING"), tr(
+            "FIP в образе не распознан как рабочий: " + "; ".join(fip.problems or ["в чёрном списке"]),
+            "The FIP in this image is not recognised as usable: " + "; ".join(fip.problems or ["on the reject list"])))
 
 
 def choose_family() -> str:
@@ -231,6 +264,7 @@ def restore(family: str, image: Path, port: str | None = None) -> None:
     ui.status("SOURCE", f"{meta['path'].name} · 0x{meta['size']:x} · SHA256 {meta['sha256']}")
     if meta["fip_magic"]:
         ui.note(tr("На 0x800 найден Airoha FIP. Это диагностический факт, не gate.", "An Airoha FIP was found at 0x800. This is diagnostic only, not a gate."))
+        _print_fip_inside(meta)
     else:
         ui.note(tr("FIP на 0x800 не распознан. Для raw recovery это предупреждение, не запрет.", "No FIP was recognized at 0x800. For raw recovery this is a warning, not a blocker."))
     ui.note(tr(
@@ -269,6 +303,9 @@ def restore(family: str, image: Path, port: str | None = None) -> None:
         print(f"  NAND: {MTD}, erase=0x{ERASE_SIZE:x}, page=0x{PAGE_SIZE:x}")
         print(f"  {tr('Файл', 'File')}: {meta['path']}")
         print(f"  SHA256: {meta['sha256']}")
+        if meta.get("fip") is not None:
+            print(f"  {tr('Будет записан', 'Will be written')}: {meta['fip'].title}"
+                  + (f" — {meta['fip'].label}" if meta["fip"].label else ""))
         print(f"  {tr('Диапазон', 'Range')}: physical NAND 0x000000..0x07ffff")
         ui.note(tr(
             "Будут стёрты и полностью перезаписаны только первые 512 КиБ NAND. Остальная NAND не затрагивается.",
