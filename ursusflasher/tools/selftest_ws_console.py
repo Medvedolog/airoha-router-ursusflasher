@@ -608,6 +608,81 @@ def main() -> int:
     finally:
         shutil.get_terminal_size = real
 
+    # RAW mode: the device shell has no history and no cursor editing, so Up/Down
+    # replace its line locally (Ctrl-U + text) and Left/Right are dropped -- neither
+    # may reach the device as the letters "[A" / "[D".
+    ws, t, shown = make()
+    t._output(b"\r\nUrsusBoot> ")
+    t._keys(b"ping 1\rhelp\r")
+    assert t.history == ["ping 1", "help"], t.history
+    t._output(b"\r\nUrsusBoot> ")
+    ws.sent.clear()
+    for seq, expect in ((b"\x1b[A", b"\x15help"), (b"\x1b[A", b"\x15ping 1"), (b"\x1b[A", b"\x15ping 1"),
+                        (b"\x1b[B", b"\x15help"), (b"\x1b[B", b"\x15")):
+        ws.sent.clear()
+        t._keys(seq)
+        assert ws.sent == [expect], (seq, ws.sent)
+    ws.sent.clear()
+    t._keys(b"\x1b[C\x1b[D\x1bOC\x1bOD")
+    assert ws.sent == [], ws.sent
+    t._keys(b"ab")
+    t._keys(b"\x1b[A")                     # replaces what was typed, from the tracked line
+    assert ws.sent[-1] == b"\x15help", ws.sent
+    assert not any(b"[" in x for x in ws.sent), ws.sent
+    # while a command runs the arrows are not sent at all
+    ws, t, shown = make()
+    t.history = ["x"]
+    t.index = 1
+    t._output(b"UrsusBoot> ping 1.2.3.4\r\nPING ...")
+    t._keys(b"\x1b[A\x1b[B")
+    assert ws.sent == [], ws.sent
+    # Backspace / Ctrl-U / Ctrl-C keep the tracked line in step with the device
+    ws, t, shown = make()
+    t._output(b"UrsusBoot> ")
+    t._keys(b"abc\x7f")
+    assert t.rawline == "ab"
+    t._keys(b"\x15")
+    assert t.rawline == ""
+
+    # Colours: dark green screen; anything that would reset colours re-applies them.
+    from ursus_ws_terminal import _BODY
+    ws, t, shown = make()
+    t.cols, t.rows, t.chrome = 100, 30, True
+    bars = t._bars().decode("utf-8")
+    assert bars.count(_BODY) == 4, "every bar must hand the screen colours back"
+    assert "48;2;7;32;17" in _BODY
+    t._output(b"\x1b[0mplain\x1b[m")
+    assert bytes(shown).count(_BODY.encode()) == 2, bytes(shown)
+    ws, t, shown = make()
+    t._output(b"\x1b[0mplain")               # no chrome (small/no-colour terminal): untouched
+    assert bytes(shown) == b"\x1b[0mplain"
+    ws, t, shown = make()
+    t.chrome, t.rows = True, 30
+    t._end()
+    assert b"\x1b[0m" in bytes(shown) and t.chrome is False
+
+    # start-up paints the whole screen in the console colours before the bars are drawn
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    ws, t, shown = make()
+    real_size = shutil.get_terminal_size
+    try:
+        shutil.get_terminal_size = lambda fallback=(100, 30): os.terminal_size((100, 30))
+        with mock.patch.object(sys, "stdout", Tty()), mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("NO_COLOR", None)
+            t._start()
+    finally:
+        shutil.get_terminal_size = real_size
+    started = bytes(shown)
+    assert t.chrome and started.index(_BODY.encode()) < started.index(b"\x1b[2J"), started[:200]
+
+    # The connect failure names the real cause: 409 = slot taken, not "WebFailsafe stopped".
+    from ursus_ws_terminal import _connect_hint
+    assert "t79" in _connect_hint(RuntimeError("live console WebSocket upgrade failed: 'HTTP/1.1 409 Conflict'"))
+    assert "409" not in _connect_hint(RuntimeError("timed out")) and "ursusweb" in _connect_hint(RuntimeError("timed out"))
+
     import inspect
     pump = inspect.getsource(LiveTerminal._pump_input)
     assert "_check_resize()" in pump, "the keyboard loop must poll the window size (silent device)"

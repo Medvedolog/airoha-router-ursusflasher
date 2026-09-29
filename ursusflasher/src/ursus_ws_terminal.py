@@ -38,6 +38,14 @@ _PROMPT = b'UrsusBoot> '
 _BROKEN_ERASE = b'\\b \\b'
 _CTRL_C_CONFIRM_S = 2.0
 
+# Console colours: dark green screen, light green text (the UrsidoFlasher look).
+# Everything drawn around it (bars, prompts) uses other colours on purpose.
+_BG = '7;32;17'
+_FG = '158;222;168'
+_BODY = f'\x1b[0;38;2;{_FG};48;2;{_BG}m'          # reset, then the screen colours
+_SGR_RESET = re.compile(rb'\x1b\[0?m')
+_ARROWS_LR = {b'\x1b[C', b'\x1b[D', b'\x1bOC', b'\x1bOD'}   # the device shell has no cursor editing
+
 
 class _ConsoleInputMode:
     """Windows: deliver Ctrl-C as a key instead of raising KeyboardInterrupt.
@@ -86,6 +94,7 @@ class LiveTerminal:
         self.line = ''
         self.cols = self.rows = 0
         self.tail_line = b''            # device output after its last newline
+        self.rawline = ''               # what the device's line buffer holds (RAW mode)
         self.ctrlc_at = 0.0
         self.resize_at = 0.0
         self.chrome = False
@@ -97,8 +106,8 @@ class LiveTerminal:
         self.action: str | None = None
 
     @staticmethod
-    def _style(text: str, fg: str = '242;232;218', bg: str = '36;24;14') -> str:
-        return f'\x1b[38;2;{fg};48;2;{bg}m{text}\x1b[0m'
+    def _style(text: str, fg: str = '214;240;218', bg: str = '18;74;38') -> str:
+        return f'\x1b[38;2;{fg};48;2;{bg}m{text}{_BODY}'
 
     def _bars(self) -> bytes:
         cols = self.cols
@@ -111,10 +120,10 @@ class LiveTerminal:
         if self.pager:
             hints += tr(' [ВКЛ]', ' [ON]')
         footer = hints[:cols].ljust(cols)
-        return (f'\x1b[1;1H\x1b[2K{self._style(header[:cols].ljust(cols), "217;154;77")}'
-                f'\x1b[2;1H\x1b[2K{self._style(rule[:cols], "168;145;121")}'
-                f'\x1b[{self.rows-1};1H\x1b[2K{self._style("─" * cols, "168;145;121")}'
-                f'\x1b[{self.rows};1H\x1b[2K{self._style(footer, "239;192;121")}').encode('utf-8')
+        return (f'\x1b[1;1H\x1b[2K{self._style(header[:cols].ljust(cols), "226;246;228", "18;74;38")}'
+                f'\x1b[2;1H\x1b[2K{self._style(rule[:cols], "110;176;122", _BG)}'
+                f'\x1b[{self.rows-1};1H\x1b[2K{self._style("─" * cols, "110;176;122", _BG)}'
+                f'\x1b[{self.rows};1H\x1b[2K{self._style(footer, "226;246;228", "18;74;38")}').encode('utf-8')
 
     def _write(self, data: bytes) -> None:
         out = getattr(sys.stdout, 'buffer', None)
@@ -158,18 +167,20 @@ class LiveTerminal:
         ui._enable_windows_ansi()
         self.chrome = True
         self.suspended = False
-        self._write(b'\x1b[r' + b'\r\n' * self.rows + b'\x1b[H\x1b[2J' + self._bars()
+        self._write(b'\x1b[r' + b'\r\n' * self.rows + b'\x1b[H' + _BODY.encode() + b'\x1b[2J' + self._bars()
                     + f'\x1b[3;{self.rows-2}r\x1b[3;1H'.encode())
 
     def _end(self) -> None:
         if self.chrome:
-            self._write(b'\x1b[r' + f'\x1b[{self.rows};1H\r\n'.encode())
+            self._write(b'\x1b[r\x1b[0m' + f'\x1b[{self.rows};1H\r\n'.encode())
             self.chrome = False
 
     def _output(self, data: bytes) -> None:
         with self.lock:
             self._check_resize(force=True)
             data = data.replace(_BROKEN_ERASE, b'\x08 \x08')
+            if self.chrome:
+                data = _SGR_RESET.sub(_BODY.encode(), data)
             self.tail_line = (self.tail_line + data).rsplit(b'\n', 1)[-1][-200:]
             probe = self.ansi_tail + data
             self.ansi_tail = probe[-64:]
@@ -328,10 +339,43 @@ class LiveTerminal:
                 self._pager_page()
         elif self.paused:
             return
+        elif key in _ARROWS_LR:
+            return
         elif self.raw:
-            self.ws.send(key)
+            if key in _ARROWS:
+                self._raw_history(_ARROWS[key])
+            else:
+                self._track_raw(key)
+                self.ws.send(key)
         else:
             self._line_key(key)
+
+    def _track_raw(self, chunk: bytes) -> None:
+        """Mirror the device's line buffer so history can replace it."""
+        for b in chunk:
+            if b in (13, 10):
+                if self.rawline and (not self.history or self.history[-1] != self.rawline):
+                    self.history.append(self.rawline)
+                self.index = len(self.history)
+                self.rawline = ''
+            elif b in (8, 127):
+                self.rawline = self.rawline[:-1]
+            elif b in (3, 21):
+                self.rawline = ''
+            elif 32 <= b < 127:
+                self.rawline += chr(b)
+
+    def _raw_history(self, action: str) -> None:
+        """Up/Down in RAW mode: the device shell has no history, so replace its line locally."""
+        if not self._idle_at_prompt() or not self.history and action == 'up':
+            return
+        if action == 'up':
+            self.index = max(0, self.index - 1)
+        else:
+            self.index = min(len(self.history), self.index + 1)
+        line = self.history[self.index] if self.index < len(self.history) else ''
+        self.ws.send(b'\x15' + line.encode('ascii', 'replace'))    # Ctrl-U erases the device line
+        self.rawline = line
 
     def _idle_at_prompt(self) -> bool:
         return self.tail_line.startswith(_PROMPT)
@@ -353,6 +397,7 @@ class LiveTerminal:
             return
         self.ctrlc_at = 0.0
         self.line = ''
+        self.rawline = ''
         self.ws.send(b'\x03')
 
     def _keys(self, data: bytes, *, flush: bool = False) -> None:
@@ -361,7 +406,9 @@ class LiveTerminal:
             if self.raw and not self.menu and not self.paused and self.keybuf[0] != 27:
                 end = next((i for i, b in enumerate(self.keybuf) if b in (27, 29, 17, 16, 3)), len(self.keybuf))
                 if end:
-                    self.ws.send(bytes(self.keybuf[:end]))
+                    chunk = bytes(self.keybuf[:end])
+                    self._track_raw(chunk)
+                    self.ws.send(chunk)
                     del self.keybuf[:end]
                     continue
             if self.keybuf[0] != 27:
@@ -370,7 +417,7 @@ class LiveTerminal:
                 self._input(key)
                 continue
             buf = bytes(self.keybuf)
-            seqs = (*_FKEYS, *_ARROWS)
+            seqs = (*_FKEYS, *_ARROWS, *_ARROWS_LR)
             match = next((s for s in seqs if buf.startswith(s)), None)
             if match:
                 del self.keybuf[:len(match)]
@@ -455,6 +502,23 @@ class LiveTerminal:
             self._keys(b'', flush=True)
 
 
+def _connect_hint(exc: Exception) -> str:
+    """Say what the failure means: 409 is a live server whose console slot is taken, not a stopped one."""
+    if '409' in str(exc):
+        return tr(
+            'Роутер отвечает, но прежняя консольная сессия ещё считается открытой (она не закрылась штатно). '
+            'Закройте другие окна UrsusFlasher; UrsusBoot t79 и новее снимает такую сессию сам примерно через минуту, '
+            'на более старом — выполните на UART `ursusweb` (Ctrl-C, затем `ursusweb`) или перезагрузите роутер.',
+            'The router answers, but an earlier console session is still counted as open (it did not close cleanly). '
+            'Close other UrsusFlasher windows; UrsusBoot t79 and later drops such a session by itself after about a minute; '
+            'on an older one run `ursusweb` on the UART (Ctrl-C, then `ursusweb`) or reboot the router.')
+    return tr(
+        'Если консоль закрыли Ctrl-C на приглашении, UrsusBoot остановил WebFailsafe: '
+        'на UART выполните `ursusweb` и подключитесь снова.',
+        'If the console was left with Ctrl-C at the prompt, UrsusBoot stopped WebFailsafe: '
+        'run `ursusweb` on the UART and connect again.')
+
+
 def live_console(host: str) -> None:
     # Import lazily: ursus_web_client owns the authenticated WebSocket framing.
     from ursus_web_client import UrsusLiveConsole, _session_log
@@ -463,11 +527,7 @@ def live_console(host: str) -> None:
         try:
             ws, hello = UrsusLiveConsole.connect(host)
         except Exception as exc:
-            raise RuntimeError(f'{exc}. ' + tr(
-                'Если консоль закрыли Ctrl-C на приглашении, UrsusBoot остановил WebFailsafe: '
-                'на UART выполните `ursusweb` и подключитесь снова.',
-                'If the console was left with Ctrl-C at the prompt, UrsusBoot stopped WebFailsafe: '
-                'run `ursusweb` on the UART and connect again.')) from exc
+            raise RuntimeError(f'{exc}. ' + _connect_hint(exc)) from exc
         terminal = LiveTerminal(ws, host)
         try:
             terminal.run(hello)
@@ -488,7 +548,7 @@ def live_console(host: str) -> None:
                 _receive_file(host)
         except Exception as exc:
             print(tr(f'[ОШИБКА] {exc}', f'[ERROR] {exc}'))
-        answer = input(tr('Вернуться к живой консоли? [Y/n]: ',
+        answer = ui.prompt(tr('Вернуться к живой консоли? [Y/n]: ',
                           'Return to the live console? [Y/n]: ')).strip().lower()
         if answer in ('n', 'no', 'н', 'нет'):
             return
@@ -510,16 +570,18 @@ def _wait_http_ready(host: str) -> None:
 def _send_file(host: str) -> None:
     from ursus_web_client import upload
 
-    print(tr('Передача в RAM UrsusBoot. Flash не записывается.',
-             'Transfer into UrsusBoot RAM. Flash is not written.'))
-    print(tr('1 initramfs · 2 прошивка OpenWrt · 3 UrsusBoot FIP · 4 Vanilla FIP · 5 UBI preloader · 6 произвольный файл XMODEM',
-             '1 initramfs · 2 OpenWrt firmware · 3 UrsusBoot FIP · 4 Vanilla FIP · 5 UBI preloader · 6 arbitrary file via XMODEM'))
-    choice = input(tr('Тип файла [Enter — назад]: ', 'File type [Enter — back]: ')).strip()
+    ui.section(tr('Передача файла в RAM UrsusBoot', 'Send a file to UrsusBoot RAM'), style='amber2')
+    ui.note(tr('Flash не записывается.', 'Flash is not written.'))
+    for number, ru, en in ((1, 'initramfs', 'initramfs'), (2, 'прошивка OpenWrt', 'OpenWrt firmware'),
+                           (3, 'UrsusBoot FIP', 'UrsusBoot FIP'), (4, 'Vanilla FIP', 'Vanilla FIP'),
+                           (5, 'UBI preloader', 'UBI preloader'), (6, 'произвольный файл (XMODEM)', 'arbitrary file (XMODEM)')):
+        ui.menu_item(number, tr(ru, en))
+    choice = ui.prompt(tr('Тип файла [Enter — назад]: ', 'File type [Enter — back]: ')).strip()
     kind = {'1': 'initramfs', '2': 'firmware', '3': 'fip',
             '4': 'vanilla-fip', '5': 'preloader'}.get(choice)
     if kind is None and choice != '6':
         return
-    name = input(tr('Путь к файлу [Enter — назад]: ', 'File path [Enter — back]: ')).strip().strip('"')
+    name = ui.prompt(tr('Путь к файлу [Enter — назад]: ', 'File path [Enter — back]: ')).strip().strip('"')
     if not name:
         return
     if choice == '6':
@@ -535,9 +597,10 @@ def _send_file(host: str) -> None:
 def _receive_file(host: str) -> None:
     from ursus_web_client import collect_diagnostics, KIT
 
-    print(tr('1 Диагностика UrsusBoot по HTTP · 2 Диапазон RAM через TFTP PUT',
-             '1 UrsusBoot HTTP diagnostics · 2 RAM range over TFTP PUT'))
-    choice = input(tr('Что сохранить [Enter — назад]: ', 'Save what [Enter — back]: ')).strip()
+    ui.section(tr('Получить с роутера', 'Get from the router'), style='amber2')
+    ui.menu_item(1, tr('Диагностика UrsusBoot по HTTP', 'UrsusBoot HTTP diagnostics'))
+    ui.menu_item(2, tr('Диапазон RAM через TFTP PUT', 'RAM range over TFTP PUT'))
+    choice = ui.prompt(tr('Что сохранить [Enter — назад]: ', 'Save what [Enter — back]: ')).strip()
     if choice == '1':
         _wait_http_ready(host)
         path = collect_diagnostics(host, 'live-console-operator-request')
@@ -545,10 +608,10 @@ def _receive_file(host: str) -> None:
     elif choice == '2':
         from ursus_ws_tftp import receive_ram
 
-        address = int(input(tr('Адрес RAM [0x81800000]: ', 'RAM address [0x81800000]: ')).strip()
+        address = int(ui.prompt(tr('Адрес RAM [0x81800000]: ', 'RAM address [0x81800000]: ')).strip()
                       or '0x81800000', 0)
-        size = int(input(tr('Длина в байтах (например 0x100000): ',
+        size = int(ui.prompt(tr('Длина в байтах (например 0x100000): ',
                             'Length in bytes (e.g. 0x100000): ')).strip(), 0)
         default = KIT / 'work' / 'diagnostics' / f'ursus-ram-{int(time.time())}.bin'
-        name = input(tr(f'Файл на ПК [{default}]: ', f'PC output file [{default}]: ')).strip().strip('"')
+        name = ui.prompt(tr(f'Файл на ПК [{default}]: ', f'PC output file [{default}]: ')).strip().strip('"')
         receive_ram(host, address, size, Path(name).expanduser() if name else default)

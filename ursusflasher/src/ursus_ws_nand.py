@@ -16,6 +16,7 @@ import socket
 import threading
 import time
 
+import console_ui as ui
 import ui_terms as terms
 from ursus_ws_xmodem import WebSocketSerial
 
@@ -441,7 +442,7 @@ def restore(host: str, status: dict, image: Path, *, port: int | None = None) ->
                  f'from {image}\nBoard: {status.get("board")}, NAND: {geo.master} '
                  f'{geo.size >> 20} MiB, {len(geo.bad)} bad blocks. '
                  'OOB is not restored. Interrupting a write can prevent boot.'))
-        answer = input(tr('Начать запись с проверкой каждого фрагмента? [y/N]: ',
+        answer = ui.prompt(tr('Начать запись с проверкой каждого фрагмента? [y/N]: ',
                           'Start writing with readback of every chunk? [y/N]: ')).strip().lower()
         if answer not in ('y', 'yes', 'д', 'да'):
             return
@@ -533,11 +534,12 @@ def menu(host: str) -> None:
                  'Restore uses TFTP.'))
     else:
         _tftp_note(host, port)
-    print(tr('1 Снять весь NAND · 2 Снять раздел · 3 Залить раздел из архива · '
-             '4 Залить весь NAND из архива',
-             '1 Back up whole NAND · 2 Back up partition · 3 Restore partition archive · '
-             '4 Restore whole NAND archive'))
-    choice = input(tr('Выбор [Enter — назад]: ', 'Choice [Enter — back]: ')).strip()
+    ui.section(tr('NAND: архив и восстановление', 'NAND: backup and restore'), style='amber2')
+    ui.menu_item(1, tr('Снять весь NAND', 'Back up whole NAND'))
+    ui.menu_item(2, tr('Снять раздел', 'Back up partition'))
+    ui.menu_item(3, tr('Залить раздел из архива', 'Restore partition archive'), write_capable=True)
+    ui.menu_item(4, tr('Залить весь NAND из архива', 'Restore whole NAND archive'), write_capable=True)
+    choice = ui.prompt(tr('Выбор [Enter — назад]: ', 'Choice [Enter — back]: ')).strip()
     if choice in ('1', '2'):
         if choice == '1':
             region = Region('entire-nand', 0, geo.size)
@@ -545,25 +547,25 @@ def menu(host: str) -> None:
             if not geo.parts:
                 raise RuntimeError('no validated partitions in this MTD layout')
             for i, p in enumerate(geo.parts, 1):
-                print(f'{i:2}. {p.name:24} 0x{p.offset:08x} + 0x{p.size:08x}')
-            index = int(input(tr('Номер раздела [Enter — назад]: ',
+                ui.menu_item(i, p.name, f'0x{p.offset:08x} + 0x{p.size:08x}')
+            index = int(ui.prompt(tr('Номер раздела [Enter — назад]: ',
                                  'Partition number [Enter — back]: ')).strip() or '0')
             if not 1 <= index <= len(geo.parts):
                 return
             region = geo.parts[index - 1]
         from ursus_web_client import KIT
         default = KIT / 'work' / 'backups' / f'ursus-{region.name}-{int(time.time())}.bin'
-        raw = input(tr(f'Файл архива [{default}]: ', f'Backup file [{default}]: ')).strip().strip('"')
+        raw = ui.prompt(tr(f'Файл архива [{default}]: ', f'Backup file [{default}]: ')).strip().strip('"')
         target = Path(raw) if raw else default
         if use_http:
-            full = input(tr('Сверить ВЕСЬ файл прямым чтением U-Boot? Долго. [y/N, Enter — выборочно]: ',
+            full = ui.prompt(tr('Сверить ВЕСЬ файл прямым чтением U-Boot? Долго. [y/N, Enter — выборочно]: ',
                             'Cross-check the WHOLE file against U-Boot direct reads? Slow. '
                             '[y/N, Enter = sampled]: ')).strip().lower() in ('y', 'yes', 'д', 'да')
             hb.backup(host, st, region, target, geo=geo, verify_all=full)
         else:
             backup(host, st, region, target, port=port)
     elif choice in ('3', '4'):
-        raw = input(tr('Путь к .bin архиву (рядом должен быть .bin.json): ',
+        raw = ui.prompt(tr('Путь к .bin архиву (рядом должен быть .bin.json): ',
                        'Path to .bin image (matching .bin.json alongside): ')).strip().strip('"')
         if not raw:
             return
