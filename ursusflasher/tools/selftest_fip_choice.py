@@ -413,6 +413,29 @@ def test_boot_area_restore_reports_fip() -> None:
         assert out.getvalue() == ""
 
 
+def test_md_uart_routing() -> None:
+    """Item 2 over UART reaches the running UrsusBoot updater, not only BootROM recovery."""
+    import bootloader_install_menu as bim
+
+    calls: list[str] = []
+    with mock.patch.object(bim.ursusboot_update, "uart_update_installed", lambda: calls.append("installed")), \
+            mock.patch.object(bim.ursusboot_update, "uart_bootrom_recover", lambda: calls.append("bootrom")):
+        for answer, want in (("1", ["installed"]), ("2", ["bootrom"]), ("0", [])):
+            calls.clear()
+            _, out, _ = run(lambda: bim._run_uart("md", None), answer)
+            assert calls == want, (answer, calls)
+        # garbage is re-asked, never routed
+        calls.clear()
+        run(lambda: bim._run_uart("md", None), "x", "", "1")
+        assert calls == ["installed"], calls
+        _, out, _ = run(lambda: bim._run_uart("md", None), "0")
+        assert "BootROM" in out and ("already running" in out or "уже запущенный" in out), out
+    # the updater itself asks which FIP before it opens the port
+    import inspect
+    src = inspect.getsource(uu.uart_update_installed)
+    assert src.index("_choose_update_fip(") < src.index("choose_port()")
+
+
 def test_known_table() -> None:
     known = uu._known_fips()
     assert known.get(ALPHA3_SHA), "the pinned alpha3 must be named"

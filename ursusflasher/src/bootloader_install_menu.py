@@ -128,9 +128,41 @@ def _ask_skip_full_backup() -> bool:
     return answer in ("y", "yes", "д", "да")
 
 
+def choose_md_uart_mode() -> str | None:
+    """MD over UART: update through the UrsusBoot that is already there, or BootROM recovery.
+
+    Item 2 used to offer only the BootROM path, which is an emergency recovery
+    (it writes the pinned alpha3 by default).  A router that still boots into
+    UrsusBoot Recovery does not need it.
+    """
+    ui.section(tr("Как использовать UART", "How to use the UART"), style="amber2")
+    ui.menu_item(
+        1,
+        tr("Через уже запущенный UrsusBoot (обновление)", "Through the UrsusBoot that is already running (update)"),
+        tr("Роутер загружается в Recovery UrsusBoot: FIP по XMODEM в RAM, проверка и запись штатным ursusupdate; BootROM не нужен. "
+           "Если ursusupdate там нет, UrsusFlasher сам поднимет новый загрузчик из RAM.",
+           "The router boots into UrsusBoot Recovery: the FIP goes to RAM over XMODEM and is validated and written by ursusupdate; no BootROM. "
+           "If ursusupdate is missing there, UrsusFlasher starts a new loader from RAM itself."),
+        tone="safe",
+    )
+    ui.menu_item(
+        2,
+        tr("Аварийное восстановление через Airoha BootROM", "Emergency recovery through Airoha BootROM"),
+        tr("Роутер не загружается или UrsusBoot не запускается. По умолчанию восстанавливает alpha3 + парный BL2; можно выбрать другой FIP.",
+           "The router does not boot or UrsusBoot does not start. By default restores alpha3 + its paired BL2; another FIP can be chosen."),
+    )
+    ui.menu_item(0, tr("Назад", "Back"))
+    c = _ask_choice(tr("UART: ", "UART: "), {"0", "1", "2"})
+    return {"0": None, "1": "installed", "2": "bootrom"}[c]
+
+
 def _run_uart(family: str, state: ds.DeviceState) -> None:
     if family == "md":
-        ursusboot_update.uart_bootrom_recover()
+        mode = choose_md_uart_mode()
+        if mode == "installed":
+            ursusboot_update.uart_update_installed()
+        elif mode == "bootrom":
+            ursusboot_update.uart_bootrom_recover()
         return
     if family == "mf":
         # Import lazily to avoid an import cycle with the EXPERT composition layer.
