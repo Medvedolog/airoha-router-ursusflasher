@@ -254,6 +254,89 @@ def _runs(region: Region, geo: Geometry) -> list[tuple[int, int]]:
     return runs
 
 
+BOOT_AREA_END = 0x80000
+
+
+def _droppable(block: bytes) -> str | None:
+    """Why a source block may be left out when the target has too few good blocks.
+
+    'erased': all 0xFF -- only from the end of a segment, so nothing after it moves.
+    'ubi-free': a UBI PEB with an EC header and no VID header -- holds no volume
+    data, and UBI does not care where its free PEBs are.
+    """
+    if block.count(0xFF) == len(block):
+        return 'erased'
+    if block[:4] == b'UBI#' and len(block) >= 24:
+        vid = int.from_bytes(block[16:20], 'big')
+        if 0 < vid < len(block) - 64 and block[vid:vid + 64].count(0xFF) == 64:
+            return 'ubi-free'
+    return None
+
+
+def _segments(region: Region, geo: Geometry) -> list[tuple[int, int]]:
+    """Skip-bad scopes.  Data never moves across a partition boundary, the way
+    U-Boot and Linux skip bad blocks inside one MTD partition."""
+    end = region.offset + region.size
+    cuts = {region.offset, end}
+    if region.name == 'entire-nand':
+        for p in geo.parts:
+            for c in (p.offset, p.offset + p.size):
+                if region.offset < c < end and c % geo.erase == 0:
+                    cuts.add(c)
+    points = sorted(cuts)
+    return list(zip(points, points[1:]))
+
+
+def plan_skip_bad(region: Region, archived_bad, target_bad, geo: Geometry, read_block) -> tuple[list, dict]:
+    """Map the archive's good blocks, in order, onto the target's good blocks.
+
+    Returns ``(moves, report)``: moves are ``(src_rel, dst_abs)`` with ``src_rel``
+    None for a target block that is only erased.  ``read_block(rel)`` returns
+    the archive block at that offset relative to the region.
+    """
+    erase = geo.erase
+    src_bad, dst_bad = set(archived_bad), set(target_bad)
+    moves: list[tuple[int | None, int]] = []
+    report = {'shifted': 0, 'dropped': 0, 'erased_only': 0, 'boot_area_shifted': False, 'segments': 0}
+    for start, end in _segments(region, geo):
+        report['segments'] += 1
+        src = [o for o in range(start, end, erase) if o not in src_bad]
+        dst = [o for o in range(start, end, erase) if o not in dst_bad]
+        kinds: dict[int, str | None] = {}
+
+        def kind(o: int) -> str | None:
+            if o not in kinds:
+                kinds[o] = _droppable(read_block(o - region.offset))
+            return kinds[o]
+
+        while len(src) > len(dst):
+            # drop a free UBI PEB anywhere, else an erased block from the very end
+            victim = next((o for o in reversed(src) if kind(o) == 'ubi-free'), None)
+            if victim is None and kind(src[-1]) == 'erased':
+                victim = src[-1]
+            if victim is None:
+                raise RuntimeError('URSUS_NAND_SKIPBAD_NO_ROOM: ' + tr(
+                    f'в области 0x{start:x}..0x{end:x} на этом аппарате {len(dst)} хороших блоков, '
+                    f'а архиву с данными нужно {len(src)}. Лишних (стёртых или свободных UBI) блоков нет. '
+                    'Ничего не записано.',
+                    f'the area 0x{start:x}..0x{end:x} has {len(dst)} good blocks on this unit, but the '
+                    f'archive needs {len(src)} for its data, and none of them is erased or a free UBI block. '
+                    'Nothing was written.'))
+            src.remove(victim)
+            report['dropped'] += 1
+        for i, d in enumerate(dst):
+            if i < len(src):
+                moves.append((src[i] - region.offset, d))
+                if src[i] != d:
+                    report['shifted'] += 1
+                    if d < BOOT_AREA_END or src[i] < BOOT_AREA_END:
+                        report['boot_area_shifted'] = True
+            else:
+                moves.append((None, d))
+                report['erased_only'] += 1
+    return moves, report
+
+
 def _metadata_path(image: Path) -> Path:
     return image.with_name(image.name + '.json')
 
@@ -378,7 +461,7 @@ def _current_bad(session: Session, master: str) -> tuple[int, ...]:
         rb'^\s+0x([0-9a-fA-F]+)\s*$', report, re.M)}))
 
 
-def _assert_archive_matches(meta: dict, status: dict, geo: Geometry) -> None:
+def _assert_archive_matches(meta: dict, status: dict, geo: Geometry, *, same_bad_map: bool = True) -> None:
     """Refuse a foreign or stale archive, naming the field that disagrees."""
     for label, want, got in (
         ('board', meta.get('board'), status.get('board')),
@@ -397,7 +480,7 @@ def _assert_archive_matches(meta: dict, status: dict, geo: Geometry) -> None:
                 f'and {got!r} on this unit. Restore stopped.',
             ))
     archived = tuple(meta.get('bad_blocks', []))
-    if archived != geo.bad:
+    if same_bad_map and archived != geo.bad:
         appeared = [x for x in geo.bad if x not in archived]
         vanished = [x for x in archived if x not in geo.bad]
         detail = []
@@ -413,10 +496,11 @@ def _assert_archive_matches(meta: dict, status: dict, geo: Geometry) -> None:
             'the bad-block map changed since the archive was taken (' + '; '.join(detail) + '). '
             'The archive no longer describes this unit physically and restoring it would shift data. '
             'Take a fresh archive with this same menu and restore from that one.',
-        ))
+        ) + tr(' Либо залейте в режиме «с пропуском плохих блоков».',
+               ' Or restore in the "skip bad blocks" mode.'))
 
 
-def restore(host: str, status: dict, image: Path, *, port: int | None = None) -> None:
+def restore(host: str, status: dict, image: Path, *, port: int | None = None, skip_bad: bool = False) -> None:
     image = image.expanduser().resolve()
     meta = json.loads(_metadata_path(image).read_text(encoding='utf-8'))
     region_data = meta.get('region') or {}
@@ -432,8 +516,34 @@ def restore(host: str, status: dict, image: Path, *, port: int | None = None) ->
         geo = discover(session, status)
         if (region != Region('entire-nand', 0, geo.size) and region not in geo.parts):
             raise RuntimeError('backup region is not present in the current layout')
-        _assert_archive_matches(meta, status, geo)
+        _assert_archive_matches(meta, status, geo, same_bad_map=not skip_bad)
         port = _own_port(port)
+        plan = None
+        if skip_bad:
+            with image.open('rb') as source:
+                def read_block(rel: int) -> bytes:
+                    source.seek(rel)
+                    return source.read(geo.erase)
+                plan, report = plan_skip_bad(region, meta.get('bad_blocks', []), geo.bad, geo, read_block)
+            print(tr(
+                f'РЕЖИМ С ПРОПУСКОМ ПЛОХИХ БЛОКОВ: плохих в архиве {len(meta.get("bad_blocks", []))}, '
+                f'на аппарате {len(geo.bad)}. Сдвинуто блоков {report["shifted"]}, '
+                f'не вошло (стёртые/свободные UBI) {report["dropped"]}, только стирается {report["erased_only"]}. '
+                'Данные не переходят через границу раздела.',
+                f'SKIP-BAD MODE: {len(meta.get("bad_blocks", []))} bad blocks in the archive, '
+                f'{len(geo.bad)} on this unit. {report["shifted"]} blocks move, {report["dropped"]} '
+                f'(erased/free UBI) are left out, {report["erased_only"]} are only erased. '
+                'Data never crosses a partition boundary.'))
+            if report['boot_area_shifted']:
+                ui.status(tr('ВНИМАНИЕ', 'WARNING'), tr(
+                    'Сдвиг затрагивает загрузочную область (первые 512 КиБ: BL2/FIP). Что BootROM и BL2 '
+                    'находят сдвинутые данные, не доказано: роутер может перестать загружаться, '
+                    'тогда нужен UART.',
+                    'The shift touches the boot area (first 512 KiB: BL2/FIP). That BootROM and BL2 find '
+                    'shifted data is not proven: the router may stop booting, and then needs UART.'))
+                if ui.prompt(tr('Чтобы всё равно продолжить, наберите латиницей SKIP BAD BOOT: ',
+                                'To continue anyway, type SKIP BAD BOOT: ')).strip() != 'SKIP BAD BOOT':
+                    return
         print(tr(f'ЗАЛИВКА {region.name}: 0x{region.offset:x} + 0x{region.size:x} '
                  f'из {image}\nПлата: {status.get("board")}, NAND: {geo.master} '
                  f'{geo.size >> 20} МиБ, плохих блоков {len(geo.bad)}. '
@@ -452,6 +562,11 @@ def restore(host: str, status: dict, image: Path, *, port: int | None = None) ->
         # snapshot predates discover()'s own commands, and a detach with nothing
         # attached is a no-op, so asking first only adds a way to be wrong.
         session.detach_ubi()
+        if plan is not None:
+            _write_plan(session, image, region, geo, plan, port)
+            print(tr('[ГОТОВО] Все записанные блоки прошли чтение и SHA256.',
+                     '[DONE] Every written block passed readback and SHA256.'))
+            return
         runs = _runs(region, geo)
         # The boot area is written last during a whole-chip restore.
         if region.name == 'entire-nand':
@@ -495,6 +610,63 @@ def restore(host: str, status: dict, image: Path, *, port: int | None = None) ->
                  '[DONE] Every written chunk passed readback and SHA256.'))
     finally:
         session.close()
+
+
+def _write_block_verified(session: Session, geo: Geometry, ram: int | None, dst: int, expect: str) -> None:
+    session.command(f'mtd erase {geo.master} 0x{dst:x} 0x{geo.erase:x}', 120)
+    if _current_bad(session, geo.master) != geo.bad:
+        raise RuntimeError('NAND bad-block map changed during erase; restore stopped')
+    if ram is not None:
+        session.command(f'mtd write {geo.master} 0x{ram:x} 0x{dst:x} 0x{geo.erase:x}', 120)
+        if _current_bad(session, geo.master) != geo.bad:
+            raise RuntimeError('NAND bad-block map changed during write; restore stopped')
+    session.command(f'mtd read {geo.master} 0x{VERIFY_ADDR:x} 0x{dst:x} 0x{geo.erase:x}', 120)
+    if session.sha(VERIFY_ADDR, geo.erase) != expect:
+        raise RuntimeError(f'NAND readback differs at physical offset 0x{dst:x}')
+
+
+def _write_plan(session: Session, image: Path, region: Region, geo: Geometry, plan: list, port: int) -> None:
+    """Write a skip-bad plan: one eraseblock at a time, each read back and hashed."""
+    moves = list(plan)
+    if region.name == 'entire-nand':
+        moves.sort(key=lambda m: m[1] < BOOT_AREA_END)     # the boot area goes last
+    per_chunk = max(1, CHUNK_LIMIT // geo.erase)
+    erased = hashlib.sha256(b'\xff' * geo.erase).hexdigest()
+    chunk = image.with_name(image.name + '.restore-chunk')
+    if chunk.exists():
+        raise FileExistsError(chunk)
+    try:
+        with image.open('rb') as source:
+            i = 0
+            while i < len(moves):
+                if moves[i][0] is None:
+                    _write_block_verified(session, geo, None, moves[i][1], erased)
+                    i += 1
+                    continue
+                group = []
+                while i < len(moves) and moves[i][0] is not None and len(group) < per_chunk:
+                    group.append(moves[i])
+                    i += 1
+                blocks = []
+                for src_rel, _dst in group:
+                    source.seek(src_rel)
+                    block = source.read(geo.erase)
+                    if len(block) != geo.erase:
+                        raise RuntimeError('short source image')
+                    blocks.append(block)
+                data = b''.join(blocks)
+                chunk.write_bytes(data)
+                try:
+                    _serve_chunk(session, chunk, len(data), hashlib.sha256(data).hexdigest(), port)
+                finally:
+                    chunk.unlink(missing_ok=True)
+                for n, ((src_rel, dst), block) in enumerate(zip(group, blocks)):
+                    _write_block_verified(session, geo, RAM_ADDR + n * geo.erase, dst,
+                                          hashlib.sha256(block).hexdigest())
+                print(f'[NAND] verified {len(group)} block(s) from archive +0x{group[0][0]:x} '
+                      f'-> 0x{group[0][1]:x}..0x{group[-1][1] + geo.erase:x}')
+    finally:
+        chunk.unlink(missing_ok=True)
 
 
 def _tftp_note(host: str, port: int) -> None:
@@ -573,6 +745,17 @@ def menu(host: str) -> None:
         whole = (manifest.get('region') or {}).get('name') == 'entire-nand'
         if whole != (choice == '4'):
             raise RuntimeError('selected preset does not match the archive region')
+        ui.menu_item(1, tr('Физически, 1:1 (по умолчанию)', 'Physical, 1:1 (default)'),
+                     tr('Каждый блок на своё место; карта плохих блоков должна совпасть с архивом.',
+                        'Every block to its own offset; the bad-block map must match the archive.'))
+        ui.menu_item(2, tr('С пропуском плохих блоков', 'Skipping bad blocks'),
+                     tr('Как nandwrite: хорошие блоки архива по порядку на хорошие блоки аппарата, внутри раздела. '
+                        'Для другого роутера или появившегося плохого блока.',
+                        'Like nandwrite: the archive\'s good blocks, in order, onto this unit\'s good blocks, within '
+                        'each partition. For another router or a newly bad block.'))
+        mode = ui.prompt(tr('Режим [1]: ', 'Mode [1]: ')).strip() or '1'
+        if mode not in ('1', '2'):
+            return
         if use_http:
             _tftp_note(host, port)
-        restore(host, st, Path(raw), port=port)
+        restore(host, st, Path(raw), port=port, skip_bad=mode == '2')

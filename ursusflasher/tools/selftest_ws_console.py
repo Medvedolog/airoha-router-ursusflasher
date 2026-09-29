@@ -165,6 +165,173 @@ def nand_restore_contract() -> None:
             assert not any(x.startswith(('mtd erase ', 'mtd write ')) for x in calls)
 
 
+def nand_skip_bad_contract() -> None:
+    """Skip-bad restore: the archive's good blocks, in order, onto the target's good blocks."""
+    import ursus_ws_nand as nand
+    from ursus_ws_nand import Region
+
+    E = 0x20000
+    base = 0x100000                      # outside the 512 KiB boot area
+    geo = Geometry('spi-nand0', 64 * E, E, 0x800, (), ())
+
+    def reader(img):
+        return lambda rel: img[rel:rel + E]
+
+    def ubi_free():
+        b = bytearray(b'\xff' * E)
+        b[:4] = b'UBI#'
+        b[16:20] = (0x800).to_bytes(4, 'big')
+        return bytes(b)
+
+    def ubi_used():
+        b = bytearray(ubi_free())
+        b[0x800:0x804] = b'UBI!'
+        return bytes(b)
+
+    # 1. the archive had a bad block, the target has none: data closes up, the tail is erased
+    region = Region('p', base, 4 * E)
+    img = b'A' * E + b'\xff' * E + b'C' * E + b'D' * E
+    moves, rep = nand.plan_skip_bad(region, [base + E], [], geo, reader(img))
+    assert moves == [(0, base), (2 * E, base + E), (3 * E, base + 2 * E), (None, base + 3 * E)], moves
+    assert rep['shifted'] == 2 and rep['erased_only'] == 1 and not rep['boot_area_shifted']
+
+    # 2. the target has a new bad block: later data moves past it, an erased tail block is left out
+    img = b'A' * E + b'B' * E + b'C' * E + b'\xff' * E
+    moves, rep = nand.plan_skip_bad(region, [], [base + E], geo, reader(img))
+    assert moves == [(0, base), (E, base + 2 * E), (2 * E, base + 3 * E)], moves
+    assert rep['dropped'] == 1
+    # an erased block in the MIDDLE is not dropped (it would move everything after it twice)
+    img = b'A' * E + b'\xff' * E + b'C' * E + b'D' * E
+    try:
+        nand.plan_skip_bad(region, [], [base + E], geo, reader(img))
+    except RuntimeError as exc:
+        assert 'URSUS_NAND_SKIPBAD_NO_ROOM' in str(exc)
+    else:
+        raise AssertionError('no room must refuse')
+
+    # 3. a free UBI PEB may go from anywhere; a PEB with a VID header may not
+    img = ubi_used() + ubi_free() + ubi_used() + ubi_used()
+    moves, rep = nand.plan_skip_bad(region, [], [base + 3 * E], geo, reader(img))
+    assert [m[0] for m in moves] == [0, 2 * E, 3 * E] and rep['dropped'] == 1, moves
+    damaged = bytearray(ubi_used())
+    damaged[0x800:0x804] = b'XXXX'
+    img = ubi_used() * 3 + bytes(damaged)
+    try:
+        nand.plan_skip_bad(region, [], [base], geo, reader(img))
+    except RuntimeError as exc:
+        assert 'URSUS_NAND_SKIPBAD_NO_ROOM' in str(exc)
+    else:
+        raise AssertionError('UBI data blocks must never be dropped')
+
+    # 4. whole chip: data never crosses a partition boundary
+    parts = (Region('bl2', 0, 4 * E), Region('ubi', 4 * E, 4 * E))
+    g2 = Geometry('spi-nand0', 8 * E, E, 0x800, parts, ())
+    whole = Region('entire-nand', 0, 8 * E)
+    img = b''.join(bytes([65 + i]) * E for i in range(7)) + b'\xff' * E
+    moves, rep = nand.plan_skip_bad(whole, [], [5 * E], g2, reader(img))
+    for src, dst in moves:
+        if src is not None:
+            assert (src < 4 * E) == (dst < 4 * E), (src, dst)
+    assert rep['segments'] == 2 and not rep['boot_area_shifted']
+    # a shift inside the boot area is reported, so the restore asks for SKIP BAD BOOT
+    moves, rep = nand.plan_skip_bad(whole, [E], [], g2, reader(img))
+    assert rep['boot_area_shifted']
+
+    # 5. end to end against a fake flash: restore(skip_bad=True) writes the plan and verifies it
+    status = {'version': '0.1.0-alpha5-t78', 'board': 'XG-040G-MD', 'soc': 'AN7581',
+              'flash_chip': 'FM25G02B', 'flash_id': 'abcd'}
+    geo5 = Geometry('spi-nand0', 64 * E, E, 0x800, (Region('p', base, 4 * E),), (base + E,))
+    flash: dict = {}
+    ram = bytearray(8 * E)
+    verify = {'data': b''}
+    calls: list[str] = []
+    corrupt = False
+
+    class FakeSession:
+        def __init__(self, host):
+            pass
+
+        def close(self):
+            pass
+
+        def detach_ubi(self):
+            calls.append('ubi detach')
+
+        def command(self, cmd, timeout=60):
+            calls.append(cmd)
+            parts_ = cmd.split()
+            if cmd.startswith('mtd bad '):
+                return f'MTD device spi-nand0 bad blocks list:\r\n\t0x{base + E:08x}\r\n'.encode()
+            if cmd.startswith('mtd erase '):
+                flash[int(parts_[3], 16)] = b'\xff' * E
+            elif cmd.startswith('mtd write '):
+                a = int(parts_[3], 16) - nand.RAM_ADDR
+                flash[int(parts_[4], 16)] = bytes(ram[a:a + E]) if not corrupt else b'X' * E
+            elif cmd.startswith('mtd read '):
+                verify['data'] = flash[int(parts_[4], 16)]
+            return b'UrsusBoot> '
+
+        def sha(self, address, size):
+            return hashlib.sha256(verify['data'] if address == nand.VERIFY_ADDR else bytes(ram[:size])).hexdigest()
+
+    def fake_send(session, path, length, digest, port):
+        data = path.read_bytes()
+        assert hashlib.sha256(data).hexdigest() == digest and len(data) == length
+        ram[:length] = data
+
+    with tempfile.TemporaryDirectory() as directory:
+        image = Path(directory) / 'p.bin'
+        image.write_bytes(b'A' * E + b'B' * E + b'C' * E + b'\xff' * E)   # taken where no block was bad
+        meta = {'schema': 1, 'format': 'ursus-nand-main-area-ecc',
+                'region': {'name': 'p', 'offset': base, 'size': 4 * E},
+                'board': status['board'], 'soc': status['soc'], 'flash_chip': status['flash_chip'],
+                'flash_id': status['flash_id'], 'flash_size': 64 * E, 'erase_size': E, 'page_size': 0x800,
+                'bad_blocks': [], 'sha256': hashlib.sha256(image.read_bytes()).hexdigest()}
+        Path(str(image) + '.json').write_text(json.dumps(meta), encoding='utf-8')
+        with mock.patch.object(nand, 'Session', FakeSession), \
+                mock.patch.object(nand, 'discover', lambda session, st: geo5), \
+                mock.patch.object(nand, '_serve_chunk', fake_send), \
+                mock.patch('builtins.input', return_value='y'):
+            try:                                   # physical mode still refuses the changed map
+                nand.restore('127.0.0.1', status, image)
+            except RuntimeError as exc:
+                assert 'URSUS_NAND_BADBLOCK_MAP_CHANGED' in str(exc)
+            else:
+                raise AssertionError('physical mode must refuse')
+            assert not flash
+            nand.restore('127.0.0.1', status, image, skip_bad=True)
+        assert flash[base] == b'A' * E and flash[base + 2 * E] == b'B' * E and flash[base + 3 * E] == b'C' * E
+        assert base + E not in flash, 'the bad block is never erased or written'
+        assert calls.index('ubi detach') < next(i for i, c in enumerate(calls) if c.startswith('mtd erase'))
+
+        # a block that reads back differently stops the restore
+        corrupt = True
+        flash.clear()
+        with mock.patch.object(nand, 'Session', FakeSession), \
+                mock.patch.object(nand, 'discover', lambda session, st: geo5), \
+                mock.patch.object(nand, '_serve_chunk', fake_send), \
+                mock.patch('builtins.input', return_value='y'):
+            try:
+                nand.restore('127.0.0.1', status, image, skip_bad=True)
+            except RuntimeError as exc:
+                assert 'readback differs' in str(exc)
+            else:
+                raise AssertionError('a bad readback must stop the restore')
+        corrupt = False
+
+        # the boot area: a shift there needs the typed confirmation; anything else writes nothing
+        geo6 = Geometry('spi-nand0', 64 * E, E, 0x800, (Region('bl2', 0, 4 * E),), (E,))
+        meta['region'] = {'name': 'bl2', 'offset': 0, 'size': 4 * E}
+        Path(str(image) + '.json').write_text(json.dumps(meta), encoding='utf-8')
+        flash.clear()
+        with mock.patch.object(nand, 'Session', FakeSession), \
+                mock.patch.object(nand, 'discover', lambda session, st: geo6), \
+                mock.patch.object(nand, '_serve_chunk', fake_send), \
+                mock.patch('builtins.input', return_value='y'):
+            nand.restore('127.0.0.1', status, image, skip_bad=True)
+        assert not flash, 'without SKIP BAD BOOT nothing may be written to a shifted boot area'
+
+
 def nand_backup_contract() -> None:
     import ursus_ws_nand as nand
     import ursus_ws_tftp
@@ -447,6 +614,7 @@ def main() -> int:
     nand_transfer_port_contract()
     nand_geometry_contract()
     nand_restore_contract()
+    nand_skip_bad_contract()
     nand_backup_contract()
     xmodem_transport_contract()
     existing_xmodem_sender_over_ws()
