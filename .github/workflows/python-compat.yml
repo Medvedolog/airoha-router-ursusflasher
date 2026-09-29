@@ -58,3 +58,8 @@ jobs:
           PYTHONDONTWRITEBYTECODE: '1'
           PYTHONPATH: ursusflasher/src
         run: python3 ursusflasher/tools/selftest_ws_console.py
+      - name: UrsusBoot HTTP streaming backup client selftest
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          PYTHONPATH: ursusflasher/src
+        run: python3 ursusflasher/tools/selftest_http_backup.py

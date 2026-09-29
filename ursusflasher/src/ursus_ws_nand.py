@@ -181,7 +181,18 @@ def _parse_list(out: bytes, status: dict) -> tuple[str, int, int, int, tuple[Reg
             erase != int(status.get('flash_erase_size') or 0) or
             page != int(status.get('flash_page_size') or 0)):
         raise RuntimeError('NAND geometry differs between mtd list and UrsusBoot status')
-    parts = tuple(p for p in d['ranges'][1:] if p.size > 0 and
+    parts = _layout_parts(tuple(d['ranges'][1:]), status, size, erase)
+    return d['name'], size, erase, page, parts
+
+
+def _layout_parts(candidates: tuple[Region, ...], status: dict, size: int,
+                  erase: int) -> tuple[Region, ...]:
+    """Which partitions to offer, from the MTD partitions U-Boot reports.
+
+    Shared by the console (`mtd list`) and HTTP (catalog) discovery so the two
+    cannot disagree about what a stock layout means.
+    """
+    parts = tuple(p for p in candidates if p.size > 0 and
                   0 <= p.offset < size and p.offset + p.size <= size and
                   p.offset % erase == 0 and p.size % erase == 0 and NAME.fullmatch(p.name))
     # The persistent DTS may still advertise BL2+UBI while the chip holds a
@@ -197,7 +208,7 @@ def _parse_list(out: bytes, status: dict) -> tuple[str, int, int, int, tuple[Reg
                           int(length) > 0 and int(off) + int(length) <= size and
                           int(off) % erase == 0 and int(length) % erase == 0)
     unique = {(p.name, p.offset, p.size): p for p in parts}
-    return d['name'], size, erase, page, tuple(unique.values())
+    return tuple(unique.values())
 
 
 def discover(session: Session, status: dict) -> Geometry:
@@ -485,20 +496,8 @@ def restore(host: str, status: dict, image: Path, *, port: int | None = None) ->
         session.close()
 
 
-def menu(host: str) -> None:
+def _tftp_note(host: str, port: int) -> None:
     from proven_backend import local_ip_for
-    from ursus_web_client import status
-    st = status(host)
-    session = Session(host)
-    try:
-        geo = discover(session, st)
-    finally:
-        session.close()
-    print(tr(f'NAND {geo.master}: {geo.size >> 20} МиБ, блок 0x{geo.erase:x}, '
-             f'плохих блоков {len(geo.bad)}. Основная область с ECC, без OOB.',
-             f'NAND {geo.master}: {geo.size >> 20} MiB, block 0x{geo.erase:x}, '
-             f'{len(geo.bad)} bad blocks. ECC-corrected main area, no OOB.'))
-    port = _transfer_port()
     print(tr(f'Сеть: ПК {local_ip_for(host)} ⇄ UrsusBoot {host}, проводной Ethernet; '
              f'разрешите UDP {port} в firewall ПК. Отключите мешающие VPN/Wi-Fi интерфейсы.',
              f'Network: PC {local_ip_for(host)} ⇄ UrsusBoot {host}, wired Ethernet; '
@@ -506,6 +505,34 @@ def menu(host: str) -> None:
     if port != PORT:
         print(tr(f'(UDP {PORT} сейчас занят другой программой на ПК.)',
                  f'(UDP {PORT} is currently taken by another program on the PC.)'))
+
+
+def menu(host: str) -> None:
+    import ursus_http_backup as hb
+    from ursus_web_client import status
+    st = status(host)
+    # T77+ streams backups over HTTP; older UrsusBoot keeps the TFTP path.
+    use_http = hb.available(st)
+    if use_http:
+        _master, geo = hb.discover(host, st)
+    else:
+        session = Session(host)
+        try:
+            geo = discover(session, st)
+        finally:
+            session.close()
+    print(tr(f'NAND {geo.master}: {geo.size >> 20} МиБ, блок 0x{geo.erase:x}, '
+             f'плохих блоков {len(geo.bad)}. Основная область с ECC, без OOB.',
+             f'NAND {geo.master}: {geo.size >> 20} MiB, block 0x{geo.erase:x}, '
+             f'{len(geo.bad)} bad blocks. ECC-corrected main area, no OOB.'))
+    port = _transfer_port()
+    if use_http:
+        print(tr('Снятие идёт потоком по HTTP (порт 80): UDP и firewall не нужны. '
+                 'Заливка идёт по TFTP.',
+                 'Backups stream over HTTP (port 80): no UDP or firewall rule needed. '
+                 'Restore uses TFTP.'))
+    else:
+        _tftp_note(host, port)
     print(tr('1 Снять весь NAND · 2 Снять раздел · 3 Залить раздел из архива · '
              '4 Залить весь NAND из архива',
              '1 Back up whole NAND · 2 Back up partition · 3 Restore partition archive · '
@@ -527,7 +554,14 @@ def menu(host: str) -> None:
         from ursus_web_client import KIT
         default = KIT / 'work' / 'backups' / f'ursus-{region.name}-{int(time.time())}.bin'
         raw = input(tr(f'Файл архива [{default}]: ', f'Backup file [{default}]: ')).strip().strip('"')
-        backup(host, st, region, Path(raw) if raw else default, port=port)
+        target = Path(raw) if raw else default
+        if use_http:
+            full = input(tr('Сверить ВЕСЬ файл прямым чтением U-Boot? Долго. [y/N, Enter — выборочно]: ',
+                            'Cross-check the WHOLE file against U-Boot direct reads? Slow. '
+                            '[y/N, Enter = sampled]: ')).strip().lower() in ('y', 'yes', 'д', 'да')
+            hb.backup(host, st, region, target, geo=geo, verify_all=full)
+        else:
+            backup(host, st, region, target, port=port)
     elif choice in ('3', '4'):
         raw = input(tr('Путь к .bin архиву (рядом должен быть .bin.json): ',
                        'Path to .bin image (matching .bin.json alongside): ')).strip().strip('"')
@@ -537,4 +571,6 @@ def menu(host: str) -> None:
         whole = (manifest.get('region') or {}).get('name') == 'entire-nand'
         if whole != (choice == '4'):
             raise RuntimeError('selected preset does not match the archive region')
+        if use_http:
+            _tftp_note(host, port)
         restore(host, st, Path(raw), port=port)
