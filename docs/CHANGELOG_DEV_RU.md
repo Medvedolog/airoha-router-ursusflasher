@@ -8,6 +8,10 @@ Published/release history remains in `docs/CHANGELOG_RU.md`.
 
 ---
 
+## 2026-09-29 — версия комплекта 0.2.77-dev-nand
+
+После точки версия UrsusFlasher выровнена с UrsusBoot: 0.2.**77** ↔ t**77** (`0.1.0-alpha5-t77`). Дальше правая часть номера комплекта совпадает с номером сборки UrsusBoot, которую он закрепляет (`config/URSUSBOOT_PIN.json`); при новой пин-версии UrsusBoot номер комплекта меняется вместе с ней.
+
 ## 2026-09-29 — версия FIP перед записью и свой FIP (`dev/ursusboot-http-backup-client`)
 
 - Новый модуль `fip_choice.py`: `identify()` разбирает FIP (сигнатура, TOC, NT_FW, LZMA1EXT BL33) и достаёт версию из строки `UrsusBoot <версия>` внутри распакованного BL33; `choose()` показывает кандидатов (версия, размер, SHA256, имя известной сборки) и предлагает «свой FIP» за набором `CUSTOM FIP`.

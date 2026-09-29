@@ -1,10 +1,10 @@
-# UrsusFlasher 0.2.74-dev-nand TEST — Nokia XG-040G-MD + XG-040G-MF
+# UrsusFlasher 0.2.77-dev-nand TEST — Nokia XG-040G-MD + XG-040G-MF
 
 Hardware-test комплект для:
 
 ```text
-Nokia XG-040G-MD -> Airoha AN7581 -> UrsusBoot-MD T75
-Nokia XG-040G-MF -> Airoha AN7583 -> UrsusBoot-MF T75
+Nokia XG-040G-MD -> Airoha AN7581 -> UrsusBoot-MD T77
+Nokia XG-040G-MF -> Airoha AN7583 -> UrsusBoot-MF T77
 ```
 
 Python 3.12+; сторонние Python-пакеты не требуются. Актуальный публичный тест публикуется как GitHub prerelease; титульная страница репозитория показывает его версию автоматически.
