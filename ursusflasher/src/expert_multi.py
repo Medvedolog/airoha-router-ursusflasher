@@ -219,16 +219,23 @@ def _run_live_console(host: str) -> None:
                       tr("Как раньше: F2/F3/F5 — файлы, диагностика, NAND", "As before: F2/F3/F5 — files, diagnostics, NAND"))
     base.ui.menu_item(2, tr("UART (COM-порт)", "UART (COM port)"),
                       tr("Чистый терминал 115200 8N1; сеть не нужна, работает и с BootROM/U-Boot", "Plain 115200 8N1 terminal; no network needed, works with BootROM/U-Boot too"))
+    base.ui.menu_item(3, tr("BootROM → UrsusBoot в RAM → консоль по LAN", "BootROM → UrsusBoot in RAM → console over LAN"),
+                      tr("Если UrsusBoot не запускается: по UART грузим свежий UrsusBoot в память, дальше всё (F2/F3/F5) по Ethernet. NAND не пишется.",
+                         "If UrsusBoot does not start: load a current UrsusBoot into RAM over UART, then everything (F2/F3/F5) goes over Ethernet. NAND is not written."),
+                      tone="safe")
     base.ui.menu_item(0, tr("Назад", "Back"))
     while True:
         choice = base.ui.prompt(tr("Подключение [1]: ", "Connection [1]: ")).strip() or "1"
-        if choice in ("0", "1", "2"):
+        if choice in ("0", "1", "2", "3"):
             break
     if choice == "1":
         uw.live_console(host)
     elif choice == "2":
         import ursus_ws_terminal
         ursus_ws_terminal.live_console_uart()
+    elif choice == "3":
+        import ursus_ram_console
+        ursus_ram_console.boot_to_lan(host=host)
 
 
 def _show_live_console_action() -> None:

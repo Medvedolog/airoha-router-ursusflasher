@@ -70,3 +70,5 @@ jobs:
         run: |
           NOKIA_LANG=ru python3 ursusflasher/tools/selftest_fip_choice.py
           NOKIA_LANG=en python3 ursusflasher/tools/selftest_fip_choice.py
+          NOKIA_LANG=ru python3 ursusflasher/tools/selftest_ram_console.py
+          NOKIA_LANG=en python3 ursusflasher/tools/selftest_ram_console.py
