@@ -512,6 +512,24 @@ def main() -> int:
     ws.close()
     th.join(timeout=2)
     assert result.get("payload") == b"version\r"
+    # EXPERT wraps sys.stdout in proven_backend._ConsoleTee for the session log.
+    # The live console writes raw bytes, so it must still reach the real stream
+    # (item 14 failed with "_ConsoleTee has no attribute buffer").
+    import proven_backend
+    raw = io.BytesIO()
+    text_out = io.TextIOWrapper(raw, encoding="utf-8", write_through=True)
+    tee = proven_backend._ConsoleTee(text_out, [])
+    assert tee.buffer is text_out.buffer
+    term = LiveTerminal(None, "127.0.0.1")
+    with mock.patch.object(sys, "stdout", tee):
+        term._write(b"UrsusBoot> \xd0\x9f")
+    assert raw.getvalue() == b"UrsusBoot> \xd0\x9f", raw.getvalue()
+    # a stream with no byte layer degrades to text instead of raising
+    plain = io.StringIO()
+    with mock.patch.object(sys, "stdout", plain):
+        term._write(b"UrsusBoot> ")
+    assert plain.getvalue() == "UrsusBoot> "
+
     print("URSUS_WS_TFTPPUT_SELFTEST=PASS ram_range=1 size=1 sha256=1")
     print("URSUS_WS_NAND_SELFTEST=PASS f5_local=1 geometry=1 bad_block_runs=1")
     print("URSUS_WS_XMODEM_SELFTEST=PASS reused_uart_sender=1 blocks=3 crc_ack=1")

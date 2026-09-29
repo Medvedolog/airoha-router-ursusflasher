@@ -408,6 +408,12 @@ class _ConsoleTee:
     def encoding(self):
         return getattr(self.console, "encoding", "utf-8")
 
+    @property
+    def buffer(self):
+        # Raw byte writers (the WebSocket live console draws its own screen)
+        # need the real stream.  Those bytes bypass the session log by design.
+        return self.console.buffer
+
 
 def _write_session_only(text: str) -> None:
     """Append technical diagnostics only to the timestamped session log.

@@ -77,8 +77,13 @@ class LiveTerminal:
                 f'\x1b[{self.rows};1H\x1b[2K{self._style(footer, "239;192;121")}').encode('utf-8')
 
     def _write(self, data: bytes) -> None:
-        sys.stdout.buffer.write(data)
-        sys.stdout.buffer.flush()
+        out = getattr(sys.stdout, 'buffer', None)
+        if out is None:                 # a wrapper without a byte layer: fall back to text
+            sys.stdout.write(data.decode('utf-8', 'replace'))
+            sys.stdout.flush()
+            return
+        out.write(data)
+        out.flush()
 
     def _refresh(self) -> None:
         if not self.chrome or self.suspended:
