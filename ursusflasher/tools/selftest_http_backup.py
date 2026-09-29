@@ -149,7 +149,7 @@ def geometry() -> Geometry:
 
 
 def capability_and_catalog() -> None:
-    for ver, want in (("0.1.0-alpha5-t76", False), ("0.1.0-alpha5-t77", True),
+    for ver, want in (("0.1.0-alpha5-t76", False), ("0.1.0-alpha5-t77", True), ("0.1.0-alpha5-t78", True),
                       ("0.1.0-alpha5-t100", True), ("0.1.0-alpha5-t75", False), ("", False)):
         assert hb.available({"version": ver}) is want, ver
     assert hb.available({"version": "0.1.0-alpha5-t70", "http_backup_available": True})
