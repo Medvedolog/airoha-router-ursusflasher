@@ -217,8 +217,8 @@ def _show_live_console_action() -> None:
         14,
         tr("Живая консоль UrsusBoot (WebSocket)", "UrsusBoot live console (WebSocket)"),
         tr(
-            "Консоль U-Boot по Ethernet. F2: HTTP или XMODEM в RAM; F3: TFTP RAM или диагностика на ПК; F4: строки/RAW; F5: NAND архив/восстановление. Ctrl-C уходит роутеру, F10 выходит.",
-            "U-Boot console over Ethernet. F2: HTTP or XMODEM to RAM; F3: TFTP RAM or diagnostics to PC; F4: line/RAW; F5: NAND backup/restore. Ctrl-C reaches the router, F10 exits.",
+            "Консоль U-Boot по Ethernet. F2: HTTP или XMODEM в RAM; F3: TFTP RAM или диагностика на ПК; F4: строки/RAW; F5: NAND архив/восстановление. Ctrl-C прерывает команду на роутере (на пустом приглашении остановил бы WebFailsafe — нужен второй Ctrl-C), F10 выходит.",
+            "U-Boot console over Ethernet. F2: HTTP or XMODEM to RAM; F3: TFTP RAM or diagnostics to PC; F4: line/RAW; F5: NAND backup/restore. Ctrl-C interrupts a running command (at the idle prompt it would stop WebFailsafe, so it needs a second press), F10 exits.",
         ),
         write_capable=True,
         enabled=True,

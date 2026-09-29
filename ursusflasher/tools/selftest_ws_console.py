@@ -530,6 +530,90 @@ def main() -> int:
         term._write(b"UrsusBoot> ")
     assert plain.getvalue() == "UrsusBoot> "
 
+    # --- live terminal behaviour without a real console --------------------
+    import shutil
+    import time as _time
+
+    class FakeWS:
+        def __init__(self):
+            self.sent = []
+            self.closed = False
+
+        def send(self, data):
+            self.sent.append(bytes(data))
+
+        def close(self):
+            self.closed = True
+
+    def make():
+        ws = FakeWS()
+        t = LiveTerminal(ws, "127.0.0.1")
+        shown = bytearray()
+        t._write = lambda data: shown.extend(data)
+        return ws, t, shown
+
+    # t77 firmware echoes a deleted character as the TEXT backslash-b: repaired for display
+    ws, t, shown = make()
+    t._output(b"UrsusBoot> ab" + b"\\b \\b")
+    assert bytes(shown) == b"UrsusBoot> ab\x08 \x08", bytes(shown)
+    ws, t, shown = make()
+    t._output(b"a\\b c")                               # not the erase sequence: untouched
+    assert bytes(shown) == b"a\\b c"
+
+    # Ctrl-C at the idle prompt would stop WebFailsafe: needs a second press within 2 s
+    ws, t, shown = make()
+    t._output(b"\r\nUrsusBoot> ping")
+    t._input(b"\x03")
+    assert ws.sent == [] and (b"NOT sent" in bytes(shown) or "НЕ отправлено".encode() in bytes(shown))
+    assert bytes(shown).endswith(b"UrsusBoot> ping")     # the typed line is redrawn
+    t._input(b"\x03")
+    assert ws.sent == [b"\x03"], ws.sent
+    # while a command is running Ctrl-C goes straight through, in RAW and in LINE mode
+    for raw in (True, False):
+        ws, t, shown = make()
+        t.raw = raw
+        t._output(b"UrsusBoot> ping 1.2.3.4\r\nPING 1.2.3.4 ...")
+        t._input(b"\x03")
+        assert ws.sent == [b"\x03"], (raw, ws.sent)
+    # a later confirmation window does not stay open forever
+    ws, t, shown = make()
+    t._output(b"UrsusBoot> ")
+    t._input(b"\x03")
+    t.ctrlc_at -= 3
+    t._input(b"\x03")
+    assert ws.sent == [], "an expired confirmation must ask again"
+    # typed bytes around a Ctrl-C reach the router in order, the Ctrl-C goes through the guard
+    ws, t, shown = make()
+    t._output(b"UrsusBoot> ")
+    t._keys(b"ab\x03cd")
+    assert ws.sent == [b"ab", b"cd"], ws.sent
+
+    # window resize is followed while the device is silent, and stale bars are erased
+    ws, t, shown = make()
+    real = shutil.get_terminal_size
+    try:
+        t.chrome, t.cols, t.rows = True, 100, 20
+        shutil.get_terminal_size = lambda fallback=(100, 30): os.terminal_size((120, 40))
+        t._check_resize(force=True)
+        out = bytes(shown)
+        assert (t.cols, t.rows) == (120, 40)
+        assert b"\x1b[19;1H\x1b[2K" in out and b"\x1b[20;1H\x1b[2K" in out, out   # old footer rows erased
+        assert b"\x1b[3;38r" in out and b"\x1b[40;1H" in out, out                 # new region and footer
+        shown.clear()
+        t._check_resize(force=True)
+        assert bytes(shown) == b"", "no redraw without a size change"
+        shutil.get_terminal_size = lambda fallback=(100, 30): os.terminal_size((30, 8))
+        t._check_resize(force=True)
+        assert t.chrome is False, "a window too small for the chrome switches it off"
+    finally:
+        shutil.get_terminal_size = real
+
+    import inspect
+    pump = inspect.getsource(LiveTerminal._pump_input)
+    assert "_check_resize()" in pump, "the keyboard loop must poll the window size (silent device)"
+    assert "_ConsoleInputMode" in inspect.getsource(LiveTerminal.run)
+    assert "KeyboardInterrupt" in inspect.getsource(LiveTerminal.run)
+
     print("URSUS_WS_TFTPPUT_SELFTEST=PASS ram_range=1 size=1 sha256=1")
     print("URSUS_WS_NAND_SELFTEST=PASS f5_local=1 geometry=1 bad_block_runs=1")
     print("URSUS_WS_XMODEM_SELFTEST=PASS reused_uart_sender=1 blocks=3 crc_ack=1")

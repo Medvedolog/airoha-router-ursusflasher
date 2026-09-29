@@ -32,6 +32,43 @@ _FKEYS = {
 _ARROWS = {b'\x1b[A': 'up', b'\x1b[B': 'down', b'\x1bOA': 'up', b'\x1bOB': 'down'}
 _FULLSCREEN = re.compile(rb'\x1b\[\?(?:1049|1047|47)h')
 _ALT_OFF = re.compile(rb'\x1b\[\?(?:1049|1047|47)l')
+_PROMPT = b'UrsusBoot> '
+# UrsusBoot t77 echoes a deleted character with printf("\\b \\b"): the two-character
+# text backslash-b instead of the BS byte.  Repaired here; harmless once fixed there.
+_BROKEN_ERASE = b'\\b \\b'
+_CTRL_C_CONFIRM_S = 2.0
+
+
+class _ConsoleInputMode:
+    """Windows: deliver Ctrl-C as a key instead of raising KeyboardInterrupt.
+
+    In the live console Ctrl-C is a device key.  With ENABLE_PROCESSED_INPUT on,
+    the same press also interrupts the flasher itself, which used to tear the
+    session down while the byte still reached the router.
+    """
+
+    def __enter__(self):
+        self.handle = self.old = None
+        if os.name == 'nt':
+            try:
+                import ctypes
+                k32 = ctypes.windll.kernel32
+                handle = k32.GetStdHandle(-10)
+                mode = ctypes.c_uint32()
+                if k32.GetConsoleMode(handle, ctypes.byref(mode)):
+                    self.handle, self.old = handle, mode.value
+                    k32.SetConsoleMode(handle, mode.value & ~0x0001)
+            except Exception:
+                self.handle = None
+        return self
+
+    def __exit__(self, *exc):
+        if self.handle is not None:
+            try:
+                import ctypes
+                ctypes.windll.kernel32.SetConsoleMode(self.handle, self.old)
+            except Exception:
+                pass
 
 
 class LiveTerminal:
@@ -48,6 +85,9 @@ class LiveTerminal:
         self.index = 0
         self.line = ''
         self.cols = self.rows = 0
+        self.tail_line = b''            # device output after its last newline
+        self.ctrlc_at = 0.0
+        self.resize_at = 0.0
         self.chrome = False
         self.suspended = False
         self.ansi_tail = b''
@@ -85,10 +125,31 @@ class LiveTerminal:
         out.write(data)
         out.flush()
 
-    def _refresh(self) -> None:
+    def _refresh(self, stale_rows: tuple = ()) -> None:
         if not self.chrome or self.suspended:
             return
-        self._write(b'\x1b7' + self._bars() + f'\x1b[3;{self.rows-2}r'.encode() + b'\x1b8')
+        erase = b''.join(f'\x1b[{r};1H\x1b[2K'.encode() for r in stale_rows)
+        self._write(b'\x1b7\x1b[r' + erase + self._bars() + f'\x1b[3;{self.rows-2}r'.encode() + b'\x1b8')
+
+    def _check_resize(self, *, force: bool = False) -> None:
+        """Follow the window size, also while the device is silent."""
+        now = time.monotonic()
+        if not force and now - self.resize_at < .15:
+            return
+        self.resize_at = now
+        with self.lock:
+            if not self.chrome or self.suspended:
+                return
+            size = shutil.get_terminal_size((100, 30))
+            if size == (self.cols, self.rows):
+                return
+            old_rows = self.rows
+            self.cols, self.rows = size
+            if self.cols < 40 or self.rows < 10:
+                self._end()
+                return
+            # bars drawn for the old size are now in the middle of the screen
+            self._refresh(stale_rows=tuple(r for r in (old_rows - 1, old_rows) if r <= self.rows - 2))
 
     def _start(self) -> None:
         self.cols, self.rows = shutil.get_terminal_size((100, 30))
@@ -107,14 +168,9 @@ class LiveTerminal:
 
     def _output(self, data: bytes) -> None:
         with self.lock:
-            if self.chrome and not self.suspended:
-                size = shutil.get_terminal_size((100, 30))
-                if size != (self.cols, self.rows):
-                    self.cols, self.rows = size
-                    if self.cols < 40 or self.rows < 10:
-                        self._end()
-                    else:
-                        self._refresh()
+            self._check_resize(force=True)
+            data = data.replace(_BROKEN_ERASE, b'\x08 \x08')
+            self.tail_line = (self.tail_line + data).rsplit(b'\n', 1)[-1][-200:]
             probe = self.ansi_tail + data
             self.ansi_tail = probe[-64:]
             if _FULLSCREEN.search(probe):
@@ -198,9 +254,6 @@ class LiveTerminal:
             return
         elif key in (b'\x7f', b'\x08'):
             self.line = self.line[:-1]
-        elif key == b'\x03':
-            self.ws.send(key)
-            self.line = ''
         elif key == b'\x15':
             self.line = ''
         elif len(key) == 1 and 32 <= key[0] < 127:
@@ -266,6 +319,8 @@ class LiveTerminal:
         elif key == b'\x1b[15~':
             self.action = 'nand'
             self.stop.set()
+        elif key == b'\x03':
+            self._ctrl_c()
         elif self.paused and key in (b'\r', b'\n'):
             with self.lock:
                 self.paused = False
@@ -278,11 +333,33 @@ class LiveTerminal:
         else:
             self._line_key(key)
 
+    def _idle_at_prompt(self) -> bool:
+        return self.tail_line.startswith(_PROMPT)
+
+    def _ctrl_c(self) -> None:
+        """Ctrl-C interrupts a running command.  At the idle prompt it would make
+        UrsusBoot stop WebFailsafe -- this connection and every later one dies
+        until `ursusweb` is started again on the UART -- so it needs a second press."""
+        now = time.monotonic()
+        if self._idle_at_prompt() and now - self.ctrlc_at > _CTRL_C_CONFIRM_S:
+            self.ctrlc_at = now
+            with self.lock:
+                self._write(tr(
+                    '\r\n[Ctrl-C на приглашении остановил бы WebFailsafe и оборвал эту консоль до `ursusweb` на UART. '
+                    'НЕ отправлено. Выход из консоли: F10. Отправить всё равно: Ctrl-C ещё раз за 2 с.]\r\n',
+                    '\r\n[Ctrl-C at the idle prompt would stop WebFailsafe and drop this console until `ursusweb` is '
+                    'run on the UART. NOT sent. Leave the console: F10. Send anyway: press Ctrl-C again within 2 s.]\r\n').encode()
+                    + self.tail_line)
+            return
+        self.ctrlc_at = 0.0
+        self.line = ''
+        self.ws.send(b'\x03')
+
     def _keys(self, data: bytes, *, flush: bool = False) -> None:
         self.keybuf.extend(data)
         while self.keybuf:
             if self.raw and not self.menu and not self.paused and self.keybuf[0] != 27:
-                end = next((i for i, b in enumerate(self.keybuf) if b in (27, 29, 17, 16)), len(self.keybuf))
+                end = next((i for i, b in enumerate(self.keybuf) if b in (27, 29, 17, 16, 3)), len(self.keybuf))
                 if end:
                     self.ws.send(bytes(self.keybuf[:end]))
                     del self.keybuf[:end]
@@ -319,6 +396,7 @@ class LiveTerminal:
             import tty
             fd = sys.stdin.fileno()
             old = termios.tcgetattr(fd)
+        input_mode = _ConsoleInputMode().__enter__()
         try:
             if os.name != 'nt':
                 tty.setraw(fd)
@@ -332,30 +410,13 @@ class LiveTerminal:
             reader = threading.Thread(target=self._reader, name='ursus-ws-console-rx', daemon=True)
             reader.start()
             while not self.stop.is_set():
-                if os.name == 'nt':
-                    if not msvcrt.kbhit():
-                        time.sleep(.03)
-                        continue
-                    ch = msvcrt.getwch()
-                    if ch in ('\x00', '\xe0'):
-                        scan = msvcrt.getwch()
-                        key = {'<': b'\x1bOQ', '=': b'\x1bOR', '>': b'\x1bOS', '?': b'\x1b[15~', 'D': b'\x1b[21~',
-                               'H': b'\x1b[A', 'P': b'\x1b[B'}.get(scan)
-                    else:
-                        key = ch.encode('utf-8', 'replace')
-                    if key:
-                        self._keys(key)
-                else:
-                    ready, _, _ = select.select([fd], [], [], .05)
-                    if ready:
-                        data = os.read(fd, 4096)
-                        if not data:
-                            break
-                        self.key_at = time.monotonic()
-                        self._keys(data)
-                    elif self.keybuf and time.monotonic() - self.key_at > .05:
-                        self._keys(b'', flush=True)
+                try:
+                    self._pump_input(msvcrt if os.name == 'nt' else None, fd if os.name != 'nt' else None)
+                except KeyboardInterrupt:
+                    # Console mode could not be changed: still treat it as the Ctrl-C key.
+                    self._ctrl_c()
         finally:
+            input_mode.__exit__()
             self.stop.set()
             self.ws.close()
             if 'reader' in locals():
@@ -365,13 +426,48 @@ class LiveTerminal:
             if os.name != 'nt':
                 termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
+    def _pump_input(self, msvcrt, fd) -> None:
+        """One pass of the keyboard loop; sets ``stop`` when the keyboard is gone."""
+        self._check_resize()
+        if msvcrt is not None:
+            if not msvcrt.kbhit():
+                time.sleep(.03)
+                return
+            ch = msvcrt.getwch()
+            if ch in ('\x00', '\xe0'):
+                scan = msvcrt.getwch()
+                key = {'<': b'\x1bOQ', '=': b'\x1bOR', '>': b'\x1bOS', '?': b'\x1b[15~', 'D': b'\x1b[21~',
+                       'H': b'\x1b[A', 'P': b'\x1b[B'}.get(scan)
+            else:
+                key = ch.encode('utf-8', 'replace')
+            if key:
+                self._keys(key)
+            return
+        ready, _, _ = select.select([fd], [], [], .05)
+        if ready:
+            data = os.read(fd, 4096)
+            if not data:
+                self.stop.set()
+                return
+            self.key_at = time.monotonic()
+            self._keys(data)
+        elif self.keybuf and time.monotonic() - self.key_at > .05:
+            self._keys(b'', flush=True)
+
 
 def live_console(host: str) -> None:
     # Import lazily: ursus_web_client owns the authenticated WebSocket framing.
     from ursus_web_client import UrsusLiveConsole, _session_log
 
     while True:
-        ws, hello = UrsusLiveConsole.connect(host)
+        try:
+            ws, hello = UrsusLiveConsole.connect(host)
+        except Exception as exc:
+            raise RuntimeError(f'{exc}. ' + tr(
+                'Если консоль закрыли Ctrl-C на приглашении, UrsusBoot остановил WebFailsafe: '
+                'на UART выполните `ursusweb` и подключитесь снова.',
+                'If the console was left with Ctrl-C at the prompt, UrsusBoot stopped WebFailsafe: '
+                'run `ursusweb` on the UART and connect again.')) from exc
         terminal = LiveTerminal(ws, host)
         try:
             terminal.run(hello)
