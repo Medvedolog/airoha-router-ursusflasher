@@ -678,6 +678,63 @@ def main() -> int:
     started = bytes(shown)
     assert t.chrome and started.index(_BODY.encode()) < started.index(b"\x1b[2J"), started[:200]
 
+    # The same terminal over a COM port: a plain UART terminal, no network functions.
+    import inspect
+    from ursus_ws_terminal import SerialLink
+
+    class FakeSerial:
+        def __init__(self):
+            self.rx = [b"U-Boot> ", b""]
+            self.tx = []
+            self.closed = False
+
+        def read(self, size=4096, timeout=0.2):
+            return self.rx.pop(0) if self.rx else b""
+
+        def write(self, data):
+            self.tx.append(bytes(data))
+
+        def close(self):
+            self.closed = True
+
+    sp = FakeSerial()
+    link = SerialLink(sp)
+    assert link.recv_message() == b"U-Boot> " and link.recv_message() == b""     # idle -> b"", never blocks forever
+    link.send(b"help\r")
+    assert sp.tx == [b"help\r"]
+    t = LiveTerminal(link, "COM7", uart="COM7")
+    shown = bytearray()
+    t._write = lambda data: shown.extend(data)
+    t.cols, t.rows = 100, 30
+    assert "UART COM7" in t._bars().decode("utf-8") and "WebSocket" not in t._bars().decode("utf-8")
+    assert "F2" not in t._bars().decode("utf-8") and "F5" not in t._bars().decode("utf-8")
+    for key in (b"\x1bOQ", b"\x1b[13~", b"\x1b[15~"):       # F2, F3, F5 need the network: refused, not queued
+        shown.clear()
+        t._input(key)
+        assert b"UART" in bytes(shown), (key, bytes(shown))
+        assert t.action is None and not t.stop.is_set(), key
+    t.menu = True
+    t._input(b"n")
+    assert t.action is None and not t.stop.is_set()
+    # Ctrl-C at the prompt is a plain interrupt on a UART: no second press is asked for
+    t._output(b"\r\nUrsusBoot> ")
+    t._input(b"\x03")
+    assert sp.tx[-1] == b"\x03", sp.tx
+    # the WebSocket terminal still asks and still leaves for F2
+    ws, t2, shown2 = make()
+    t2._input(b"\x1bOQ")
+    assert t2.action == "upload" and t2.stop.is_set()
+    import expert_multi
+    assert "live_console_uart" in inspect.getsource(expert_multi._run_live_console)
+    link.close()
+    assert sp.closed
+    try:
+        link.recv_message()
+    except EOFError:
+        pass
+    else:
+        raise AssertionError("a closed link must end the reader")
+
     # The connect failure names the real cause: 409 = slot taken, not "WebFailsafe stopped".
     from ursus_ws_terminal import _connect_hint
     assert "t79" in _connect_hint(RuntimeError("live console WebSocket upgrade failed: 'HTTP/1.1 409 Conflict'"))

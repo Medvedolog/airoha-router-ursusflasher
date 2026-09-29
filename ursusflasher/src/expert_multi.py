@@ -212,13 +212,32 @@ def _show_stock_slot_action() -> None:
     )
 
 
+def _run_live_console(host: str) -> None:
+    """Item 14: the same terminal over Ethernet (WebSocket) or over a COM port."""
+    base.ui.section(tr("Живая консоль: подключение", "Live console: connection"), style="amber2")
+    base.ui.menu_item(1, tr("Ethernet (WebSocket)", "Ethernet (WebSocket)"),
+                      tr("Как раньше: F2/F3/F5 — файлы, диагностика, NAND", "As before: F2/F3/F5 — files, diagnostics, NAND"))
+    base.ui.menu_item(2, tr("UART (COM-порт)", "UART (COM port)"),
+                      tr("Чистый терминал 115200 8N1; сеть не нужна, работает и с BootROM/U-Boot", "Plain 115200 8N1 terminal; no network needed, works with BootROM/U-Boot too"))
+    base.ui.menu_item(0, tr("Назад", "Back"))
+    while True:
+        choice = base.ui.prompt(tr("Подключение [1]: ", "Connection [1]: ")).strip() or "1"
+        if choice in ("0", "1", "2"):
+            break
+    if choice == "1":
+        uw.live_console(host)
+    elif choice == "2":
+        import ursus_ws_terminal
+        ursus_ws_terminal.live_console_uart()
+
+
 def _show_live_console_action() -> None:
     base.ui.menu_item(
         14,
         tr("Живая консоль UrsusBoot (WebSocket)", "UrsusBoot live console (WebSocket)"),
         tr(
-            "Консоль U-Boot по Ethernet. F2: HTTP или XMODEM в RAM; F3: TFTP RAM или диагностика на ПК; F4: строки/RAW; F5: NAND архив/восстановление. Ctrl-C прерывает команду на роутере (на пустом приглашении остановил бы WebFailsafe — нужен второй Ctrl-C), F10 выходит.",
-            "U-Boot console over Ethernet. F2: HTTP or XMODEM to RAM; F3: TFTP RAM or diagnostics to PC; F4: line/RAW; F5: NAND backup/restore. Ctrl-C interrupts a running command (at the idle prompt it would stop WebFailsafe, so it needs a second press), F10 exits.",
+            "Консоль U-Boot по Ethernet (WebSocket) или по UART (COM). F2: HTTP или XMODEM в RAM; F3: TFTP RAM или диагностика на ПК; F4: строки/RAW; F5: NAND архив/восстановление (F2/F3/F5 — только по Ethernet). Ctrl-C прерывает команду на роутере (на пустом приглашении остановил бы WebFailsafe — нужен второй Ctrl-C), F10 выходит.",
+            "U-Boot console over Ethernet (WebSocket) or UART (COM). F2: HTTP or XMODEM to RAM; F3: TFTP RAM or diagnostics to PC; F4: line/RAW; F5: NAND backup/restore (F2/F3/F5 need Ethernet). Ctrl-C interrupts a running command (at the idle prompt it would stop WebFailsafe, so it needs a second press), F10 exits.",
         ),
         write_capable=True,
         enabled=True,
@@ -365,7 +384,7 @@ def main() -> int:
             continue
 
         if number == 14:
-            base.run_action(lambda: uw.live_console(host), write_may_happen=True)
+            base.run_action(lambda: _run_live_console(host), write_may_happen=True)
             continue
 
         selected = app[number]

@@ -79,9 +79,35 @@ class _ConsoleInputMode:
                 pass
 
 
+class SerialLink:
+    """The terminal's link interface (send / recv_message / close) over a COM port.
+
+    ``recv_message`` returns b'' when the line is idle, which the reader loop
+    treats as "nothing yet", so the same terminal serves WebSocket and UART.
+    """
+
+    def __init__(self, sp):
+        self.sp = sp
+        self.closed = False
+
+    def send(self, data: bytes) -> None:
+        self.sp.write(bytes(data))
+
+    def recv_message(self) -> bytes:
+        if self.closed:
+            raise EOFError('UART closed')
+        return self.sp.read(4096, .1)
+
+    def close(self) -> None:
+        if not self.closed:
+            self.closed = True
+            self.sp.close()
+
+
 class LiveTerminal:
-    def __init__(self, ws, host: str):
+    def __init__(self, ws, host: str, *, uart: str | None = None):
         self.ws, self.host = ws, host
+        self.uart = uart                # COM port name: same terminal, no network functions
         self.stop = threading.Event()
         self.lock = threading.RLock()
         self.raw = True
@@ -112,11 +138,17 @@ class LiveTerminal:
     def _bars(self) -> bytes:
         cols = self.cols
         mode = 'RAW' if self.raw else 'LINE'
-        header = f' UrsusFlasher  ·  UrsusBoot {self.host}  ●  WebSocket  ·  {mode} '
+        if self.uart:
+            header = f' UrsusFlasher  ·  UART {self.uart}  ●  115200 8N1  ·  {mode} '
+        else:
+            header = f' UrsusFlasher  ·  UrsusBoot {self.host}  ●  WebSocket  ·  {mode} '
         rule = tr('── ЖИВАЯ КОНСОЛЬ ', '── LIVE CONSOLE ')
         rule += '─' * max(0, cols - len(rule))
-        hints = tr(' F2 ↑файл · F3 ↓файл · F4 строки/RAW · F5 NAND · F10 выход ',
-                   ' F2 ↑file · F3 ↓file · F4 line/RAW · F5 NAND · F10 quit ')
+        if self.uart:
+            hints = tr(' F4 строки/RAW · Ctrl+P пейджер · F10 выход ', ' F4 line/RAW · Ctrl+P pager · F10 quit ')
+        else:
+            hints = tr(' F2 ↑файл · F3 ↓файл · F4 строки/RAW · F5 NAND · F10 выход ',
+                       ' F2 ↑file · F3 ↓file · F4 line/RAW · F5 NAND · F10 quit ')
         if self.pager:
             hints += tr(' [ВКЛ]', ' [ON]')
         footer = hints[:cols].ljust(cols)
@@ -274,19 +306,25 @@ class LiveTerminal:
         with self.lock:
             self._write(b'\r\x1b[2K] ' + self.line.encode('ascii'))
 
+    def _request_action(self, action: str) -> None:
+        if self.uart:
+            with self.lock:
+                self._write(tr('\r\n[Отправка файла, приём и NAND работают по Ethernet (WebSocket); на UART доступен только терминал.]\r\n',
+                               '\r\n[File transfer and NAND work over Ethernet (WebSocket); on the UART this is a terminal only.]\r\n').encode())
+            return
+        self.action = action
+        self.stop.set()
+
     def _menu_choice(self, key: bytes) -> None:
         self.menu = False
         if key in (b'q', b'Q'):
             self.stop.set()
         elif key in (b's', b'S'):
-            self.action = 'upload'
-            self.stop.set()
+            self._request_action('upload')
         elif key in (b'd', b'D'):
-            self.action = 'download'
-            self.stop.set()
+            self._request_action('download')
         elif key in (b'n', b'N'):
-            self.action = 'nand'
-            self.stop.set()
+            self._request_action('nand')
         elif key in (b'l', b'L', b'r', b'R'):
             self.raw = not self.raw
             self.line = ''
@@ -317,19 +355,16 @@ class LiveTerminal:
         elif key == b'\x10':
             self._toggle_pager()
         elif key in (b'\x1bOQ', b'\x1b[12~'):
-            self.action = 'upload'
-            self.stop.set()
+            self._request_action('upload')
         elif key in (b'\x1bOR', b'\x1b[13~'):
-            self.action = 'download'
-            self.stop.set()
+            self._request_action('download')
         elif key in (b'\x1bOS', b'\x1b[14~'):
             self.raw = not self.raw
             self.line = ''
             with self.lock:
                 self._refresh()
         elif key == b'\x1b[15~':
-            self.action = 'nand'
-            self.stop.set()
+            self._request_action('nand')
         elif key == b'\x03':
             self._ctrl_c()
         elif self.paused and key in (b'\r', b'\n'):
@@ -385,7 +420,7 @@ class LiveTerminal:
         UrsusBoot stop WebFailsafe -- this connection and every later one dies
         until `ursusweb` is started again on the UART -- so it needs a second press."""
         now = time.monotonic()
-        if self._idle_at_prompt() and now - self.ctrlc_at > _CTRL_C_CONFIRM_S:
+        if not self.uart and self._idle_at_prompt() and now - self.ctrlc_at > _CTRL_C_CONFIRM_S:
             self.ctrlc_at = now
             with self.lock:
                 self._write(tr(
@@ -450,8 +485,12 @@ class LiveTerminal:
             with self.lock:
                 self._start()
                 self._write(hello + (b'\r\n' if hello and not hello.endswith(b'\n') else b''))
-                self._write(tr('WebSocket · F2 HTTP/XMODEM в RAM · F3 TFTP/диагностика · F4 строки/RAW · F5 NAND · F10 выход\r\n',
-                               'WebSocket · F2 HTTP/XMODEM to RAM · F3 TFTP/diagnostics · F4 line/RAW · F5 NAND · F10 quit\r\n').encode())
+                if self.uart:
+                    self._write(tr(f'UART {self.uart} · 115200 8N1 · F4 строки/RAW · F10 выход\r\n',
+                                   f'UART {self.uart} · 115200 8N1 · F4 line/RAW · F10 quit\r\n').encode())
+                else:
+                    self._write(tr('WebSocket · F2 HTTP/XMODEM в RAM · F3 TFTP/диагностика · F4 строки/RAW · F5 NAND · F10 выход\r\n',
+                                   'WebSocket · F2 HTTP/XMODEM to RAM · F3 TFTP/diagnostics · F4 line/RAW · F5 NAND · F10 quit\r\n').encode())
                 self._write(tr('Ожидаем вывод устройства. Enter покажет приглашение; команды записи не ограничены.\r\n',
                                'Waiting for device output. Enter requests a prompt; flash commands are unrestricted.\r\n').encode())
             reader = threading.Thread(target=self._reader, name='ursus-ws-console-rx', daemon=True)
@@ -500,6 +539,21 @@ class LiveTerminal:
             self._keys(data)
         elif self.keybuf and time.monotonic() - self.key_at > .05:
             self._keys(b'', flush=True)
+
+
+def live_console_uart(port: str | None = None) -> None:
+    """The live console terminal over a COM port -- a plain UART terminal, no network needed."""
+    from proven_backend import RecoverySerial
+    import ursusboot_update
+
+    port = port or ursusboot_update.choose_port()
+    sp = RecoverySerial(port)
+    link = SerialLink(sp)
+    terminal = LiveTerminal(link, port, uart=port)
+    try:
+        terminal.run(b'')
+    finally:
+        link.close()                # also closes the port: other tools can use it again
 
 
 def _connect_hint(exc: Exception) -> str:
