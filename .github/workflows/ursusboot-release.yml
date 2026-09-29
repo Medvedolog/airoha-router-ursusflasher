@@ -13,6 +13,7 @@ on:
       - feature/ursusboot-modular-airoha
       - claude/lucid-gauss-t0il1g
       - dev/ursusboot-t75-transfer
+      - dev/ursusboot-http-backup-client
     paths:
       - '.github/workflows/ursusboot-release.yml'
       - 'config/URSUSBOOT_PIN.json'

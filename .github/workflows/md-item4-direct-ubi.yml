@@ -21,6 +21,7 @@ on:
       - dev/ursusboot-ws-console-ui
       - dev/ursusboot-t75-transfer
       - dev/ursusboot-t75-nand-presets
+      - dev/ursusboot-http-backup-client
     paths:
       - '.github/workflows/md-item4-direct-ubi.yml'
       - 'START_ONECLICK.cmd'
