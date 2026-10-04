@@ -185,10 +185,24 @@ def ensure_stock_layout_image() -> Path:
     return require_bundle_role("OPENWRT_NONUBI_SYSUPGRADE")
 
 
+_LAST_URSUS_STATUS_ERROR = ""
+
+
 def ursus_status(host: str = RECOVERY_HOST) -> dict | None:
+    global _LAST_URSUS_STATUS_ERROR
     try:
-        return uw.status(host)
-    except Exception:
+        st = uw.status(host)
+        if _LAST_URSUS_STATUS_ERROR:
+            proven._write_session_only(
+                f"[RECOVERY_PROBE] host={host} status=RECOVERED previous_error={_LAST_URSUS_STATUS_ERROR}"
+            )
+        _LAST_URSUS_STATUS_ERROR = ""
+        return st
+    except Exception as exc:
+        error = f"{exc.__class__.__name__}: {exc}"
+        if error != _LAST_URSUS_STATUS_ERROR:
+            proven._write_session_only(f"[RECOVERY_PROBE] host={host} status=WAIT error={error}")
+            _LAST_URSUS_STATUS_ERROR = error
         return None
 
 
@@ -206,6 +220,10 @@ def wait_ursus(host: str = RECOVERY_HOST, seconds: int = 120) -> dict | None:
                    f"[WAIT] The router has not responded yet. I will wait about {remain} more seconds."))
             last_notice = bucket
         time.sleep(1)
+    proven._write_session_only(
+        f"[RECOVERY_PROBE_TIMEOUT] host={host} seconds={seconds} "
+        f"last_error={_LAST_URSUS_STATUS_ERROR or 'none'}"
+    )
     return None
 
 
@@ -240,34 +258,79 @@ def probe_http_identity(host: str) -> str:
     return "http"
 
 
-def wait_for_manual_recovery() -> dict:
+def wait_for_manual_recovery(*, family: str = "", manual_firmware: str = "") -> dict:
     stage(
-        "Вход в режим восстановления UrsusBoot",
-        "Entering UrsusBoot Recovery",
-        "Загрузчик уже записан. На этом шаге постоянную память не меняю.",
-        "The bootloader is already written. This step does not modify persistent storage.",
-        "Если автоматический вход после reboot не получился: выключите питание Nokia, включите снова, примерно через 1 секунду зажмите Reset и держите 5-10 секунд — до 2 коротких + 3 длинных красных миганий и постоянного красного света. Затем отпустите Reset. До подачи питания Reset не зажимайте: это Airoha BootROM.",
-        "If automatic Recovery after reboot was missed: power Nokia off, power it on again, wait about 1 second, then hold Reset for 5-10 seconds until 2 short + 3 long red flashes and steady red. Then release Reset. Do not hold Reset before applying power because that enters Airoha BootROM.",
+        "Повторный вход в режим восстановления UrsusBoot",
+        "Retrying UrsusBoot Recovery",
+        "UrsusBoot уже записан и сверен чтением обратно. OpenWrt/UBI ещё не записывались. Повторно прошивать загрузчик не нужно.",
+        "UrsusBoot has already been written and verified by readback. OpenWrt/UBI has not been written yet. Do not rewrite the bootloader.",
+        "Можно сделать ещё одну попытку состыковаться с уже установленным UrsusBoot без каких-либо новых записей в NAND.",
+        "You can make one more attempt to connect to the already installed UrsusBoot without any further NAND writes.",
     )
-    while True:
-        input(tr(
-            "Выполните вход в Recovery и нажмите Enter, когда красный индикатор горит постоянно. Программа проверит 192.168.1.1: ",
-            "Enter Recovery, then press Enter when the red status LED is solid. The program will check 192.168.1.1: ",
+    answer = input(tr(
+        "Попробовать ещё раз подключиться к UrsusBoot Recovery? [Y/n]: ",
+        "Try once more to connect to UrsusBoot Recovery? [Y/n]: ",
+    )).strip().lower()
+    if answer in ("n", "no", "н", "нет"):
+        proven._write_session_only(
+            f"[RECOVERY_HANDOFF_STOP] host={RECOVERY_HOST} bootloader_write=VERIFIED "
+            "runtime_confirmed=0 openwrt_write_started=0 operator_retry=NO"
+        )
+        raise RuntimeError(tr(
+            "UrsusBoot записан и сверен; продолжение в Recovery отменено оператором. OpenWrt/UBI не записывались.",
+            "UrsusBoot was written and verified; the operator declined the Recovery retry. OpenWrt/UBI was not written.",
         ))
-        st = wait_ursus(RECOVERY_HOST, 20)
-        if st:
-            say(tr("[ГОТОВО] Режим восстановления UrsusBoot найден.",
-                   "[READY] UrsusBoot Recovery is responding."))
-            return st
-        say(tr("[ВНИМАНИЕ] Recovery пока не отвечает. Запись загрузчика повторять не нужно.",
-               "[WARNING] Recovery is not responding yet. Do not rewrite the bootloader."))
-        again = input(tr(
-            "Повторите вход в Recovery и нажмите Enter для новой проверки; 0 — остановить ONE-CLICK без новых записей: ",
-            "Retry Recovery and press Enter to check again; 0 — stop ONE-CLICK without further writes: ",
-        )).strip()
-        if again == "0":
-            raise RuntimeError(tr("Остановлено пользователем после успешной записи загрузчика.",
-                                  "Stopped by the user after the bootloader write had already passed readback."))
+
+    say(tr(
+        "[СДЕЛАЙТЕ] Выключите Nokia. Включите питание и СРАЗУ ПОСЛЕ подачи питания зажмите Reset. "
+        "До подачи питания Reset не держите — это вход в Airoha BootROM. "
+        "Держите Reset до 2 коротких + 3 длинных красных миганий и постоянного красного света, затем отпустите.",
+        "[ACTION] Power the Nokia off. Turn it on and hold Reset IMMEDIATELY AFTER power is applied. "
+        "Do not hold Reset before power-on because that enters Airoha BootROM. "
+        "Keep Reset held through 2 short + 3 long red flashes and steady red, then release it.",
+    ))
+    input(tr(
+        "Когда красный индикатор загорится постоянно, нажмите Enter — UrsusFlasher проверит Recovery ещё раз: ",
+        "When the red status LED is solid, press Enter and UrsusFlasher will check Recovery once more: ",
+    ))
+    st = wait_ursus(RECOVERY_HOST, 45)
+    if st:
+        say(tr("[ГОТОВО] UrsusBoot Recovery найден со второй попытки.",
+               "[READY] UrsusBoot Recovery was found on the second attempt."))
+        proven._write_session_only(
+            f"[RECOVERY_HANDOFF] host={RECOVERY_HOST} attempts=2 result=CONNECTED"
+        )
+        return st
+
+    fam = family.upper() if family else "UNKNOWN"
+    firmware = manual_firmware or tr(
+        "подходящий OpenWrt UBI sysupgrade из папки fw",
+        "the matching OpenWrt UBI sysupgrade from the fw folder",
+    )
+    proven._write_session_only(
+        f"[RECOVERY_HANDOFF_FAILED] host={RECOVERY_HOST} attempts=2 "
+        f"bootloader_write=VERIFIED runtime_confirmed=0 openwrt_write_started=0 "
+        f"family={fam} manual_firmware={firmware} "
+        f"last_probe={_LAST_URSUS_STATUS_ERROR or 'none'}"
+    )
+    say(tr(
+        "[СТОП] UrsusBoot Recovery не найден после двух попыток. UrsusBoot уже записан и сверен; "
+        "OpenWrt/UBI не записывались, повторно прошивать UrsusBoot не нужно.",
+        "[STOP] UrsusBoot Recovery was not found after two attempts. UrsusBoot is already written and verified; "
+        "OpenWrt/UBI was not written, and UrsusBoot must not be reflashed.",
+    ))
+    say(tr(
+        "[ИНФО] Можно продолжить вручную через WebFailsafe: перезагрузите Nokia, сразу после подачи питания "
+        "удерживайте Reset до постоянного красного света, откройте http://192.168.1.1 и прошейте файл:",
+        "[INFO] You can continue manually through WebFailsafe: reboot the Nokia, hold Reset immediately after "
+        "power-on until the red LED is steady, open http://192.168.1.1 and flash this file:",
+    ))
+    print(f"  {firmware}", flush=True)
+    raise RuntimeError(tr(
+        f"Recovery handoff не удался. Ручной WebFailsafe остаётся доступным; используйте {firmware}.",
+        f"Recovery handoff failed. Manual WebFailsafe remains available; use {firmware}.",
+    ))
+
 
 def report_ursus_version(st: dict) -> dict:
     """Report runtime identity without ever turning a version mismatch into a writer."""

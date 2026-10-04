@@ -20,6 +20,7 @@ import device_state as ds
 import mf_persistent
 import proven_backend as pb
 import ursusboot_install as transport
+import ursusboot_release
 
 BOOT_AREA_SIZE = mf_persistent.BOOT_AREA_SIZE
 ERASE_SIZE = 0x20000
@@ -31,6 +32,45 @@ def tr(ru: str, en: str) -> str:
 
 def _stamp() -> str:
     return time.strftime("%Y%m%d-%H%M%S")
+
+
+def _target_release_identity() -> tuple[str, str]:
+    version = ursusboot_release.version("mf", "UNKNOWN")
+    commit = str((ursusboot_release.RELEASE or {}).get("commit") or "")
+    if version == "UNKNOWN" or not commit:
+        pin = _root() / "config" / "URSUSBOOT_PIN.json"
+        try:
+            data = json.loads(pin.read_text(encoding="utf-8"))
+            version = str(data.get("version") or version)
+            commit = str(data.get("commit") or commit)
+        except Exception:
+            pass
+    return version, commit or "UNKNOWN"
+
+
+def _report_verified_bootloader(result: dict) -> None:
+    version, commit = _target_release_identity()
+    status = str(result.get("status") or "UNKNOWN")
+    backend = str(result.get("backend") or ("mtd0" if result.get("route") == "stock" else "unknown"))
+    target_sha = str(result.get("target_sha256") or "UNKNOWN")
+    readback_sha = str(result.get("readback_sha256") or "UNKNOWN")
+    result["ursusboot_version"] = version
+    result["ursusboot_commit"] = commit
+    pb._write_session_only(
+        f"[BOOTLOADER] target=UrsusBoot {version} commit={commit} family=MF "
+        f"backend={backend} native_bl31=preserved candidate_sha256={target_sha} "
+        f"readback_sha256={readback_sha} status={status}"
+    )
+    if status == "WRITE_AND_READBACK_PASS":
+        ui.status("ГОТОВО", tr(
+            f"UrsusBoot {version} записан и полностью сверен чтением обратно.",
+            f"UrsusBoot {version} was written and fully verified by readback.",
+        ))
+    elif status == "ALREADY_EXACT":
+        ui.status("ГОТОВО", tr(
+            f"UrsusBoot {version} уже совпадает с целевым образом и сверен чтением.",
+            f"UrsusBoot {version} already matches the target image and was verified by readback.",
+        ))
 
 
 def _root() -> Path:
@@ -325,6 +365,9 @@ def install_from_openwrt(*, host: str, unattended: bool = False, recovery_after:
                 result["status"]="READBACK_MISMATCH"; _write_result(result_path,result); raise RuntimeError("MF boot-area readback mismatch; do not reboot")
             result["status"]="WRITE_AND_READBACK_PASS"; result["readback_sha256"]=expected; _write_result(result_path,result)
 
+    result["completed_at"] = _stamp()
+    _report_verified_bootloader(result)
+    _write_result(result_path, result)
     if recovery_after:
         ui.note(tr("После reboot сразу зажмите Reset до 2 коротких + 3 длинных красных миганий и постоянного красного света.", "After reboot immediately hold Reset through 2 short + 3 long red flashes and steady red."))
         ui.prompt(tr("Нажмите Enter для перезагрузки OpenWrt: ", "Press Enter to reboot OpenWrt: "))
@@ -376,7 +419,9 @@ def install_from_stock(*, host: str, unattended: bool = False, skip_full_backup:
             result["readback_sha256"] = rb; result["status"]="WRITE_AND_READBACK_PASS"
         else:
             result["status"]="ALREADY_EXACT"; result["readback_sha256"]=live_sha
-        result["completed_at"]=_stamp(); _write_result(result_path,result)
+        result["completed_at"]=_stamp()
+        _report_verified_bootloader(result)
+        _write_result(result_path,result)
         if recovery_after:
             ui.note(tr("После reboot сразу зажмите Reset до 2 коротких + 3 длинных красных миганий и постоянного красного света.", "After reboot immediately hold Reset through 2 short + 3 long red flashes and steady red."))
             ui.prompt(tr("Нажмите Enter для перезагрузки Nokia: ", "Press Enter to reboot Nokia: "))

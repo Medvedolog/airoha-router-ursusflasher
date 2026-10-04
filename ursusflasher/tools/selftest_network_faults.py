@@ -94,5 +94,37 @@ except pb.Error as e:
     print(f'telnet-eof             {"PASS" if took < 5 else "FAIL"} {took:.1f}s: {e}')
     took < 5 or FAILED.append('telnet-eof')
 payload.unlink()
+
+
+# Recovery handoff regression: a verified bootloader write must never be repeated
+# merely because the operator missed the first Recovery window.
+SRC = Path(__file__).resolve().parents[1] / 'src'
+one_src = (SRC / 'one_key.py').read_text(encoding='utf-8')
+multi_src = (SRC / 'one_key_multi.py').read_text(encoding='utf-8')
+mf_src = (SRC / 'mf_runtime_install.py').read_text(encoding='utf-8')
+for marker in (
+    '[RECOVERY_PROBE_TIMEOUT]',
+    'Попробовать ещё раз подключиться к UrsusBoot Recovery? [Y/n]',
+    '[RECOVERY_HANDOFF_FAILED]',
+    'bootloader_write=VERIFIED',
+    'openwrt_write_started=0',
+    'СРАЗУ ПОСЛЕ подачи питания',
+    'http://192.168.1.1',
+):
+    assert marker in one_src, marker
+assert 'примерно через 1 секунду зажмите Reset' not in one_src
+assert '_wait_recovery(family)' in multi_src
+assert 'manual_firmware=_manual_sysupgrade_relpath(family)' in multi_src
+assert 'OPENWRT_UBI_SYSUPGRADE' in multi_src
+for marker in (
+    '[BOOTLOADER]',
+    'native_bl31=preserved',
+    'WRITE_AND_READBACK_PASS',
+    'ursusboot_commit',
+    'UrsusBoot {version} записан и полностью сверен чтением обратно.',
+):
+    assert marker in mf_src, marker
+print('recovery-handoff-contract PASS')
+
 print('selftest_network_faults:', 'FAIL ' + ','.join(FAILED) if FAILED else 'PASS')
 sys.exit(1 if FAILED else 0)

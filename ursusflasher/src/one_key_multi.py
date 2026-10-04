@@ -131,11 +131,29 @@ def _probe(*, interactive_ssh: bool = False) -> ds.DeviceState:
     return state
 
 
-def _wait_recovery() -> dict:
+def _manual_sysupgrade_relpath(family: str) -> str:
+    profile = _manifest()["profiles"].get(family) or {}
+    hits = [x for x in profile.get("files", []) if x.get("role") == "OPENWRT_UBI_SYSUPGRADE"]
+    if len(hits) != 1:
+        return "fw/"
+    return str(hits[0].get("path") or "fw/")
+
+
+def _wait_recovery(family: str) -> dict:
     st = md_one_key.wait_ursus(HOST, 75)
     if st:
+        pb._write_session_only(
+            f"[RECOVERY_HANDOFF] host={HOST} attempts=1 result=CONNECTED family={family.upper()}"
+        )
         return st
-    return md_one_key.wait_for_manual_recovery()
+    pb._write_session_only(
+        f"[RECOVERY_HANDOFF] host={HOST} attempt=1 result=TIMEOUT family={family.upper()} "
+        "bootloader_write=VERIFIED openwrt_write_started=0"
+    )
+    return md_one_key.wait_for_manual_recovery(
+        family=family,
+        manual_firmware=_manual_sysupgrade_relpath(family),
+    )
 
 
 def _family_from_ursus(st: dict) -> str:
@@ -197,7 +215,7 @@ def _install_bootloader(state: ds.DeviceState, family: str, skip_full_backup: bo
         )
         if rc:
             raise RuntimeError(f"MF UrsusBoot install returned rc={rc}")
-    return _wait_recovery()
+    return _wait_recovery(family)
 
 
 def mf_runtime_mode(st: dict) -> str:
