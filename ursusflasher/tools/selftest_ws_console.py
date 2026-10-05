@@ -15,7 +15,8 @@ from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SRC = HERE.parent / "src"
+BASE = HERE.parent
+SRC = BASE / "data" if (BASE / "data").is_dir() else BASE / "src"
 sys.path.insert(0, str(SRC))
 
 import ursus_web_client as uw
