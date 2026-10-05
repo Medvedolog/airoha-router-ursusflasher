@@ -9,7 +9,7 @@
 **Airoha AN7581 / AN7583 · 256 MiB SPI-NAND · UrsusBoot · OpenWrt**
 
 [![UrsusFlasher latest prerelease](https://img.shields.io/github/v/release/Medvedolog/airoha-router-ursusflasher?include_prereleases&label=UrsusFlasher&color=6f4b2f)](https://github.com/Medvedolog/airoha-router-ursusflasher/releases)
-[![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--t71-b36b32)](https://github.com/Medvedolog/airoha-ursusboot/tree/96a2777e94c250a89d8b9f633e3cddd5b851c495)
+[![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--t80-b36b32)](https://github.com/Medvedolog/airoha-ursusboot/tree/52e8dd55c332d60d7516b060825203ae7da4a001)
 ![Target](https://img.shields.io/badge/Nokia-XG--040G--MD_%2F_XG--040G--MF-555)
 ![OpenWrt](https://img.shields.io/badge/OpenWrt-UnameOne_Edition-00a4ef)
 
@@ -45,7 +45,7 @@ That is a router with OpenWrt already installed: the layout is `OPENWRT_UBI`, wh
 
 ## Current development status
 
-The current published PUBLIC TEST is **UrsusFlasher 0.2.71** with pinned **UrsusBoot `0.1.0-alpha5-t71`** for MD and MF. UrsusBoot t68–t71: truthful WebFailsafe diagnostics after the UBI migration, repair of a missing/invalid UBI `fip` via **Restore UrsusBoot** (fip.old preserved), and a canonical MF `ursusboot-update.fip`. Hardware: the full ONE-KEY Vanilla route passed on XG-040G-MD with t71 (factory MAC kept); the fip repair paths are not hardware-tested yet. Since 0.2.67 the installer also strengthens the stock UID-0 bootstrap: install flows can enable FTP through the stock Web UI when a service account is required for root access, while read-only backup does not. The version badge above is populated from the latest GitHub prerelease so the title page does not need a manual version edit for every public test.
+The current development iteration is **UrsusFlasher 0.2.80-dev** with pinned **UrsusBoot `0.1.0-alpha5-t80`** for MD and MF. T80 retires stock-layout OpenWrt as an install/update target when persistent UrsusBoot is present. Existing `OPENWRT_STOCK_LAYOUT` remains detectable only as a recovery/migration source for backup, restore, diagnostics, and migration to OpenWrt UBI. ONE-KEY remains Nokia STOCK → persistent UrsusBoot → Recovery → OpenWrt UBI. **T80 is HW_PENDING**; CI/build success is not hardware validation.
 
 TEST59 and TEST60 are revoked for new hardware runs because their split build identity could make ONE-CLICK attempt an unnecessary second FIP write after a direct `mtd0` write/readback had already succeeded.
 
