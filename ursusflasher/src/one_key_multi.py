@@ -28,8 +28,8 @@ probe_http_identity = md_one_key.probe_http_identity
 HOST = os.environ.get("NOKIA_ROUTER_IP", "192.168.1.1").strip() or "192.168.1.1"
 import ursusboot_release  # noqa: E402
 
-MD_TARGET = ursusboot_release.version("md", "0.1.0-alpha5-UBIUX1-TEST61")
-MF_TARGET = ursusboot_release.version("mf", "0.1.0-TEST62")
+MD_TARGET = ursusboot_release.version("md", "0.1.0-alpha5-t80")
+MF_TARGET = ursusboot_release.version("mf", "0.1.0-alpha5-t80")
 
 
 def _root() -> Path:
