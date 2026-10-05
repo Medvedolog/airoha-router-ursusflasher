@@ -24,7 +24,8 @@ def test_expert_can_skip_full_backup():
 
     assert "def main(*, skip_full_backup: bool = False, router_host: str | None = None)" in one_key
     assert "md_one_key.install_ursus_from_stock(HOST, skip_full_backup=skip_full_backup)" in one_key_multi
-    assert "skip_full_backup=skip_full_backup" in install
+    assert "skip_full_backup: bool = False" in install
+    assert "if skip_full_backup:" in install
     assert "full_stock_backup_skipped" in install
     guidance = (SRC / "network_guidance.py").read_text(encoding="utf-8")
     assert "def choose_router_host(" in guidance
