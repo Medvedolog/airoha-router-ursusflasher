@@ -1,6 +1,6 @@
-# UrsusFlasher 0.2.71 / UrsusBoot t71 — operating instructions
+# UrsusFlasher 0.2.80-dev / UrsusBoot t80 — operating instructions
 
-This document covers Nokia XG-040G-MD / AN7581 and XG-040G-MF / AN7583. The current published PUBLIC TEST is UrsusFlasher 0.2.71 with pinned UrsusBoot t71. The newest prerelease is always listed first on the GitHub Releases page.
+This document covers Nokia XG-040G-MD / AN7581 and XG-040G-MF / AN7583. The current development iteration is UrsusFlasher 0.2.80-dev with pinned UrsusBoot t80. T80 is HW_PENDING: build and CI success are not hardware validation.
 
 UrsusFlasher requires **Python 3.12+** and only the standard library; no `pip` packages are required.
 
@@ -22,14 +22,14 @@ Use **LAN2 or LAN3** for flashing.
 
 ## ONE-CLICK
 
-**ONE-CLICK always installs OpenWrt with the UBI layout.** The kit carries two images — one for UBI and one for the factory layout — but every ONE-CLICK path uses the UBI one and offers no choice.
+**ONE-CLICK always installs OpenWrt with the UBI layout.** In T80 this is also an enforced policy for Nokia MD/MF: **stock-layout OpenWrt is retired as a normal write target**.
 
-If you need the **factory layout**, do it manually in one of two ways:
+- EXPERT and UrsusBoot Recovery must not create a new `OPENWRT_STOCK_LAYOUT`;
+- a non-UBI/factory sysupgrade may still be classified for diagnostics, but it cannot become a write target;
+- an existing `OPENWRT_STOCK_LAYOUT` remains supported as a recovery/migration source for backup, diagnostics, stock restore, or migration to `OPENWRT_UBI`;
+- `OPENWRT_UBI -> OPENWRT_UBI` remains the normal update path.
 
-- **EXPERT item 3, "Записать пользовательскую прошивку OpenWrt"** — point it at the bundled `fw/openwrt-airoha-an7581-nokia_xg-040g-md-squashfs-sysupgrade.bin`. The item accepts any `.bin`/`.itb`, the image class is detected automatically, and the write takes the factory-layout path.
-- **The UrsusBoot web UI** — upload the same file in Recovery and press "Install into factory layout".
-
-The transition is one-way: the factory layout can be installed from Nokia stock, but not from an already installed OpenWrt UBI — such an image is refused before any write.
+The reason is that stock-layout OpenWrt's raw `u-boot-env` shares eraseblock `0x60000–0x7ffff` with the tail of the persistent UrsusBoot FIP. A normal `sysupgrade` can invoke `fw_setenv` and damage that bootloader data.
 
 Run `START_ONECLICK.cmd` on Windows or `./START_ONECLICK.sh` on Linux/macOS.
 
