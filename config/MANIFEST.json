@@ -1,8 +1,8 @@
 {
   "schema": 2,
   "project": "UrsusFlasher",
-  "version": "0.2.61-md-alpha5-test61-safetyreg1-identity1-noautofip1-ubiattach2-uploadretry1-sessionrecovery1-postsysreset1-diagstate1",
-  "build_date": "2026-09-08",
+  "version": "0.2.80-dev",
+  "build_date": "2026-10-05",
   "target": {
     "model": "Nokia XG-040G-MD",
     "soc": "Airoha AN7581",
@@ -15,7 +15,7 @@
   },
   "orchestration": {
     "host_ui": "data/expert.py",
-    "policy": "STATEUI8 DIAGAUTH1/BACKUPRAW1 + ROUTE1 + alpha5 UBIUX1/ROOTFSENV1. Environment routing requires positive proof; Telnet presence never proves Nokia STOCK. Action-local destructive preflight remains fail-closed.",
+    "policy": "STATEUI8 DIAGAUTH1/BACKUPRAW1 + ROUTE1 + T80 stock-layout retirement. Environment routing requires positive proof; OPENWRT_STOCK_LAYOUT is recovery/migration source only and never a normal write target.",
     "ursusboot_inputs": [
       "webfailsafe",
       "tftp",
@@ -41,14 +41,14 @@
     "upload_retry_policy": "Interrupted FIP/FIT upload remains RAM-only/NOT_STARTED before operation POST; wait through reconnect grace, then require an operator y/N before starting a new complete transfer session."
   },
   "ursusboot": {
-    "version": "0.1.0-alpha5-UBIUX1-TEST61",
-    "fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip",
+    "version": "0.1.0-alpha5-t80",
+    "fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-t80-update.fip",
     "fip_size": 503808,
-    "fip_sha256": "3c922e4256b6047376a7d445006e6cb2a4485bb412747033a77defd15e42fcea",
-    "u_boot_size": 860808,
-    "u_boot_sha256": "43296d98686ada9e4e13c5a5a49430372abf45e9bd0fc8eae837920e8ba5224d",
-    "lzma_size": 291160,
-    "lzma_sha256": "bec245ab0b10e3fffcc2f0a482c2c3b97b03577b4a03c436857243cd68ff9d29",
+    "fip_sha256": "e751cb44569b07b77335bb49676fdfe219b88437ad9e299e381ab2ed1c44692d",
+    "u_boot_size": 803600,
+    "u_boot_sha256": "63aa5401f1fdd0dbd1e3d5506ce44ca9c5dedc671b4f1cb0892d5b3fa7f1acad",
+    "lzma_size": 271701,
+    "lzma_sha256": "b50106bc4945f60212e3552c03da0bcd281338273a644ae9b835ef0787088786",
     "nt_fw_slot": 327680,
     "nt_fw_slack": 36520,
     "physical_fip_end": 505856,
@@ -77,9 +77,9 @@
       "OPENWRT_FACTORY_ROOTFS"
     ],
     "layout_policy": {
-      "STOCK->OPENWRT_STOCK_LAYOUT": "ALLOW",
+      "STOCK->OPENWRT_STOCK_LAYOUT": "DENY_RETIRED_T80",
       "STOCK->OPENWRT_UBI": "ALLOW",
-      "OPENWRT_STOCK_LAYOUT->OPENWRT_STOCK_LAYOUT": "ALLOW",
+      "OPENWRT_STOCK_LAYOUT->OPENWRT_STOCK_LAYOUT": "DENY_RETIRED_T80",
       "OPENWRT_STOCK_LAYOUT->OPENWRT_UBI": "ALLOW_RECOVERY_ONLY",
       "OPENWRT_UBI->OPENWRT_UBI": "ALLOW",
       "OPENWRT_UBI->OPENWRT_STOCK_LAYOUT": "DENY",
@@ -89,7 +89,7 @@
     "web_led_reference": "removed; LED patterns documented in doc/INSTRUCTIONS_RU.md",
     "disaster_tftp": "SPEC_ONLY",
     "stock_boot_env_offset": 507904,
-    "release_revision": "ALPHA5_TEST61_SAFETYREG1_IDENTITY1_NOAUTOFIP1_UBIATTACH2_UPLOADRETRY1_SESSIONRECOVERY1_POSTSYSRESET1_DIAGSTATE1",
+    "release_revision": "T80_STOCK_LAYOUT_TARGET_RETIRED_MD_MF",
     "ram_installer_raw_sha256": "b2a8c49002c33a44774da4b14903773ace030e10a04a48d5531708691ba9cc05",
     "ram_installer_lzma_sha256": "e819920374fcb049bd40033fbe24385cf0871c9d2e426d323c4e0f1460a1776f",
     "ram_installer_lzma_size": 321399,
@@ -219,14 +219,14 @@
       "rollback": "active fip only -> hardware-proven HWFIX2 CRC32 1917ed23",
       "build_info": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha4-UIFIX1-BUILD_INFO.txt"
     },
-    "production_target_version": "0.1.0-alpha5-UBIUX1-TEST61",
-    "production_target_fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip",
-    "production_target_fip_sha256": "3c922e4256b6047376a7d445006e6cb2a4485bb412747033a77defd15e42fcea",
+    "production_target_version": "0.1.0-alpha5-t80",
+    "production_target_fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-t80-update.fip",
+    "production_target_fip_sha256": "e751cb44569b07b77335bb49676fdfe219b88437ad9e299e381ab2ed1c44692d",
     "stock_bootstrap_version": "REMOVED_FROM_ONECLICK",
-    "stock_bootstrap_policy": "ONE-CLICK writes 0.1.0-alpha5-UBIUX1-TEST61 directly into the content-proven stock-style 512-KiB mtd0 while preserving 0x0..0x7ff BootROM prefix and 0x7c000..0x7ffff tcboot environment, then performs a full readback. After backup/preflight it always requires one ordinary y/N before this mtd0 write. No subsequent automatic UrsusBoot self-update is permitted.",
-    "direct_stock_target_version": "0.1.0-alpha5-UBIUX1-TEST61",
-    "direct_stock_target_fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip",
-    "direct_stock_target_fip_sha256": "3c922e4256b6047376a7d445006e6cb2a4485bb412747033a77defd15e42fcea",
+    "stock_bootstrap_policy": "ONE-CLICK writes pinned UrsusBoot T80 directly into the content-proven stock-style 512-KiB mtd0 while preserving the BootROM prefix and tcboot environment, then enters Recovery and migrates STOCK to OpenWrt UBI. Stock-layout OpenWrt is never created.",
+    "direct_stock_target_version": "0.1.0-alpha5-t80",
+    "direct_stock_target_fip": "data/payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-t80-update.fip",
+    "direct_stock_target_fip_sha256": "e751cb44569b07b77335bb49676fdfe219b88437ad9e299e381ab2ed1c44692d",
     "direct_stock_lineage_gate": "All FIP entries except NT_FW/BL33 and the checksum record must be byte-for-byte identical to exact alpha3 FIP; Trusted Boot Firmware entry SHA256 must remain 07c9e1542a3de845055faa2244bbd07adc8c5a136811a61a0d678ec8fff5ee5e.",
     "direct_stock_write_scope": "mtd0 only: preserve BootROM prefix 0x0..0x7ff and stock tcboot env 0x7c000..0x7ffff; replace the FIP window with 0.1.0-alpha5-UBIUX1-TEST61; full 512-KiB SHA256 readback; system partitions untouched; one y/N immediately before write.",
     "directstock1": "0.2.41: first direct-stock HWFIX3 hardware A/B candidate. Removes alpha3 as an ordinary ONE-CLICK intermediate. Emergency alpha3 payloads and BootROM path remain unchanged.",
@@ -702,7 +702,8 @@
     "test58": "0.2.58 public test: DIAGCAP2 success/failure bundles, REBOOTWAIT1 single-owner 90 s Recovery wait, WAITUI1 non-negative countdown, BUILDDATE1 fixed 2026-09-08 release epoch. Inherits TEST57 reset/upload/Web transaction fixes.",
     "test59": "0.2.59 public test: restores visible keep/reset settings policy control after prior completed/failed operations; fixes Web reboot after ordinary UBI update; enforces ASCII/English machine UART logs; permits direct Recovery-safe replacement when a smaller FIT improves or preserves existing UBI headroom.",
     "test60": "0.2.60 public test: CONFIGTRIM1 disables unused U-Boot UBIFS filesystem commands and extlinux/PXE parser/command path; UBI/TFTP/WGET and ursusdispatch are retained.",
-    "test61": "0.2.61 TEST61 SAFETYREG1 fixes the TEST58-60 split identity class, removes automatic installed-UrsusBoot self-update from ONE-CLICK, reuses the already-correct UBI attachment without detach, makes interrupted uploads operator-restartable while preserving NOT_STARTED before the operation endpoint, keeps the UI reusable after non-writing failures, and restores one y/N before direct mtd0 write. TEST59/60 are revoked for hardware use."
+    "test61": "0.2.61 TEST61 SAFETYREG1 fixes the TEST58-60 split identity class, removes automatic installed-UrsusBoot self-update from ONE-CLICK, reuses the already-correct UBI attachment without detach, makes interrupted uploads operator-restartable while preserving NOT_STARTED before the operation endpoint, keeps the UI reusable after non-writing failures, and restores one y/N before direct mtd0 write. TEST59/60 are revoked for hardware use.",
+    "t80": "0.2.80-dev pins UrsusBoot 0.1.0-alpha5-t80 @52e8dd55c332; retires stock-layout OpenWrt as a target on MD/MF; existing OPENWRT_STOCK_LAYOUT remains recognized only for backup/restore/diagnostics and Recovery migration to OPENWRT_UBI."
   },
   "ui": {
     "operator_text_refactor": "0.2.28",
