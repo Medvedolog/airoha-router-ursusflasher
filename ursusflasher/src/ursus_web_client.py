@@ -770,12 +770,10 @@ def update_firmware(host: str, image: Path, *, confirm=True, preloader: Path | N
             else:
                 raise UrsusWebError(f'unsupported current layout for UBI sysupgrade: {layout}')
         elif image_type == 'OPENWRT_NONUBI_SYSUPGRADE':
-            if layout not in ('STOCK', 'OPENWRT_STOCK_LAYOUT'):
-                raise UrsusWebError(f'one-way policy: non-UBI sysupgrade is forbidden on {layout}')
-            if not st.get('stock_layout_install_available'):
-                raise UrsusWebError('validated non-UBI sysupgrade is not available for current layout')
-            endpoint, phrase, header = '/api/install-openwrt-stock-layout', 'FLASH', 'INSTALL-OPENWRT-STOCK-LAYOUT'
-            print(terms.tr('[ИНФО] Выбрана установка или обновление OpenWrt в заводской разметке.', '[INFO] OpenWrt install/update in factory layout selected.'))
+            raise UrsusWebError(
+                'stock-layout OpenWrt target retired on Nokia MD/MF; '
+                'non-UBI image is diagnostic-only, use OPENWRT_UBI migration/update'
+            )
         else:
             raise UrsusWebError(f'unsupported Main-channel image class: {image_type}')
 
