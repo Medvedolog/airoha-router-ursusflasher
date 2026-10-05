@@ -416,18 +416,29 @@ def test_recovery_loader_item4_route():
     expert=(SRC/"expert.py").read_text(encoding="utf-8")
     multi=(SRC/"expert_multi.py").read_text(encoding="utf-8")
     route=(SRC/"ursusboot_pregnant.py").read_text(encoding="utf-8")
-    web=(SRC/"ursus_web_client.py").read_text(encoding="utf-8")
     for shipped in (expert, multi):
         assert "ursusboot_pregnant.run_expert(host=host, profile=profile)" in shipped
         assert "stock_ab_pregnant.run_expert(host=host, profile=profile)" not in shipped
+
+    # Current item 4 is the native UrsusBoot STOCK->UBI path, not the old
+    # pregnant-initramfs/bootm path.  A full stock backup remains mandatory:
+    # skip_full_backup may be true only after an existing complete backup has
+    # passed the stock restore validator.
     assert 'route="stock"' in route
-    assert 'skip_full_backup=False' in route
-    assert 'uw.upload(host, image, "initramfs"' in route
-    assert "uw.boot_once(host)" in route
-    assert "pregnant._monitor(host, policy, meta)" in route
+    assert 'reuse_backup, _backup_path = _select_backup_policy("md")' in route
+    assert 'reuse_backup, _backup_path = _select_backup_policy("mf")' in route
+    assert "validation = pb.verify_stock_restore_backup(path)" in route
+    assert "skip_full_backup=reuse_backup" in route
+    assert "uw.update_firmware(" in route
+    assert "preloader=preloader" in route
+    assert "keep_settings=False" in route
+    assert "return _finish_on_vanilla(host, " in route
+    assert "uw.replace_with_vanilla(host, fip, confirm=False)" in route
+    assert 'uw.upload(host, image, "initramfs"' not in route
+    assert "uw.boot_once(host)" not in route
+    assert "pregnant._monitor(host, policy, meta)" not in route
     assert "stock_ab_transition" not in route
     assert "nsb_slave" not in route
-    assert "'POST', '/api/expert/boot-once'" in web
 
 
 def test_autonomous_fit_contract():
