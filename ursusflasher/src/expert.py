@@ -89,8 +89,8 @@ def _custom_openwrt_menu_detail(state: ds.DeviceState, action: ds.ActionApplicab
         )
     if action.resolved_backend == "URSUSBOOT_RECOVERY_CUSTOM_IMAGE":
         return tr(
-            "UrsusBoot Recovery: HTTP → проверка образа → запись OpenWrt",
-            "UrsusBoot Recovery: HTTP → image validation → OpenWrt flash",
+            "UrsusBoot Recovery: HTTP → проверка образа → только OpenWrt UBI",
+            "UrsusBoot Recovery: HTTP → image validation → OpenWrt UBI only",
         )
     return tr(
         "Доступно из установленной OpenWrt или UrsusBoot Recovery",
