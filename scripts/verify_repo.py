@@ -113,6 +113,9 @@ with tempfile.TemporaryDirectory() as td:
     archived_selftests = {
         'selftest_alpha5_ubiux1.py',
         'selftest_directstock1.py',
+        'selftest_fudan1_ssh.py',
+        'selftest_mainline.py',
+        'selftest_ursusboot_only.py',
         'selftest_test57.py',
         'selftest_test58.py',
         'selftest_test59.py',
