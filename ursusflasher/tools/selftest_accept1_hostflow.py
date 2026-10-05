@@ -6,15 +6,24 @@ D=Path(__file__).resolve().parents[1]
 os.environ.setdefault("NOKIA_LANG","ru")
 sys.path.insert(0,str(D/"data"))
 import one_key as ok
+import one_key_multi as multi
 import ursusboot_update as u
 import expert
 
-assert ok.TARGET_URSUS == '0.1.0-alpha5-UBIUX1-TEST61'
-assert u.PRODUCTION_PAYLOAD.name == "ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip"
-assert hashlib.sha256(u.PRODUCTION_PAYLOAD.read_bytes()).hexdigest() == '3c922e4256b6047376a7d445006e6cb2a4485bb412747033a77defd15e42fcea'
+assert ok.TARGET_URSUS == '0.1.0-alpha5-t80'
+assert multi.MD_TARGET == '0.1.0-alpha5-t80'
+assert multi.MF_TARGET == '0.1.0-alpha5-t80'
+assert u.PRODUCTION_VERSION == '0.1.0-alpha5-t80'
+assert u.PRODUCTION_PAYLOAD.name == "ursusboot-md-0.1.0-alpha5-t80-update.fip"
+assert not u.PRODUCTION_PAYLOAD.exists()  # injected only from exact pinned T80 artifact in public-kit build
 assert u.EMERGENCY_PAYLOAD.name == "ursusboot-md-0.1.0-alpha3-update.fip"
 assert hashlib.sha256(u.EMERGENCY_PAYLOAD.read_bytes()).hexdigest() == "597071e178470bfda23aab9738ad7ddb0b25e9b21ef336fd3eceb39c39f983ce"
-u.require_fip_payload()
+try:
+    u.require_fip_payload()
+except Exception:
+    pass
+else:
+    raise AssertionError('un-injected source/QA export must not provide a fake T80 production payload')
 
 one_src=(D/"data/one_key.py").read_text(encoding="utf-8")
 assert not hasattr(ok, "ensure_target_ursus")
@@ -39,8 +48,8 @@ assert not (D/"START.cmd").exists() and not (D/"START.sh").exists()
 assert "target_already_exact" in (D/"data/ursusboot_install.py").read_text(encoding="utf-8")
 assert {p.name for p in D.glob("START*.cmd")} == {"START_ONECLICK.cmd","START_EXPERT.cmd"}
 launcher=(D/"START_ONECLICK.cmd").read_text(encoding="utf-8")
-assert "pause >nul" in launcher and "data\\one_key.py" in launcher
+assert "pause >nul" in launcher and "data\\one_key_multi.py" in launcher
 
-print("TEST61_ACCEPT1_HOSTFLOW_QA=PASS")
+print("T80_ACCEPT1_HOSTFLOW_QA=PASS")
 print("INSTALLED_URSUSBOOT_AUTOUPDATE=FORBIDDEN")
 print("EXPLICIT_UPDATE_AND_EMERGENCY_SPLIT=PASS")
