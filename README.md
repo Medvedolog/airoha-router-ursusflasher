@@ -9,7 +9,7 @@
 **Airoha AN7581 / AN7583 · SPI-NAND 256 МиБ · UrsusBoot · OpenWrt**
 
 [![UrsusFlasher latest prerelease](https://img.shields.io/github/v/release/Medvedolog/airoha-router-ursusflasher?include_prereleases&label=UrsusFlasher&color=6f4b2f)](https://github.com/Medvedolog/airoha-router-ursusflasher/releases)
-[![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--t71-b36b32)](https://github.com/Medvedolog/airoha-ursusboot/tree/96a2777e94c250a89d8b9f633e3cddd5b851c495)
+[![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--t80-b36b32)](https://github.com/Medvedolog/airoha-ursusboot/tree/52e8dd55c332d60d7516b060825203ae7da4a001)
 ![Target](https://img.shields.io/badge/Nokia-XG--040G--MD_%2F_XG--040G--MF-555)
 ![OpenWrt](https://img.shields.io/badge/OpenWrt-UnameOne_Edition-00a4ef)
 
@@ -43,10 +43,10 @@
 
 ## Текущий статус разработки
 
-Текущий опубликованный PUBLIC TEST — **UrsusFlasher 0.2.71** с закреплённым **UrsusBoot `0.1.0-alpha5-t71`** для MD и MF. UrsusBoot t68–t71: честная диагностика WebFailsafe после перехода на UBI, ремонт отсутствующего/битого UBI `fip` кнопкой «Восстановить UrsusBoot» (с сохранением `fip.old`), канонический `ursusboot-update.fip` для MF. С 0.2.67 также укреплён stock UID 0 bootstrap: установочные пути сами включают FTP через штатный Web UI, если без сервисного аккаунта root недоступен; read-only backup этого не делает. Значок версии вверху берётся автоматически из последнего GitHub prerelease, поэтому титульная страница не должна отставать от опубликованной сборки.
+Текущая рабочая итерация — **UrsusFlasher 0.2.80-dev** с закреплённым **UrsusBoot `0.1.0-alpha5-t80`** для MD и MF. В T80 закрыт конфликт persistent UrsusBoot со stock-layout OpenWrt: новый stock-layout больше не является целью установки/обновления; существующий `OPENWRT_STOCK_LAYOUT` остаётся распознаваемым только как источник для backup/restore/diagnostics и миграции в OpenWrt UBI. ONE-KEY по-прежнему ведёт Nokia STOCK → persistent UrsusBoot → Recovery → OpenWrt UBI.
 
 > [!IMPORTANT]
-> **0.2.71 / t71 — аппаратная приёмка:** на XG-040G-MD пройден полный ONE-KEY Vanilla (Nokia STOCK → UrsusBoot → OpenWrt UBI → Vanilla U-Boot, заводской MAC сохранён) и ONE-KEY с UrsusBoot; на XG-040G-MF тот же маршрут пройден на t66. Ремонт UBI `fip` (t69–t71) на железе ещё не проверялся. Для аппаратных прогонов MD/MF используйте [TEST64 checklist](docs/TEST64_TEST_RU.md) и прикладывайте полный журнал при любой ошибке.
+> **0.2.80-dev / T80 — HW_PENDING:** сборка и CI подтверждают контракт, но это не аппаратная валидация T80. Исторические аппаратные прогоны предыдущих версий остаются историческими доказательствами и не переносятся автоматически на T80.
 
 ---
 
