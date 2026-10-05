@@ -88,7 +88,7 @@ m = json.loads((ROOT / 'config/MANIFEST.json').read_text(encoding='utf-8'))
 assert m['version'] == VERSION
 pin = json.loads((ROOT / 'config/URSUSBOOT_PIN.json').read_text(encoding='utf-8'))
 assert pin['version'] == '0.1.0-alpha5-t80'
-assert pin['commit'] == '52e8dd55c332d60d7516b060825203ae7da4a001'
+assert pin['commit'] == 'e27da4f7dac5d93af26b44ae4b0d60acea2aae74'
 
 # Runtime syntax and current package self-tests. Compile in-process so QA does not
 # spawn one interpreter per source file on slow/shared filesystems.
