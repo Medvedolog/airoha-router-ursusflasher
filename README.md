@@ -9,7 +9,7 @@
 **Airoha AN7581 / AN7583 · SPI-NAND 256 МиБ · UrsusBoot · OpenWrt**
 
 [![UrsusFlasher latest prerelease](https://img.shields.io/github/v/release/Medvedolog/airoha-router-ursusflasher?include_prereleases&label=UrsusFlasher&color=6f4b2f)](https://github.com/Medvedolog/airoha-router-ursusflasher/releases)
-[![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--t80-b36b32)](https://github.com/Medvedolog/airoha-ursusboot/tree/52e8dd55c332d60d7516b060825203ae7da4a001)
+[![UrsusBoot](https://img.shields.io/badge/UrsusBoot-0.1.0--alpha5--t80-b36b32)](https://github.com/Medvedolog/airoha-ursusboot/tree/e27da4f7dac5d93af26b44ae4b0d60acea2aae74)
 ![Target](https://img.shields.io/badge/Nokia-XG--040G--MD_%2F_XG--040G--MF-555)
 ![OpenWrt](https://img.shields.io/badge/OpenWrt-UnameOne_Edition-00a4ef)
 
