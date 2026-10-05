@@ -118,11 +118,15 @@ with tempfile.TemporaryDirectory() as td:
         'selftest_test60.py',
         'selftest_test61_safetyreg.py',
     }
-    for test in sorted(qa_tools.glob('selftest_*.py')):
-        if test.name in archived_selftests:
-            print(f'ARCHIVED_SELFTEST_NOT_CURRENT={test.name}')
+    for source_test in sorted((ROOT / 'ursusflasher/tools').glob('selftest_*.py')):
+        if source_test.name in archived_selftests:
+            print(f'ARCHIVED_SELFTEST_NOT_CURRENT={source_test.name}')
             continue
-        subprocess.run([sys.executable, str(test)], cwd=qa, check=True, env=env)
+        test_source = source_test.read_text(encoding='utf-8')
+        if 'Path(__file__).resolve().parents[2]' in test_source and 'ursusflasher' in test_source and 'src' in test_source:
+            subprocess.run([sys.executable, str(source_test)], cwd=ROOT, check=True, env=env)
+        else:
+            subprocess.run([sys.executable, str(qa_tools / source_test.name)], cwd=qa, check=True, env=env)
 
     # Separately verify the real operator export with no QA-only payload overlay.
     rel = export_tree(td / 'release')
