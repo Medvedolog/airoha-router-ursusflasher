@@ -8,8 +8,7 @@ import struct
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-SRC = HERE.parent / "src"
+SRC = Path(__file__).resolve().parents[1] / "src"
 sys.path.insert(0, str(SRC))
 
 import mf_persistent as mf
