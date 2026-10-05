@@ -30,13 +30,13 @@ for rel, expected in checks.items():
 # HWFIX3/UIFIX1 files merely because they once lived in this repository.
 pin = json.loads((ROOT / "config/URSUSBOOT_PIN.json").read_text(encoding="utf-8"))
 assert pin["repo"] == "Medvedolog/airoha-ursusboot"
-assert pin["commit"] == "52e8dd55c332d60d7516b060825203ae7da4a001"
+assert pin["commit"] == "e27da4f7dac5d93af26b44ae4b0d60acea2aae74"
 assert pin["version"] == "0.1.0-alpha5-t80"
-assert pin["build_run"] == 37235556002
+assert pin["build_run"] == 37288451919
 assert pin["artifacts"]["md"]["update_fip_size"] == 503808
-assert pin["artifacts"]["md"]["update_fip_sha256"] == "e751cb44569b07b77335bb49676fdfe219b88437ad9e299e381ab2ed1c44692d"
-assert pin["artifacts"]["mf"]["update_fip_size"] == 327025
-assert pin["artifacts"]["mf"]["update_fip_sha256"] == "561dfcf086043e8d0f1d9a03eb5818c179dc5a4e53a2ff25fc31574e3c16fb6c"
+assert pin["artifacts"]["md"]["update_fip_sha256"] == "90716644a2d856542cdab8cf5694f43031c55d8424247fc87cdde130412fdafb"
+assert pin["artifacts"]["mf"]["update_fip_size"] == 327027
+assert pin["artifacts"]["mf"]["update_fip_sha256"] == "a70d318fece02d7bf24f46dd589dc33ec09c048898a442e5a9686e26f07f432f"
 
 legacy = ROOT / "payloads/md/ursusboot/ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip"
 assert f"{zlib.crc32(legacy.read_bytes()) & 0xffffffff:08x}" == "c1edda32"
