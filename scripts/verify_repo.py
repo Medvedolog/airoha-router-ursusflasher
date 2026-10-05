@@ -69,9 +69,11 @@ for p in parts:
             h.update(chunk)
 assert h.hexdigest() == '6ec133d3810812111d719b53c37dcd83501fe534a8d5f149d5f91e0a657991ac'
 
-# Verify repository SHA256 closure when present.
+# A root SHA256SUMS is a frozen release snapshot.  Development branches are
+# expected to change source/workflow files; their exported release tree gets a
+# fresh SHA256SUMS and is verified by verify_release/verify_public_release.
 repo_manifest = ROOT / 'SHA256SUMS'
-if repo_manifest.is_file():
+if repo_manifest.is_file() and not VERSION.endswith('-dev'):
     for row in repo_manifest.read_text(encoding='utf-8').splitlines():
         if not row.strip():
             continue
