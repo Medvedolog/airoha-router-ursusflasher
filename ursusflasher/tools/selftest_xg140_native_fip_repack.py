@@ -5,8 +5,7 @@ import importlib.util
 import struct
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-REPACK = ROOT / "ursusflasher" / "tools" / "repack_xg140_native_fip.py"
+REPACK = Path(__file__).resolve().with_name("repack_xg140_native_fip.py")
 spec = importlib.util.spec_from_file_location("xg140_repack", REPACK)
 assert spec and spec.loader
 mod = importlib.util.module_from_spec(spec)
