@@ -1,22 +1,22 @@
 {
   "repo": "Medvedolog/airoha-ursusboot",
-  "commit": "52e8dd55c332d60d7516b060825203ae7da4a001",
+  "commit": "e27da4f7dac5d93af26b44ae4b0d60acea2aae74",
   "version": "0.1.0-alpha5-t80",
-  "build_run": 37235556002,
+  "build_run": 37288451919,
   "artifacts": {
     "md": {
-      "id": 11316194052,
-      "name": "ursusboot-xg040-md-52e8dd55c332d60d7516b060825203ae7da4a001",
-      "archive_sha256": "1a9471630cb5efb1ae6368d55923461635083a966d17b654e2fa481bed6528ee",
+      "id": 11336812011,
+      "name": "ursusboot-xg040-md-e27da4f7dac5d93af26b44ae4b0d60acea2aae74",
+      "archive_sha256": "0902df1d9e5fe08dc6effb971156d2b096a1e46f395bd672b1c99767c6ecbb08",
       "update_fip_size": 503808,
-      "update_fip_sha256": "e751cb44569b07b77335bb49676fdfe219b88437ad9e299e381ab2ed1c44692d"
+      "update_fip_sha256": "90716644a2d856542cdab8cf5694f43031c55d8424247fc87cdde130412fdafb"
     },
     "mf": {
-      "id": 11315989446,
-      "name": "ursusboot-xg040-mf-52e8dd55c332d60d7516b060825203ae7da4a001",
-      "archive_sha256": "b55d4362cc6b2609a0dc5e9d60b02ab70b5371b7fd304961ca00b7f08c95f9a2",
-      "update_fip_size": 327025,
-      "update_fip_sha256": "561dfcf086043e8d0f1d9a03eb5818c179dc5a4e53a2ff25fc31574e3c16fb6c"
+      "id": 11336517086,
+      "name": "ursusboot-xg040-mf-e27da4f7dac5d93af26b44ae4b0d60acea2aae74",
+      "archive_sha256": "d571ef48631a74d679b73ee67d6aedb2aec1fce29704b532f41e554dccde98a9",
+      "update_fip_size": 327027,
+      "update_fip_sha256": "a70d318fece02d7bf24f46dd589dc33ec09c048898a442e5a9686e26f07f432f"
     }
   }
 }
