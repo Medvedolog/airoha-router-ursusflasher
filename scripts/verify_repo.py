@@ -112,6 +112,7 @@ with tempfile.TemporaryDirectory() as td:
     shutil.copytree(ROOT / 'payloads', qa / 'data' / 'payloads', dirs_exist_ok=True)
     archived_selftests = {
         'selftest_alpha5_ubiux1.py',
+        'selftest_directstock1.py',
         'selftest_test57.py',
         'selftest_test58.py',
         'selftest_test59.py',
