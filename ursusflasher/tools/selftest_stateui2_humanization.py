@@ -30,7 +30,7 @@ assert 'Заводская прошивка Nokia' in lines
 assert 'root есть' in lines
 assert 'Проверка состояния:' in lines
 for code, expected in {
-    'STOCK_MODEL_SOC_MISMATCH':'Заводской веб-интерфейс отвечает, но модель и SoC не совпали с XG-040G-MD / AN7581',
+    'STOCK_MODEL_SOC_MISMATCH':'Заводской веб-интерфейс отвечает, но пара модель/SoC не совпала с поддерживаемым профилем MD/AN7581 или MF/AN7583',
     'OPENWRT_BOARD_LAYOUT_UNCONFIRMED':'OpenWrt отвечает по SSH, но модель платы и разметка не подтверждены',
     'OPENWRT_ROOT_SSH_UNAVAILABLE':'OpenWrt отвечает по HTTP, но проверить доступ root по SSH не удалось',
     'URSUS_MODEL_UNCONFIRMED':'UrsusBoot отвечает, но модель не подтверждена',
