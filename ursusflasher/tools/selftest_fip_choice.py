@@ -301,7 +301,7 @@ def test_emergency_transaction() -> None:
 
 
 def test_emergency_choice() -> None:
-    with mock.patch.object(uu, "require_fip_payload", lambda: None):
+    # Source trees intentionally do not vendor the pinned production FIP; the public-kit\n    # builder injects it via URSUSBOOT_RELEASE.json.  Use an existing valid FIP here so\n    # this unit test exercises chooser/BL2 semantics rather than artifact packaging.\n    with mock.patch.object(uu, "require_fip_payload", lambda: None), \\\n            mock.patch.object(uu, "PRODUCTION_PAYLOAD", TEST61):
         (choice, write_bl2), out, script = run(uu._choose_emergency_fip, "")
         assert choice.kind == "pinned" and write_bl2 is True and choice.info.sha256 == ALPHA3_SHA
         assert len(script.asked) == 1                                  # Enter: no extra questions on the default path
