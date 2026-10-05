@@ -100,22 +100,20 @@ for d in ROOT.rglob('__pycache__'):
     shutil.rmtree(d)
 
 with tempfile.TemporaryDirectory() as td:
-    rel = export_tree(Path(td) / 'release')
+    td = Path(td)
 
-    # Selftests are authored against the exported-kit layout (runtime under
-    # data/). Add developer tools temporarily, run them against that layout,
-    # then remove them so they are not part of the operator package.
-    qa_tools = rel / 'tools'
+    # Historical regression selftests are authored against kit layout, but some
+    # intentionally reference superseded payloads that are not shipped anymore.
+    # Build a QA-only export and overlay the repository payload archive there.
+    qa = export_tree(td / 'qa-release')
+    qa_tools = qa / 'tools'
     shutil.copytree(ROOT / 'ursusflasher/tools', qa_tools)
+    shutil.copytree(ROOT / 'payloads', qa / 'data' / 'payloads', dirs_exist_ok=True)
     for test in sorted(qa_tools.glob('selftest_*.py')):
-        subprocess.run([sys.executable, str(test)], cwd=rel, check=True, env=env)
-    shutil.rmtree(qa_tools)
-    for d in rel.rglob('__pycache__'):
-        shutil.rmtree(d)
+        subprocess.run([sys.executable, str(test)], cwd=qa, check=True, env=env)
 
-    # export_tree() writes a fresh manifest; verify that it covers the exact
-    # exported runtime tree. This checks current package closure without relying
-    # on a frozen historical SHA256SUMS.expected snapshot.
+    # Separately verify the real operator export with no QA-only payload overlay.
+    rel = export_tree(td / 'release')
     manifest = rel / 'SHA256SUMS'
     listed = set()
     for raw in manifest.read_text(encoding='utf-8').splitlines():
