@@ -24,10 +24,12 @@ def main() -> int:
     md = bp.get_profile("md")
     mf = bp.get_profile("mf")
     require(bp.write_action_enabled(md, "restore_nokia"), "MD restore_nokia should be allowed")
-    require(bp.write_action_enabled(mf, "restore_nokia"), "MF restore_nokia explicit recovery writer missing")
-    require(not bp.persistent_writes_enabled(mf), "MF broad persistent writes must remain disabled")
-    for key in ("install_openwrt", "install_or_repair_bootloader", "custom_openwrt", "recover_bootloader"):
-        require(not bp.write_action_enabled(mf, key), f"MF unexpectedly authorizes {key}")
+    require(bp.persistent_writes_enabled(mf), "MF production persistent runtime must be enabled")
+    require((mf.get("write_policy") or {}).get("backend") == "MF_DEVICE_DERIVED_MTD0_RUNTIME",
+            "MF must use the device-derived mtd0 production backend")
+    for key in ("install_openwrt", "install_or_repair_bootloader", "custom_openwrt",
+                "restore_nokia", "recover_bootloader"):
+        require(bp.write_action_enabled(mf, key), f"MF production policy must authorize {key}")
 
     mf_state = ds.DeviceState(
         probe_status=ds.PROBE_COMPLETE,
@@ -42,8 +44,8 @@ def main() -> int:
     mf_actions = ds.action_applicability(mf_state)
     require(mf_actions[6].enabled, "MF EXPERT item 6 should be enabled")
     require(mf_actions[6].write_capable, "MF item 6 must remain visibly write-capable")
-    for number in (1, 2, 3, 4, 5):
-        require(not mf_actions[number].enabled, f"MF write action {number} escaped the profile gate")
+    for number in (1, 2, 3, 5):
+        require(mf_actions[number].enabled, f"MF production write action {number} should be enabled")
 
     md_state = ds.DeviceState(
         probe_status=ds.PROBE_COMPLETE,
@@ -100,8 +102,17 @@ def main() -> int:
         raise SystemExit("SELFTEST FAIL: unknown restore family was accepted")
 
     catalog = json.loads((ROOT / "config/BOARD_PROFILES.json").read_text(encoding="utf-8"))
-    require(catalog["profiles"]["mf"]["write_policy"]["allowed_write_actions"] == ["restore_nokia"],
-            "MF profile recovery allowlist drifted")
+    mf_policy = catalog["profiles"]["mf"]["write_policy"]
+    require(mf_policy["persistent_write_enabled"] is True,
+            "MF production persistent write policy unexpectedly disabled")
+    require(mf_policy["backend"] == "MF_DEVICE_DERIVED_MTD0_RUNTIME",
+            "MF device-derived production backend drifted")
+    require("restore_nokia" in mf_policy["allowed_write_actions"],
+            "MF restore_nokia capability missing")
+    require(mf_policy["bl2_last_required"] is True,
+            "MF BL2-last safety contract must remain enabled")
+    require(set(mf_policy["rejected_backends"]) >= {"MF3_PERSIST1", "MF3_PERSIST2"},
+            "retired MF3 persistent backends must remain rejected")
 
     print("STOCK_RESTORE_INTEGRATION_SELFTEST=PASS")
     return 0
