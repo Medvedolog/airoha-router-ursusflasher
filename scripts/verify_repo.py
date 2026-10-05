@@ -109,6 +109,12 @@ with tempfile.TemporaryDirectory() as td:
     qa_tools = qa / 'tools'
     shutil.copytree(ROOT / 'ursusflasher/tools', qa_tools)
     shutil.copytree(ROOT / 'payloads', qa / 'data' / 'payloads', dirs_exist_ok=True)
+    # Historical engineering selftests may depend on lab modules deliberately
+    # excluded from operator packages.
+    for lab_name in ('alpha4_hwfix_test.py', 'expert_mf_acceptance.py', 'mf_persistent_install.py'):
+        lab_src = ROOT / 'ursusflasher/src' / lab_name
+        if lab_src.is_file():
+            shutil.copy2(lab_src, qa / 'data' / lab_name)
     for test in sorted(qa_tools.glob('selftest_*.py')):
         subprocess.run([sys.executable, str(test)], cwd=qa, check=True, env=env)
 
