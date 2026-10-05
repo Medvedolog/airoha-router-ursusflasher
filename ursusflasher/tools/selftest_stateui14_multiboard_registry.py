@@ -12,7 +12,8 @@ import device_state as ds
 import ui_terms as terms
 import expert_multi as multi
 
-assert ds.ACTION_KEYS[4] == 'restore_factory_bootarea', ds.ACTION_KEYS
+assert ds.ACTION_KEYS[4] == 'vanilla_transition', ds.ACTION_KEYS
+assert ds.ACTION_KEYS[9] == 'restore_factory_bootarea', ds.ACTION_KEYS
 
 states=[
     ds.DeviceState(),
@@ -30,7 +31,7 @@ for state in states:
         assert title and title != a.key, (number,a.key,title)
 
 unknown_app=multi.action_applicability(ds.DeviceState())
-assert unknown_app[4].resolved_backend == 'UART_BOOTAREA_FACTORY_RESTORE'
+assert unknown_app[9].resolved_backend == 'UART_BOOTAREA_FACTORY_RESTORE'
 assert 'UART_BOOTAREA_FACTORY_RESTORE' in terms._DATA['methods']
 assert terms.human('UART_BOOTAREA_FACTORY_RESTORE','method').startswith('Через USB-UART')
 
