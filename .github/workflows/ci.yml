@@ -1,11 +1,12 @@
 name: CI
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, dev/ursusboot-http-backup-client ]
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -18,5 +19,23 @@ jobs:
       - run: python3 scripts/verify_repo.py
       - run: python3 scripts/build_release.py --out-dir dist
       - run: python3 scripts/verify_release.py dist
-      - run: python3 scripts/build_public_release.py --out-dir dist-public
+      - name: Fetch pinned UrsusBoot T80 artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p .ursusboot/md .ursusboot/mf
+          repo="$(python3 -c 'import json; print(json.load(open("config/URSUSBOOT_PIN.json"))["repo"])')"
+          run="$(python3 -c 'import json; print(json.load(open("config/URSUSBOOT_PIN.json"))["build_run"])')"
+          md="$(python3 -c 'import json; print(json.load(open("config/URSUSBOOT_PIN.json"))["artifacts"]["md"]["name"])')"
+          mf="$(python3 -c 'import json; print(json.load(open("config/URSUSBOOT_PIN.json"))["artifacts"]["mf"]["name"])')"
+          gh run download "$run" -R "$repo" -n "$md" -D .ursusboot/md
+          gh run download "$run" -R "$repo" -n "$mf" -D .ursusboot/mf
+      - run: python3 scripts/build_public_release.py --out-dir dist-public --ursusboot-md .ursusboot/md --ursusboot-mf .ursusboot/mf
       - run: python3 scripts/verify_public_release.py dist-public
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UrsusFlasher-0.2.80-dev
+          path: |
+            dist-public/*.zip
+            dist-public/*.sha256.txt
