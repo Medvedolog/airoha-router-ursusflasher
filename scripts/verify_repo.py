@@ -99,13 +99,19 @@ for p in list(sorted((ROOT / 'ursusflasher/src').glob('*.py'))) + list(sorted((R
 for d in ROOT.rglob('__pycache__'):
     shutil.rmtree(d)
 
-# Run source-level functional/selftest contracts from the repository tree.
-# The exported kit intentionally contains runtime data, not the developer test suite.
-for test in sorted((ROOT / 'ursusflasher/tools').glob('selftest_*.py')):
-    subprocess.run([sys.executable, str(test)], cwd=ROOT, check=True, env=env)
-
 with tempfile.TemporaryDirectory() as td:
     rel = export_tree(Path(td) / 'release')
+
+    # Selftests are authored against the exported-kit layout (runtime under
+    # data/). Add developer tools temporarily, run them against that layout,
+    # then remove them so they are not part of the operator package.
+    qa_tools = rel / 'tools'
+    shutil.copytree(ROOT / 'ursusflasher/tools', qa_tools)
+    for test in sorted(qa_tools.glob('selftest_*.py')):
+        subprocess.run([sys.executable, str(test)], cwd=rel, check=True, env=env)
+    shutil.rmtree(qa_tools)
+    for d in rel.rglob('__pycache__'):
+        shutil.rmtree(d)
 
     # export_tree() writes a fresh manifest; verify that it covers the exact
     # exported runtime tree. This checks current package closure without relying
