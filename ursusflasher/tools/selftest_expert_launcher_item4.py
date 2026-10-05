@@ -90,11 +90,12 @@ def test_shipped_item4_dispatch_behavior() -> None:
         patch(em.base.ui, "rule", lambda *args, **kwargs: None)
         patch(em.base.ui, "status", lambda *args, **kwargs: None)
         patch(em.base.ui, "prompt", lambda _text: "")
-        patch(em.base.network_guidance, "show", lambda: None)
+        patch(em.base.network_guidance, "choose_router_host", lambda default: host)
+        patch(em.base.network_guidance, "show", lambda *args, **kwargs: None)
         patch(em, "_show_action", lambda *args, **kwargs: None)
         patch(em.base, "ask_menu", lambda _max: next(choices))
         patch(
-            em.stock_ab_pregnant,
+            em.ursusboot_pregnant,
             "run_expert",
             lambda *, host, profile: (events.append(("pregnant", host, profile)) or 0),
         )
