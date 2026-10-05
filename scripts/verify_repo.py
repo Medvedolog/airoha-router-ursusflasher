@@ -118,6 +118,9 @@ with tempfile.TemporaryDirectory() as td:
         # Historical MF acceptance wrapper; production moved to mf_runtime_install
         # and expert_mf_acceptance.py is intentionally no longer shipped.
         'selftest_mf_persistent_expert_integration.py',
+        # Historical payload-refresh regression pins the retired MD non-UBI
+        # sysupgrade bytes; T80 keeps that class diagnostic-only.
+        'selftest_payloadrefresh1.py',
         'selftest_ursusboot_only.py',
         'selftest_test57.py',
         'selftest_test58.py',
