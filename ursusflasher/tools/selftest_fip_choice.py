@@ -211,6 +211,8 @@ def test_web_update() -> None:
         mock.patch.object(uu.uw, "update_bootloader", fake_update),
         mock.patch.object(uu.uw, "status", lambda host: {"version": "0.1.0-alpha3"}),
         mock.patch.object(uu, "require_fip_payload", lambda: None),
+        # Production T80 is injected into public kits, not vendored in the source tree.
+        mock.patch.object(uu, "PRODUCTION_PAYLOAD", TEST61),
     )
     with contextlib.ExitStack() as stack:
         for p in patches:
