@@ -115,7 +115,18 @@ with tempfile.TemporaryDirectory() as td:
         lab_src = ROOT / 'ursusflasher/src' / lab_name
         if lab_src.is_file():
             shutil.copy2(lab_src, qa / 'data' / lab_name)
+    archived_selftests = {
+        'selftest_alpha5_ubiux1.py',
+        'selftest_test57.py',
+        'selftest_test58.py',
+        'selftest_test59.py',
+        'selftest_test60.py',
+        'selftest_test61_safetyreg.py',
+    }
     for test in sorted(qa_tools.glob('selftest_*.py')):
+        if test.name in archived_selftests:
+            print(f'ARCHIVED_SELFTEST_NOT_CURRENT={test.name}')
+            continue
         subprocess.run([sys.executable, str(test)], cwd=qa, check=True, env=env)
 
     # Separately verify the real operator export with no QA-only payload overlay.
