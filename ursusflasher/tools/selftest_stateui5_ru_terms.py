@@ -6,10 +6,10 @@ ROOT = Path(__file__).resolve().parents[1]
 terms = json.loads((ROOT / "data/UI_TERMS.json").read_text(encoding="utf-8"))
 a = terms["expert_actions"]
 assert a["install_or_repair_bootloader"]["ru"] == "Установить или обновить UrsusBoot"
-assert a["custom_openwrt"]["ru"] == "Записать пользовательскую прошивку OpenWrt"
-assert a["restore_nokia"]["ru"] == "Восстановить заводскую прошивку Nokia"
-assert a["full_backup"]["ru"] == "Создать полную копию flash-памяти"
-assert a["capabilities"]["ru"] == "Состояние устройства и доступные операции"
+assert a["custom_openwrt"]["ru"] == "Установить свою прошивку OpenWrt"
+assert a["restore_nokia"]["ru"] == "Вернуть роутер к заводскому состоянию целиком"
+assert a["full_backup"]["ru"] == "Снять полную копию памяти роутера"
+assert a["capabilities"]["ru"] == "Что этот роутер позволяет сделать"
 expert = (ROOT / "data/expert.py").read_text(encoding="utf-8")
 network = (ROOT / "data/network_guidance.py").read_text(encoding="utf-8")
 assert "! — операция может выполнять запись во flash-память (NAND)" in expert
@@ -22,7 +22,6 @@ for bad in (
     "Записать свою прошивку OpenWrt",
     "Вернуть заводскую прошивку Nokia",
     "Снять полную копию flash-памяти",
-    "Что этот роутер позволяет сделать",
     "Для прошивки лучше использовать LAN2 или LAN3",
 ):
     assert bad not in expert + network + json.dumps(terms, ensure_ascii=False), bad
