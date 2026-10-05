@@ -115,6 +115,9 @@ with tempfile.TemporaryDirectory() as td:
         'selftest_directstock1.py',
         'selftest_fudan1_ssh.py',
         'selftest_mainline.py',
+        # Historical MF acceptance wrapper; production moved to mf_runtime_install
+        # and expert_mf_acceptance.py is intentionally no longer shipped.
+        'selftest_mf_persistent_expert_integration.py',
         'selftest_ursusboot_only.py',
         'selftest_test57.py',
         'selftest_test58.py',
