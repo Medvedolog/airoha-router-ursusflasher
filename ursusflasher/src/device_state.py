@@ -511,13 +511,20 @@ def action_applicability(state: DeviceState) -> dict[int, ActionApplicability]:
         elif key == "custom_openwrt":
             if state.current_system == "RECOVERY":
                 backend = "URSUSBOOT_RECOVERY_CUSTOM_IMAGE"
+            elif state.current_system == "OPENWRT_FACTORY" or state.current_layout == "OPENWRT_FACTORY":
+                enabled = False
+                backend = "MIGRATION_TO_UBI_ONLY"
+                reason = terms.tr(
+                    "OpenWrt в заводской разметке — только источник восстановления/миграции в UBI; обычный sysupgrade отключён",
+                    "Stock-layout OpenWrt is recovery/migration source only; ordinary sysupgrade is disabled",
+                )
             elif state.current_system.startswith("OPENWRT") and state.execution_environment == EXEC_PERSISTENT_ROOT:
                 backend = "SSH_PERSISTENT_OPENWRT_SYSUPGRADE"
             else:
                 enabled = False
                 reason = terms.tr(
-                    "доступно из установленной OpenWrt или UrsusBoot Recovery",
-                    "available from installed OpenWrt or UrsusBoot Recovery",
+                    "доступно из установленной OpenWrt UBI или UrsusBoot Recovery",
+                    "available from installed OpenWrt UBI or UrsusBoot Recovery",
                 )
         elif key == "full_backup":
             if state.current_system == "NOKIA_STOCK" and state.probe_status == PROBE_COMPLETE:
