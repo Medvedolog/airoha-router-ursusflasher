@@ -315,8 +315,10 @@ def test_mf_refusal_behavior() -> None:
 
 def test_expert_wiring_smoke() -> None:
     expert = (SRC / "expert.py").read_text(encoding="utf-8")
-    assert "stock_ab_pregnant.run_expert(host=host, profile=profile)" in expert
-    assert "Reset не менее 30 секунд" in expert
+    assert "ursusboot_pregnant.run_expert(host=host, profile=profile)" in expert
+    assert "stock_ab_pregnant.run_expert(host=host, profile=profile)" not in expert
+    assert "Stock Nokia → OpenWrt UBI с UrsusBoot Recovery" in expert
+    assert "UrsusBoot остаётся Recovery до отдельного перехода на Vanilla" in expert
 
 
 test_fit_contract_behavior()
