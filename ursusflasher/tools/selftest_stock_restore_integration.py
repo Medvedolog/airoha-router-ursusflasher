@@ -5,9 +5,8 @@ import json
 import sys
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-SRC = HERE.parent / "src"
-ROOT = HERE.parents[1]
+ROOT = Path(__file__).resolve().parents[2]
+SRC = ROOT / "ursusflasher" / "src"
 sys.path.insert(0, str(SRC))
 
 import board_profiles as bp  # noqa: E402
