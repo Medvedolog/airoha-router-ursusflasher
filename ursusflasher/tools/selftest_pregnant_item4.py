@@ -471,9 +471,13 @@ def test_autonomous_fit_contract():
 
 def test_item4_ui_contract():
     expert=(SRC/"expert.py").read_text(encoding="utf-8")
-    assert "Установить чистый OpenWrt через временный UrsusBoot Recovery" in expert
-    assert "UrsusBoot в финале удаляется" in expert
-    assert 'enabled = profile == "xg040-md"' in expert
+    route=(SRC/"ursusboot_pregnant.py").read_text(encoding="utf-8")
+    assert "Stock Nokia → OpenWrt UBI с UrsusBoot Recovery" in expert
+    assert "UrsusBoot остаётся Recovery до отдельного перехода на Vanilla" in expert
+    assert "Полный backup → один y/N" in expert
+    assert "enabled = profile in ursusboot_pregnant.SUPPORTED_PROFILES" in expert
+    assert "XG-040G-MD / XG-040G-MF" in expert
+    assert 'SUPPORTED_PROFILES = {"xg040-md": "md", "xg040-mf": "mf"}' in route
 
 
 test_recovery_loader_item4_route()
