@@ -7,7 +7,7 @@
 - USB-UART адаптер **3,3 В**;
 - подключение **TX / RX / GND**;
 - **VCC не подключать**;
-- ПК с UrsusFlasher 0.2.61 / TEST61;
+- ПК с UrsusFlasher 0.2.80-dev / UrsusBoot T80;
 - доступ к кнопке Reset и питанию роутера.
 
 ## Запуск
@@ -42,11 +42,13 @@ preloader
   -> служебный UrsusBoot в оперативной памяти
 ```
 
-Аварийная BootROM-цепочка **прибита к проверенной alpha3 lineage**: exact alpha3 preloader / RAM installer / recovery FIP / BL2. Production TEST61 в эту RAM bootstrap-цепочку автоматически не подмешивается. Это отдельная compatibility boundary.
+Аварийная BootROM-цепочка **прибита к проверенной alpha3 lineage**: exact alpha3 preloader / RAM installer / recovery FIP / BL2. Production T80 в эту RAM bootstrap-цепочку автоматически не подмешивается. Это отдельная compatibility boundary. Аварийная alpha3 lineage сохранена без изменения; production T80 имеет статус HW_PENDING и проверяется отдельно.
 
 На этом этапе постоянная flash-память не изменяется.
 
 ## Какая версия будет записана — и свой FIP
+
+Комплектный production target этой dev-итерации — **UrsusBoot `0.1.0-alpha5-t80`**; это не меняет проверенную alpha3 RAM bootstrap-цепочку.
 
 Через BootROM в RAM всегда стартует **alpha3** (RAM installer) — это только загрузчик-помощник. В постоянную память пишется то, что вы выберете **до** входа в BootROM:
 
