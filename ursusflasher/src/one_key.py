@@ -25,7 +25,7 @@ import ui_terms as terms
 import network_guidance
 import ursusboot_release
 
-TARGET_URSUS = ursusboot_release.version("md", "0.1.0-alpha5-UBIUX1-TEST61")
+TARGET_URSUS = ursusboot_release.version("md", "0.1.0-alpha5-t80")
 RECOVERY_HOST = os.environ.get("URSUS_RECOVERY_HOST", "192.168.1.1")
 DEFAULT_STOCK_HOST = os.environ.get("NOKIA_HOST", "192.168.1.1")
 
