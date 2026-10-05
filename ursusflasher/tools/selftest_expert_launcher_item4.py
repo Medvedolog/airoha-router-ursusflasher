@@ -31,7 +31,7 @@ def test_launcher_chain_source() -> None:
     assert "_transition_profile_after_selection" in airoha
     assert "fresh_state = ds.probe_device_state(host)" in airoha
     assert "import stock_ab_pregnant" in multi
-    assert "stock_ab_pregnant.run_expert(host=host, profile=profile)" in multi
+    assert "ursusboot_pregnant.run_expert(host=host, profile=profile)" in multi
     assert "elif number == 9:" in multi
     assert "_run_factory_bootarea_restore(state)" in multi
 
