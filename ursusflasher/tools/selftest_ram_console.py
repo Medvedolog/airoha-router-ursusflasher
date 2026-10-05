@@ -63,6 +63,9 @@ def run(steps, *answers, serial_script=None, http_ok=True, prompt="prompt"):
         steps.append("xmodem:" + Path(path).name)
 
     patches = [
+        # T80 production FIP is injected into public kits, not vendored in the source tree.
+        # Use an existing valid FIP so this test stays focused on RAM-loader flow semantics.
+        mock.patch.object(uu, "PRODUCTION_PAYLOAD", TEST61),
         mock.patch.object(builtins, "input", lambda p="": answers.pop(0)),
         mock.patch.object(uu, "choose_port", lambda: ports.append(1) or "COM9"),
         mock.patch.object(proven, "probe_serial_port", lambda port: None),
@@ -90,8 +93,9 @@ def run(steps, *answers, serial_script=None, http_ok=True, prompt="prompt"):
 
 
 def main() -> int:
-    bundled = rc._loaders("md")[2]
-    assert bundled, "the kit's current MD FIP must be offered as the RAM loader"
+    with mock.patch.object(uu, "PRODUCTION_PAYLOAD", TEST61):
+        bundled = rc._loaders("md")[2]
+    assert bundled, "a valid bundled MD FIP must be offered as the RAM loader"
 
     # 1. default: bundled loader -> BootROM -> prompt -> ursusweb -> HTTP -> LAN console
     steps: list[str] = []
