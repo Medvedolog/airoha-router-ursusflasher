@@ -12,7 +12,7 @@ s.access={'http':True,'ssh':True,'root':'YES'}
 app=ds.action_applicability(s)
 assert app[2].enabled and app[2].resolved_backend=='SSH_PERSISTENT_OPENWRT', app[2]
 assert app[3].enabled and app[3].resolved_backend=='SSH_PERSISTENT_OPENWRT_SYSUPGRADE', app[3]
-assert app[4].enabled and app[4].resolved_backend=='ALIAS_TO_ACTION_2', app[4]
+assert app[4].enabled and app[4].key=='vanilla_transition' and app[4].resolved_backend=='STOCK_AB_TRANSITION_EXPERT_ITEM4', app[4]
 
 # UrsusBoot Recovery: item 2 becomes self-update, item 3 becomes Recovery image install.
 r=ds.DeviceState(host='192.168.1.1', probe_status=ds.PROBE_COMPLETE)
@@ -24,10 +24,11 @@ assert app[3].enabled and app[3].resolved_backend=='URSUSBOOT_RECOVERY_CUSTOM_IM
 
 expert=(ROOT/'data/expert.py').read_text(encoding='utf-8')
 for needle in (
-    'VISIBLE_ACTIONS = (1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12)',
-    'Пункт 4 объединён с пунктом 2',
     'Установленная OpenWrt: SSH → передача образа → sysupgrade -T → sysupgrade',
     'UrsusBoot Recovery: HTTP → обновление FIP с сетевыми ретраями; TFTP только отдельным ручным recovery-путём',
+    'Stock Nokia → OpenWrt UBI с UrsusBoot Recovery',
+    'UrsusBoot остаётся Recovery до отдельного перехода на Vanilla',
+    '_show_transition_action(state)',
     'USB-UART → Airoha BootROM → UrsusBoot из RAM → запись и проверка загрузчика',
     'Проверка на ПК: структура, размеры и SHA256; роутер не изменяется',
     'sysupgrade -v -n',
