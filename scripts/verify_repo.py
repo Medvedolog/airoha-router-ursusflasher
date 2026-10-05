@@ -127,7 +127,12 @@ with tempfile.TemporaryDirectory() as td:
             print(f'ARCHIVED_SELFTEST_NOT_CURRENT={source_test.name}')
             continue
         test_source = source_test.read_text(encoding='utf-8')
-        if 'Path(__file__).resolve().parents[2]' in test_source and 'ursusflasher' in test_source and 'src' in test_source:
+        source_tree_test = (
+            ('Path(__file__).resolve().parents[2]' in test_source and 'ursusflasher' in test_source and 'src' in test_source)
+            or ('Path(__file__).resolve().parents[1] / "src"' in test_source)
+            or ("Path(__file__).resolve().parents[1] / 'src'" in test_source)
+        )
+        if source_tree_test:
             subprocess.run([sys.executable, str(source_test)], cwd=ROOT, check=True, env=env)
         else:
             subprocess.run([sys.executable, str(qa_tools / source_test.name)], cwd=qa, check=True, env=env)
