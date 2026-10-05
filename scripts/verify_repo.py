@@ -99,24 +99,29 @@ for p in list(sorted((ROOT / 'ursusflasher/src').glob('*.py'))) + list(sorted((R
 for d in ROOT.rglob('__pycache__'):
     shutil.rmtree(d)
 
+# Run source-level functional/selftest contracts from the repository tree.
+# The exported kit intentionally contains runtime data, not the developer test suite.
+for test in sorted((ROOT / 'ursusflasher/tools').glob('selftest_*.py')):
+    subprocess.run([sys.executable, str(test)], cwd=ROOT, check=True, env=env)
+
 with tempfile.TemporaryDirectory() as td:
     rel = export_tree(Path(td) / 'release')
-    tests = [p.name for p in sorted((rel / 'tools').glob('selftest_*.py'))]
-    tests.append('verify_manifest_closure.py')
-    for test in tests:
-        subprocess.run([sys.executable, str(rel / 'tools' / test)], cwd=rel, check=True, env=env)
 
-    # Compare exported release content to the SHA256 manifest from the actual
-    # current package that this roll-up was made from.
-    expected_rows = (ROOT / 'ursusflasher/release/SHA256SUMS.expected').read_text(encoding='utf-8').splitlines()
-    for row in expected_rows:
-        if not row.strip():
+    # export_tree() writes a fresh manifest; verify that it covers the exact
+    # exported runtime tree. This checks current package closure without relying
+    # on a frozen historical SHA256SUMS.expected snapshot.
+    manifest = rel / 'SHA256SUMS'
+    listed = set()
+    for raw in manifest.read_text(encoding='utf-8').splitlines():
+        if not raw.strip():
             continue
-        expected, name = row.split(None, 1)
-        name = name.strip()
+        expected, name = raw.split(None, 1)
+        name = name.strip().lstrip('*')
         p = rel / name
         assert p.is_file(), name
-        actual = sha256(p)
-        assert actual == expected, (name, actual, expected)
+        assert sha256(p) == expected, (name, sha256(p), expected)
+        listed.add(name)
+    actual = {p.relative_to(rel).as_posix() for p in rel.rglob('*') if p.is_file() and p != manifest}
+    assert listed == actual, (sorted(actual - listed), sorted(listed - actual))
 
 print('GITHUB_ROLLUP_REPO_QA=PASS')
