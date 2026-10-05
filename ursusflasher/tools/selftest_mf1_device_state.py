@@ -131,9 +131,19 @@ def test_mf_write_gate() -> None:
     actions = ds.action_applicability(mf)
     write_actions = [item for item in actions.values() if item.write_capable]
     assert write_actions
-    assert all(not item.enabled for item in write_actions)
-    assert actions[1].resolved_backend == "DISABLED_READ_ONLY_BRINGUP"
-    assert actions[2].resolved_backend == "DISABLED_READ_ONLY_BRINGUP"
+
+    # MF production is no longer a blanket read-only bring-up profile.  Only
+    # the device-derived/proven writers are authorized by BOARD_PROFILES;
+    # unrelated writers must remain fail-closed.
+    assert actions[1].enabled
+    assert actions[1].resolved_backend == "PRODUCTION_INSTALL_WORKFLOW"
+    assert actions[2].enabled
+    assert actions[2].resolved_backend == "TELNET_NOKIA_STOCK"
+    assert not actions[3].enabled  # custom sysupgrade is not applicable from Nokia stock
+    assert not actions[4].enabled
+    assert actions[4].resolved_backend == "MF_DEVICE_DERIVED_MTD0_RUNTIME"
+    assert actions[5].enabled
+    assert actions[6].enabled
     assert actions[7].enabled
     assert actions[7].resolved_backend == "STOCK_READONLY_TFTP_OR_BOOTROM"
     assert actions[8].enabled
