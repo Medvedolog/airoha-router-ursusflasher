@@ -44,8 +44,11 @@ jobs:
           from pathlib import Path
           profiles = json.loads(Path('config/BOARD_PROFILES.json').read_text())
           mf = profiles['profiles']['mf']['write_policy']
-          assert mf['persistent_write_enabled'] is False
-          assert mf['allowed_write_actions'] == ['restore_nokia']
+          assert mf['persistent_write_enabled'] is True
+          assert mf['backend'] == 'MF_DEVICE_DERIVED_MTD0_RUNTIME'
+          assert 'restore_nokia' in mf['allowed_write_actions']
+          assert mf['bl2_last_required'] is True
+          assert {'MF3_PERSIST1', 'MF3_PERSIST2'} <= set(mf['rejected_backends'])
           caps = json.loads(Path('config/FIRMWARE_CAPABILITIES.json').read_text())
           restore = caps['ui_actions']['restore_nokia']
           assert restore['implemented'] is True
