@@ -23,7 +23,17 @@ def main() -> int:
     assert mf[1]["flash"]["ubi_size"] == 0x0FFE0000
     assert mf[1]["flash"]["bosa_offset"] == 0x051C0000
     assert mf[1]["flash"]["ri_offset"] == 0x05200000
-    assert not bp.persistent_writes_enabled(mf[1])
+    # MF production persistent writes are enabled through the device-derived
+    # runtime mtd0 backend.  The retired MF3 experimental persistent writers
+    # must stay rejected; T80 stock-layout retirement is covered separately.
+    assert bp.persistent_writes_enabled(mf[1])
+    write_policy = mf[1]["write_policy"]
+    assert write_policy["backend"] == "MF_DEVICE_DERIVED_MTD0_RUNTIME"
+    assert write_policy["persistent_install_contract"] == "HOST_DEVICE_DERIVED_STOCK_FIP_BL33_PATCH"
+    assert set(write_policy["rejected_backends"]) >= {"MF3_PERSIST1", "MF3_PERSIST2"}
+    assert bp.write_action_enabled(mf[1], "install_openwrt")
+    assert bp.write_action_enabled(mf[1], "install_or_repair_bootloader")
+    assert bp.write_action_enabled(mf[1], "restore_nokia")
 
     assert bp.match_profile(model="XG-040G-MF", soc="AN7581") is None
     assert bp.match_profile(model="XG-040G-MD", soc="AN7583") is None
