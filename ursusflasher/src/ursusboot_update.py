@@ -22,10 +22,11 @@ PAYLOAD_DIR = (ROOT / 'payloads' / 'md' / 'ursusboot') if REPO_MODE else (HERE /
 EMERGENCY_PAYLOAD = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-update.fip'
 import ursusboot_release  # noqa: E402
 
-# Bundled UrsusBoot release (airoha-ursusboot at a pinned commit) when present;
-# otherwise the historical TEST61 safety-regression FIP described by MANIFEST.json.
-PRODUCTION_PAYLOAD = ursusboot_release.path('md', 'update_fip') or (PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha5-UBIUX1-TEST61-update.fip')
-PRODUCTION_VERSION = ursusboot_release.version('md', '0.1.0-alpha5-UBIUX1-TEST61')
+# Bundled UrsusBoot release (airoha-ursusboot at the pinned T80 commit) when present.
+# A dev/source tree without URSUSBOOT_RELEASE.json must not silently substitute
+# historical TEST61 bytes for the T80 production target.
+PRODUCTION_PAYLOAD = ursusboot_release.path('md', 'update_fip') or (PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha5-t80-update.fip')
+PRODUCTION_VERSION = ursusboot_release.version('md', '0.1.0-alpha5-t80')
 PAYLOAD = EMERGENCY_PAYLOAD  # compatibility alias for BootROM/emergency alpha3 paths
 RAM_INSTALLER = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-ram-installer.fip'
 BL2_IMAGE = PAYLOAD_DIR / 'ursusboot-md-0.1.0-alpha3-bl2.bin'
