@@ -140,8 +140,8 @@ def test_mf_write_gate() -> None:
     assert actions[2].enabled
     assert actions[2].resolved_backend == "TELNET_NOKIA_STOCK"
     assert not actions[3].enabled  # custom sysupgrade is not applicable from Nokia stock
-    assert not actions[4].enabled
-    assert actions[4].resolved_backend == "MF_DEVICE_DERIVED_MTD0_RUNTIME"
+    assert actions[4].enabled
+    assert actions[4].resolved_backend == "STOCK_AB_TRANSITION_EXPERT_ITEM4"
     assert actions[5].enabled
     assert actions[6].enabled
     assert actions[7].enabled
