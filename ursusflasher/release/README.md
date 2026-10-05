@@ -1,13 +1,15 @@
-# UrsusFlasher 0.2.78-dev-nand TEST — Nokia XG-040G-MD + XG-040G-MF
+# UrsusFlasher 0.2.80-dev — Nokia XG-040G-MD + XG-040G-MF
 
 Hardware-test комплект для:
 
 ```text
-Nokia XG-040G-MD -> Airoha AN7581 -> UrsusBoot-MD T78
-Nokia XG-040G-MF -> Airoha AN7583 -> UrsusBoot-MF T78
+Nokia XG-040G-MD -> Airoha AN7581 -> UrsusBoot-MD T80
+Nokia XG-040G-MF -> Airoha AN7583 -> UrsusBoot-MF T80
 ```
 
-Python 3.12+; сторонние Python-пакеты не требуются. Актуальный публичный тест публикуется как GitHub prerelease; титульная страница репозитория показывает его версию автоматически.
+Python 3.12+; сторонние Python-пакеты не требуются. Текущая T80-линия имеет статус **HW_PENDING**: успешные source/build/CI проверки не являются аппаратной валидацией.
+
+Stock-layout OpenWrt на MD/MF больше не является целью установки или обновления. Существующий `OPENWRT_STOCK_LAYOUT` остаётся только источником восстановления/диагностики и миграции в `OPENWRT_UBI`; ONE-KEY сохраняет маршрут Nokia STOCK → persistent UrsusBoot → Recovery → OpenWrt UBI. Актуальный публичный тест публикуется как GitHub prerelease; титульная страница репозитория показывает его версию автоматически.
 
 ## NAND через живую консоль
 
