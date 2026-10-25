@@ -152,6 +152,9 @@ Unpack the archive and run from its folder:
 
 Python **3.12+** and an Ethernet cable are all you need. No third-party Python packages are required.
 
+> [!IMPORTANT]
+> **Before flashing, set the PC's Ethernet adapter to the static IPv4 address `192.168.1.254` with subnet mask `255.255.255.0` (`/24`).** The router uses `192.168.1.1`. UrsusBoot does not provide a DHCP server; leaving the PC on automatic addressing can prevent the Recovery connection and image transfer from working.
+
 If the task is simple — "install OpenWrt" — run **ONE-CLICK**. If you need something specific: update only the bootloader, take a backup, work out why the router is silent — **EXPERT**.
 
 ### Which port to use
