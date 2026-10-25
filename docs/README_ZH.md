@@ -128,6 +128,9 @@ UART 控制台使用熟悉的 U-Boot 命令；WebFailsafe 的“U-Boot 控制台
 需要 **Python 3.12+** 和网线，不需要额外 `pip` 包。只想安装 OpenWrt 就选 **ONE-CLICK**；只安装引导程序、备份或诊断则用 **EXPERT**。
 
 > [!IMPORTANT]
+> **刷写前，请将电脑有线网卡的 IPv4 地址手动设置为 `192.168.1.254`，子网掩码设为 `255.255.255.0`（`/24`）。** 路由器地址为 `192.168.1.1`。UrsusBoot 不提供 DHCP 地址分配；如果电脑仍设为自动获取地址，可能无法连接恢复界面或传输镜像。
+
+> [!IMPORTANT]
 > 操作前关闭电脑上的 VPN、Wi-Fi 和其他 Ethernet 接口，只保留连接路由器的网卡。其他活动路由可能抢占 `192.168.1.1`，也可能干扰 Nokia Stock、UrsusBoot Recovery 和 OpenWrt 间的切换。
 
 电脑与路由器用一根网线**直接连接**。LAN2/LAN3 最合适；LAN4 可用于初始阶段，但工具包的 OpenWrt 启动后它成为 WAN，需将网线移到 LAN2/LAN3 才能继续访问 `192.168.1.1`。LAN1 使用单独的 EN8811H PHY，不推荐用于迁移或恢复。
